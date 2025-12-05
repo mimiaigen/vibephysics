@@ -19,6 +19,24 @@ def create_seabed_material(obj):
     
     obj.data.materials.append(mat)
 
+def create_mud_material(obj):
+    """Creates a wet mud material"""
+    mat = bpy.data.materials.new(name="MudMat")
+    mat.use_nodes = True
+    bsdf = mat.node_tree.nodes["Principled BSDF"]
+    
+    # Darker, wetter earth
+    bsdf.inputs['Base Color'].default_value = (0.08, 0.05, 0.02, 1)
+    bsdf.inputs['Roughness'].default_value = 0.6 # Wetter than dry dirt
+    
+    # Handle different Blender versions for Specular
+    if 'Specular' in bsdf.inputs:
+        bsdf.inputs['Specular'].default_value = 0.3
+    elif 'Specular IOR Level' in bsdf.inputs: # Blender 4.0+
+        bsdf.inputs['Specular IOR Level'].default_value = 0.3
+    
+    obj.data.materials.append(mat)
+
 def create_sphere_material(sphere, index, count):
     """Visual Material only (Non-Physics)"""
     mat = bpy.data.materials.new(name=f"SphereMat_{index}")

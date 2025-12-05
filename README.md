@@ -15,7 +15,8 @@ vibephysics/
 │   ├── water_float.py  # Floating spheres with mass variations
 │   ├── water_rise.py   # Calm water rising simulation
 │   ├── water_bucket.py    # Periodic water bucket
-│   └── storm.py        # Intense storm with debris
+│   ├── storm.py        # Intense storm with debris
+│   └── water_puddles.py   # Shallow puddles on uneven ground
 └── README.md
 ```
 
@@ -135,6 +136,27 @@ blender -b -P scripts/storm.py -- --storm-intensity 3.0 --num-debris 30
 - `--wind-chaos` - Turbulence force strength
 - `--num-debris` - Number of debris objects
 - `--volumetric-density` - Fog density
+
+---
+
+### 5. **water_puddles.py** - Water Puddles
+Simulates uneven muddy terrain with shallow water puddles and scattered debris.
+
+**Features:**
+- Procedural uneven ground generation
+- Mud materials
+- Partial submersion (puddles vs dry land)
+- Buoyancy only affects objects in the "water" zones
+
+**Usage:**
+```bash
+blender -b -P scripts/water_puddles.py -- --terrain-size 20.0
+```
+
+**Key Arguments:**
+- `--puddle-depth` - Depth variation of the terrain
+- `--z-water` - Water level height
+- `--num-debris` - Number of scattered objects
 
 ---
 

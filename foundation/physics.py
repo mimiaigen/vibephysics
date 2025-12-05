@@ -114,6 +114,79 @@ def create_seabed(z_bottom):
     # Assign Material
     create_seabed_material(seabed)
 
+def create_uneven_ground(z_base, size, noise_scale=10.0, strength=2.0):
+    """
+    Creates an uneven terrain mesh using displacement.
+    SIMULATION TYPE: Rigid Body (Passive / Mesh)
+    """
+    # High-res plane
+    bpy.ops.mesh.primitive_plane_add(size=size, location=(0, 0, z_base))
+    ground = bpy.context.active_object
+    ground.name = "UnevenGround"
+    
+    # Subdivide
+    bpy.ops.object.mode_set(mode='EDIT')
+    bpy.ops.mesh.subdivide(number_cuts=50) # High res for displacement
+    bpy.ops.object.mode_set(mode='OBJECT')
+    
+    # --- FLATTEN EDGES ---
+    # Create Vertex Group for displacement strength
+    # 1.0 in center, 0.0 at edges
+    vg = ground.vertex_groups.new(name="DisplaceGroup")
+    
+    import bmesh
+    bm = bmesh.new()
+    bm.from_mesh(ground.data)
+    
+    dvert_lay = bm.verts.layers.deform.verify()
+    
+    # Size is the total width. Radius is size/2.
+    radius = size / 2.0
+    # Flatten margin
+    margin = size * 0.1
+    safe_radius = radius - margin
+    
+    for v in bm.verts:
+        # Check distance from center (Chebyshev distance for square, Euclidean for circle)
+        # For square flattening, we check X and Y bounds.
+        dist_x = abs(v.co.x)
+        dist_y = abs(v.co.y)
+        dist = max(dist_x, dist_y)
+        
+        weight = 0.0
+        if dist < safe_radius:
+            weight = 1.0
+        elif dist >= radius:
+            weight = 0.0
+        else:
+            # Linear fade
+            weight = (radius - dist) / margin
+            
+        v[dvert_lay][vg.index] = weight
+        
+    bm.to_mesh(ground.data)
+    bm.free()
+    
+    # Add Displacement
+    disp = ground.modifiers.new(name="Displace", type='DISPLACE')
+    tex = bpy.data.textures.new(name="GroundNoise", type='CLOUDS')
+    tex.noise_scale = noise_scale
+    tex.noise_depth = 2
+    disp.texture = tex
+    disp.strength = strength
+    disp.mid_level = 0.5
+    disp.vertex_group = "DisplaceGroup" # Apply mask
+    
+    bpy.ops.object.shade_smooth()
+    
+    # Physics
+    bpy.ops.rigidbody.object_add(type='PASSIVE')
+    ground.rigid_body.collision_shape = 'MESH' # Essential for uneven terrain
+    ground.rigid_body.friction = 0.8
+    
+    # Assign Material - handled by caller usually, but we can set a default
+    return ground
+
 def create_bucket_container(z_bottom, z_surface, radius, wall_thickness=0.2):
     """
     Creates a cylindrical bucket container.

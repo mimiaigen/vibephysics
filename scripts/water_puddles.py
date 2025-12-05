@@ -8,7 +8,7 @@ import random
 # Add parent directory to path to import foundation
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from foundation import physics, visuals, materials, lighting
+from foundation import physics, water, ground, objects, materials, lighting, point_tracking
 
 def parse_args():
     """Parse command-line arguments for water puddles simulation."""
@@ -56,6 +56,13 @@ def parse_args():
     camera_group.add_argument('--resolution-y', type=int, default=1080,
                              help='Render resolution height')
     
+    # Point Tracking Settings
+    tracking_group = parser.add_argument_group('Point Tracking Settings')
+    tracking_group.add_argument('--no-point-tracking', action='store_true',
+                               help='Disable point cloud tracking visualization')
+    tracking_group.add_argument('--points-per-object', type=int, default=30,
+                               help='Number of surface sample points per object')
+    
     # Output Settings
     output_group = parser.add_argument_group('Output Settings')
     output_group.add_argument('--output', type=str, default='water_puddles.blend',
@@ -94,7 +101,7 @@ def run_simulation_setup(args):
     # Increase strength to create deeper puddles
     strength = args.puddle_depth * 2.0
     
-    ground = physics.create_uneven_ground(
+    terrain = ground.create_uneven_ground(
         z_base=args.z_ground,
         size=args.terrain_size,
         noise_scale=2.0, 
@@ -104,8 +111,8 @@ def run_simulation_setup(args):
     # We need a solid block to cut the water, but we want the visual ground to be thinner/cleaner.
     
     bpy.ops.object.select_all(action='DESELECT')
-    ground.select_set(True)
-    bpy.context.view_layer.objects.active = ground
+    terrain.select_set(True)
+    bpy.context.view_layer.objects.active = terrain
     bpy.ops.object.duplicate()
     ground_cutter = bpy.context.active_object
     ground_cutter.name = "Ground_Cutter"
@@ -120,11 +127,11 @@ def run_simulation_setup(args):
     ground_cutter.hide_viewport = True
     
     # Visual Ground: Give it a small thickness so it's not a paper plane
-    mod_solid_vis = ground.modifiers.new(name="SolidifyVisual", type='SOLIDIFY')
+    mod_solid_vis = terrain.modifiers.new(name="SolidifyVisual", type='SOLIDIFY')
     mod_solid_vis.thickness = 0.5 # Much thinner
     mod_solid_vis.offset = -1.0
     
-    materials.create_mud_material(ground)
+    materials.create_mud_material(terrain)
     
     # 3. Water Surface (Static Puddles)
     # We manually create a high-res plane with Noise Displacement to act as "Water"
@@ -183,7 +190,7 @@ def run_simulation_setup(args):
     # Spawn them in the air so they fall
     z_spawn = z_water_level + 2.0
     
-    positions = physics.generate_scattered_positions(
+    positions = objects.generate_scattered_positions(
         num_points=args.num_debris,
         spawn_radius=args.terrain_size / 2.5,
         min_dist=0.8,
@@ -209,7 +216,7 @@ def run_simulation_setup(args):
         debris_objects.append(obj)
 
     # 5. Interactions
-    visuals.setup_dynamic_paint_interaction(
+    water.setup_dynamic_paint_interaction(
         water_visual, 
         debris_objects, 
         ripple_strength=2.0
@@ -231,7 +238,17 @@ def run_simulation_setup(args):
         caustic_scale=10.0
     )
     
+    # 7. Point Tracking Visualization (2nd viewport with colored point cloud)
+    if not args.no_point_tracking and debris_objects:
+        point_tracking.setup_point_tracking_visualization(
+            tracked_objects=debris_objects,
+            points_per_object=args.points_per_object,
+            setup_viewport=not bpy.app.background
+        )
+    
     print("✅ Water Puddles Simulation Ready!")
+    if not args.no_point_tracking:
+        print(f"   - Point Tracking: {args.points_per_object} points per object")
 
 if __name__ == "__main__":
     try:

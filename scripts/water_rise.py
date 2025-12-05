@@ -7,7 +7,7 @@ import argparse
 # Add parent directory to path to import foundation
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from foundation import physics, visuals, materials, lighting
+from foundation import physics, water, ground, objects, materials, lighting, point_tracking
 
 def parse_args():
     """Parse command-line arguments for water rise simulation configuration.
@@ -79,6 +79,13 @@ def parse_args():
                              help='Render resolution width')
     camera_group.add_argument('--resolution-y', type=int, default=1080,
                              help='Render resolution height')
+    
+    # Point Tracking Settings
+    tracking_group = parser.add_argument_group('Point Tracking Settings')
+    tracking_group.add_argument('--no-point-tracking', action='store_true',
+                               help='Disable point cloud tracking visualization')
+    tracking_group.add_argument('--points-per-object', type=int, default=30,
+                               help='Number of surface sample points per object')
     
     # Output Settings
     output_group = parser.add_argument_group('Output Settings')
@@ -158,10 +165,10 @@ def run_simulation_setup(args):
             buoyancy_obj.location.z = args.z_bottom
             buoyancy_obj.keyframe_insert(data_path="location", index=2, frame=args.start_frame + args.rise_duration)
     
-    physics.create_seabed(z_bottom=args.z_bottom)
+    ground.create_seabed(z_bottom=args.z_bottom)
     
     # 2. Visual Environment - Calm Water
-    water_visual = visuals.create_visual_water(
+    water_visual = water.create_visual_water(
         scale=1.0,
         wave_scale=args.calm_wave_scale,  # Very calm waves
         time=None,  # Animated, but very subtle
@@ -180,7 +187,7 @@ def run_simulation_setup(args):
     )
     
     # 3. Objects - Place on ground initially
-    objects = []
+    floating_objs = []
     import random
     # random.seed(42) # Moved to internal generator or handling
     
@@ -188,23 +195,24 @@ def run_simulation_setup(args):
     min_dist = 1.2
     z_spawn = args.z_bottom + 0.6  # Just above seabed
     
-    positions = physics.generate_scattered_positions(
+    positions = objects.generate_scattered_positions(
         num_points=len(object_masses),
         spawn_radius=args.spawn_radius,
         min_dist=min_dist,
-        z_pos=z_spawn
+        z_pos=z_spawn,
+        z_range=2.0  # Small stack on seabed if crowded
     )
     
     for i, mass in enumerate(object_masses):
         if i < len(positions):
             pos = positions[i]
-            sphere = physics.create_floating_sphere(i, mass, pos, len(object_masses))
-            objects.append(sphere)
+            sphere = objects.create_floating_sphere(i, mass, pos, len(object_masses))
+            floating_objs.append(sphere)
     
     # 4. Interactions - Less intense ripples for calm water
-    visuals.setup_dynamic_paint_interaction(
+    water.setup_dynamic_paint_interaction(
         water_visual, 
-        objects, 
+        floating_objs, 
         ripple_strength=0.5  # Reduced for calm water
     )
     
@@ -225,10 +233,20 @@ def run_simulation_setup(args):
         caustic_strength=args.caustic_strength
     )
     
+    # 6. Point Tracking Visualization (2nd viewport with colored point cloud)
+    if not args.no_point_tracking and floating_objs:
+        point_tracking.setup_point_tracking_visualization(
+            tracked_objects=floating_objs,
+            points_per_object=args.points_per_object,
+            setup_viewport=not bpy.app.background
+        )
+    
     print("✅ Water Rise Simulation Ready!")
     print("   - Physics: Rigid Body + Buoyancy")
     print("   - Visuals: Calm Ocean + Rising Water Level")
     print(f"   - Water rises from z=0 to z={args.rise_height} over {args.rise_duration} frames")
+    if not args.no_point_tracking:
+        print(f"   - Point Tracking: {args.points_per_object} points per object")
 
 if __name__ == "__main__":
     # Parse command-line arguments

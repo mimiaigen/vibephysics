@@ -7,7 +7,7 @@ import argparse
 # Add parent directory to path to import foundation
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from foundation import physics, visuals, materials, lighting
+from foundation import physics, water, ground, objects, materials, lighting, point_tracking
 
 def parse_args():
     """Parse command-line arguments for water bucket simulation configuration.
@@ -80,6 +80,13 @@ def parse_args():
     camera_group.add_argument('--resolution-y', type=int, default=1080,
                              help='Render resolution height')
     
+    # Point Tracking Settings
+    tracking_group = parser.add_argument_group('Point Tracking Settings')
+    tracking_group.add_argument('--no-point-tracking', action='store_true',
+                               help='Disable point cloud tracking visualization')
+    tracking_group.add_argument('--points-per-object', type=int, default=30,
+                               help='Number of surface sample points per object')
+    
     # Output Settings
     output_group = parser.add_argument_group('Output Settings')
     output_group.add_argument('--output', type=str, default='water_bucket.blend',
@@ -134,7 +141,7 @@ def run_simulation_setup(args):
             hide=not args.show_force_fields
         )
     
-    physics.create_bucket_container(
+    ground.create_bucket_container(
         z_bottom=args.z_bottom,
         z_surface=args.z_surface,
         radius=args.bucket_radius
@@ -143,7 +150,7 @@ def run_simulation_setup(args):
     # 2. Visual Environment - Water Bucket
     # We force wave_scale to 0.0 for the visual water to keep it flat
     # The ripples come from Dynamic Paint which is added next
-    water_visual = visuals.create_visual_water(
+    water_visual = water.create_visual_water(
         scale=1.0,
         wave_scale=0.0, # Flat water
         radius=args.bucket_radius,
@@ -162,11 +169,12 @@ def run_simulation_setup(args):
     # We spawn slightly above water
     z_spawn = 3.0
     
-    positions = physics.generate_scattered_positions(
+    positions = objects.generate_scattered_positions(
         num_points=args.num_floats,
         spawn_radius=args.bucket_radius - 0.6, # Keep away from walls
         min_dist=min_dist,
-        z_pos=z_spawn
+        z_pos=z_spawn,
+        z_range=4.0  # Allow stacking
     )
     
     idx = 0
@@ -174,12 +182,12 @@ def run_simulation_setup(args):
         if idx >= args.num_floats:
             break
         
-        sphere = physics.create_floating_sphere(idx, float_masses[idx], pos, args.num_floats)
+        sphere = objects.create_floating_sphere(idx, float_masses[idx], pos, args.num_floats)
         floats.append(sphere)
         idx += 1
     
     # 4. Interactions - Strong ripples for water bucket
-    visuals.setup_dynamic_paint_interaction(
+    water.setup_dynamic_paint_interaction(
         water_visual, 
         floats, 
         ripple_strength=args.ripple_strength
@@ -202,10 +210,20 @@ def run_simulation_setup(args):
         caustic_strength=args.caustic_strength
     )
     
+    # 6. Point Tracking Visualization (2nd viewport with colored point cloud)
+    if not args.no_point_tracking and floats:
+        point_tracking.setup_point_tracking_visualization(
+            tracked_objects=floats,
+            points_per_object=args.points_per_object,
+            setup_viewport=not bpy.app.background
+        )
+    
     print("✅ Water Bucket Simulation Ready!")
     print("   - Physics: Rigid Body + Enhanced Currents")
     print("   - Visuals: Dynamic Waves + Ripples")
     print(f"   - {args.num_floats} floating objects in {args.bucket_radius*2}m bucket")
+    if not args.no_point_tracking:
+        print(f"   - Point Tracking: {args.points_per_object} points per object")
 
 if __name__ == "__main__":
     # Parse command-line arguments

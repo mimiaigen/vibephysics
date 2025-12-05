@@ -22,6 +22,7 @@ else
     $BLENDER -b --python-use-system-env -P scripts/water_float.py -- \
       --num-spheres 25 \
       --wave-scale 0.5 \
+      --collision-spawn \
       --start-frame $START_FRAME \
       --end-frame $FRAMES \
       --output water_float_sim.blend

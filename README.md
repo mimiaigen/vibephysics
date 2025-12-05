@@ -7,16 +7,18 @@ A Blender physics simulation framework for creating realistic water and fluid dy
 ```
 vibephysics/
 ├── foundation/          # Mid-level physics implementation
-│   ├── physics.py      # Core physics systems (rigid body, buoyancy, currents)
-│   ├── visuals.py      # Visual effects (ocean modifier, dynamic paint)
+│   ├── physics.py      # Core physics: rigid body world, force fields
+│   ├── ground.py       # Terrain: seabed, uneven ground, containers
+│   ├── water.py        # Water: visual water, dynamic paint ripples
+│   ├── objects.py      # Floating objects: make any mesh floatable
 │   ├── materials.py    # Material shaders (water, seabed, objects)
 │   └── lighting.py     # Lighting and camera setup
 ├── scripts/            # High-level simulation scenarios
 │   ├── water_float.py  # Floating spheres with mass variations
 │   ├── water_rise.py   # Calm water rising simulation
-│   ├── water_bucket.py    # Periodic water bucket
+│   ├── water_bucket.py # Periodic water bucket
 │   ├── storm.py        # Intense storm with debris
-│   └── water_puddles.py   # Shallow puddles on uneven ground
+│   └── water_puddles.py # Shallow puddles on uneven ground
 └── README.md
 ```
 
@@ -24,16 +26,25 @@ vibephysics/
 
 The `foundation` directory contains reusable mid-level physics implementations:
 
-### `physics.py`
+### `physics.py` - Core Physics
 - **`setup_rigid_body_world()`** - Initializes Bullet physics with optimized substeps
 - **`create_buoyancy_field()`** - Upward force field simulating water buoyancy
 - **`create_underwater_currents()`** - Turbulence force for water movement
-- **`create_seabed()`** - Ocean floor collision mesh
-- **`create_floating_sphere()`** - Physics-enabled object with adaptive damping
 
-### `visuals.py`
+### `ground.py` - Terrain
+- **`create_seabed()`** - Flat ocean floor collision mesh
+- **`create_uneven_ground()`** - Procedural terrain with noise displacement
+- **`create_bucket_container()`** - Cylindrical container with physics walls
+
+### `water.py` - Water Visuals
 - **`create_visual_water()`** - Ocean modifier for realistic wave surfaces
 - **`setup_dynamic_paint_interaction()`** - Ripple effects from object interactions
+
+### `objects.py` - Floating Objects
+- **`make_object_floatable()`** - Makes ANY mesh object physics-enabled and floatable
+- **`create_floating_sphere()`** - Convenience function for spheres
+- **`create_floating_mesh()`** - Create various mesh types (sphere, cube, cylinder, cone, torus, monkey)
+- **`generate_scattered_positions()`** - Non-overlapping random positions
 
 ### `materials.py`
 - **`create_water_material()`** - Transparent water shader with caustics support
@@ -193,7 +204,7 @@ To create your own simulation:
 
 1. **Import foundation modules:**
 ```python
-from foundation import physics, visuals, materials, lighting
+from foundation import physics, ground, water, objects, materials, lighting
 ```
 
 2. **Setup physics environment:**
@@ -201,23 +212,30 @@ from foundation import physics, visuals, materials, lighting
 physics.setup_rigid_body_world()
 physics.create_buoyancy_field(z_bottom=-5, z_surface=0, strength=10.0)
 physics.create_underwater_currents(z_bottom=-5, z_surface=0, strength=20.0)
-physics.create_seabed(z_bottom=-5)
+ground.create_seabed(z_bottom=-5)
 ```
 
 3. **Create visual water:**
 ```python
-water = visuals.create_visual_water(scale=1.0, wave_scale=1.0)
-materials.create_water_material(water)
+water_obj = water.create_visual_water(scale=1.0, wave_scale=1.0)
+materials.create_water_material(water_obj)
 ```
 
-4. **Add objects:**
+4. **Add floating objects (ANY mesh!):**
 ```python
-sphere = physics.create_floating_sphere(index=0, mass_val=1.0, location=(0,0,5))
+# Option 1: Create a sphere
+sphere = objects.create_floating_sphere(index=0, mass=1.0, location=(0,0,5), total_count=1)
+
+# Option 2: Make ANY existing object floatable
+import bpy
+bpy.ops.mesh.primitive_monkey_add(location=(0, 0, 5))
+monkey = bpy.context.active_object
+objects.make_object_floatable(monkey, mass=0.5, z_surface=0.0)
 ```
 
 5. **Setup interactions:**
 ```python
-visuals.setup_dynamic_paint_interaction(water, [sphere], ripple_strength=10.0)
+water.setup_dynamic_paint_interaction(water_obj, [sphere, monkey], ripple_strength=10.0)
 ```
 
 6. **Configure rendering:**

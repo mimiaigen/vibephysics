@@ -3,26 +3,28 @@ import math
 
 def create_caustics_light(scale, energy=20.0):
     """
-    Creates a Sun Light that projects a caustic pattern.
-    Visuals: God Rays + Seabed patterns (Global coverage)
+    Creates a subtle Sun Light that projects a soft caustic pattern.
+    Designed to complement natural sky lighting, not overpower it.
     """
     # 1. Create Texture Projection Object (Empty)
-    # This allows the texture to stay 'fixed' in world space even if the sun moves, 
-    # and provides a stable coordinate system for the Voronoi.
     bpy.ops.object.empty_add(type='PLAIN_AXES', location=(0, 0, 0))
     texture_control = bpy.context.active_object
     texture_control.name = "Caustic_Texture_Control"
     
-    # 2. Create Sun Light
-    # Placed high, pointing down. 
+    # 2. Create Sun Light - angled like natural sunlight
     bpy.ops.object.light_add(type='SUN', location=(0, 0, 50))
     light = bpy.context.active_object
     light.name = "CausticLight"
     
-    # Sun Settings
-    light.data.energy = energy  # Sun strength is different from Spot. Start lower, tune up.
-    # For clear caustics, we want a small angle (hard shadows)
-    light.data.angle = math.radians(0.5) 
+    # Rotate sun to come from an angle (not straight down) for natural look
+    light.rotation_euler = (math.radians(45), 0, math.radians(30))
+    
+    # Sun Settings - much softer and natural
+    # Clamp energy to reasonable values for natural look
+    natural_energy = min(energy * 0.005, 5.0)  # Very subtle, max 5.0
+    light.data.energy = natural_energy
+    # Larger angle = softer shadows (real sun is ~0.5 degrees, we use larger for softness)
+    light.data.angle = math.radians(3.0)
     
     # Node Setup for Texture Projection (Gobo)
     light.data.use_nodes = True
@@ -36,22 +38,24 @@ def create_caustics_light(scale, energy=20.0):
     
     # Coordinate System: Object (The Empty)
     node_coord = nodes.new(type='ShaderNodeTexCoord')
-    node_coord.object = texture_control # Link to the Empty
+    node_coord.object = texture_control
     
     node_mapping = nodes.new(type='ShaderNodeMapping')
-    # Point Z down for projection? Object coords are usually XYZ. 
-    # We'll map XY of the empty to the noise.
     
-    # Voronoi (Caustic Pattern)
+    # Voronoi (Caustic Pattern) - softer settings
     node_voronoi = nodes.new(type='ShaderNodeTexVoronoi')
     node_voronoi.voronoi_dimensions = '4D'
     node_voronoi.feature = 'SMOOTH_F1'
     node_voronoi.inputs['Scale'].default_value = scale
+    node_voronoi.inputs['Smoothness'].default_value = 1.0  # Maximum smoothness
     
-    # ColorRamp (Sharpen)
+    # ColorRamp - much softer gradient for subtle caustics
     node_ramp = nodes.new(type='ShaderNodeValToRGB')
-    node_ramp.color_ramp.elements[0].position = 0.05
-    node_ramp.color_ramp.elements[1].position = 0.25
+    node_ramp.color_ramp.interpolation = 'EASE'
+    node_ramp.color_ramp.elements[0].position = 0.2
+    node_ramp.color_ramp.elements[0].color = (0.7, 0.7, 0.7, 1.0)  # Not pure black
+    node_ramp.color_ramp.elements[1].position = 0.6
+    node_ramp.color_ramp.elements[1].color = (1.0, 1.0, 1.0, 1.0)
     
     # Linking
     links.new(node_coord.outputs['Object'], node_mapping.inputs['Vector'])
@@ -60,14 +64,12 @@ def create_caustics_light(scale, energy=20.0):
     links.new(node_ramp.outputs['Color'], node_emission.inputs['Color'])
     links.new(node_emission.outputs['Emission'], node_out.inputs['Surface'])
     
-    # Animate W (Time)
+    # Animate W (Time) - slower animation for natural feel
     fcurve = node_voronoi.inputs['W'].driver_add("default_value")
     driver = fcurve.driver
-    driver.expression = "frame / 24.0"
+    driver.expression = "frame / 48.0"  # Slower caustic movement
     
-    # Set Strength
-    # Sun strength in nodes interacts with data.energy. 
-    # We keep emission strength 1.0 and control via data.energy
+    # Emission strength kept at 1.0, controlled via data.energy
     node_emission.inputs['Strength'].default_value = 1.0
 
 
@@ -123,7 +125,7 @@ def create_underwater_volume(z_surface, z_bottom, density):
 def setup_lighting_and_camera(camera_radius, camera_height, resolution_x, resolution_y, start_frame, end_frame, 
                               enable_caustics, enable_volumetric, z_surface, z_bottom, volumetric_density, caustic_scale, 
                               caustic_strength=8000.0, water_obj_name="Water_Visual"):
-    """Visual Scene Setup (Non-Physics)"""
+    """Visual Scene Setup (Non-Physics) - Natural lighting from sky only"""
     # Cameras - Create 6 cameras evenly distributed around the circle
     cameras = []
     num_cameras = 6
@@ -154,33 +156,52 @@ def setup_lighting_and_camera(camera_radius, camera_height, resolution_x, resolu
     if cameras:
         bpy.context.scene.camera = cameras[0]
     
-    # Sun -> Specular Point Light
-    # Replace broad Sun with a bright Point Light to create sharp specular highlights
-    bpy.ops.object.light_add(type='POINT', location=(5, 5, 10))
-    light = bpy.context.active_object
-    light.name = "SpecularLight"
-    light.data.energy = 5000.0 # High energy for point light to reach far
-    light.data.shadow_soft_size = 0.1 # Small size = sharp shadows/speculars
-    
-    # Add a Rim Light for extra definition (optional)
-    bpy.ops.object.light_add(type='AREA', location=(-8, -8, 5))
-    rim = bpy.context.active_object
-    rim.name = "RimLight"
-    rim.data.energy = 500.0
-    rim.rotation_euler = (math.radians(60), 0, math.radians(-45))
-    
+    # NO artificial lights - only environment lighting
+    # Caustics disabled by default for natural look
     if enable_caustics:
+        # Subtle caustics that complement natural sky lighting
         create_caustics_light(scale=caustic_scale, energy=caustic_strength)
         
     if enable_volumetric:
         create_underwater_volume(z_surface, z_bottom, volumetric_density)
     
-    # World/Sky
+    # World/Sky - Natural HDRI-style lighting using Sky Texture
     world = bpy.context.scene.world or bpy.data.worlds.new("World")
     bpy.context.scene.world = world
     world.use_nodes = True
-    bg = world.node_tree.nodes["Background"]
-    bg.inputs[0].default_value = (0.6, 0.8, 1.0, 1)
+    
+    nodes = world.node_tree.nodes
+    links = world.node_tree.links
+    nodes.clear()
+    
+    # Create Sky Texture for natural outdoor lighting
+    node_out = nodes.new(type='ShaderNodeOutputWorld')
+    node_bg = nodes.new(type='ShaderNodeBackground')
+    node_sky = nodes.new(type='ShaderNodeTexSky')
+    
+    # Sky Texture settings for natural daylight
+    # Handle different Blender versions (NISHITA for 2.9-4.x, HOSEK_WILKIE for 5.0+)
+    try:
+        node_sky.sky_type = 'NISHITA'
+        node_sky.sun_elevation = math.radians(45)
+        node_sky.sun_rotation = math.radians(0)
+        node_sky.altitude = 0
+        node_sky.air_density = 1.0
+        node_sky.dust_density = 1.0
+        node_sky.ozone_density = 1.0
+    except TypeError:
+        # Blender 5.0+ uses different sky types
+        node_sky.sky_type = 'HOSEK_WILKIE'
+        node_sky.turbidity = 2.0  # Lower = clearer sky
+        # Sun direction as vector (x, y, z) - sun at 45 degrees elevation
+        node_sky.sun_direction = (0.0, 0.707, 0.707)
+    
+    # Background strength - controls overall scene brightness
+    node_bg.inputs['Strength'].default_value = 1.0
+    
+    # Connect nodes
+    links.new(node_sky.outputs['Color'], node_bg.inputs['Color'])
+    links.new(node_bg.outputs['Background'], node_out.inputs['Surface'])
     
     # Render Settings
     bpy.context.scene.render.engine = 'CYCLES'
@@ -190,23 +211,13 @@ def setup_lighting_and_camera(camera_radius, camera_height, resolution_x, resolu
     bpy.context.scene.frame_start = start_frame
     bpy.context.scene.frame_end = end_frame
     
-    # EEVEE / Viewport Settings (so it looks good in "Material Preview" mode)
-    # Even if we render in Cycles, these help the viewport look correct
-    # Handle API change for Blender 4.2+ (use_ssr removed/changed)
+    # EEVEE / Viewport Settings
     try:
-        bpy.context.scene.eevee.use_ssr = True        # Screen Space Reflections
-        bpy.context.scene.eevee.use_ssr_refraction = True # Refraction
+        bpy.context.scene.eevee.use_ssr = True
+        bpy.context.scene.eevee.use_ssr_refraction = True
     except AttributeError:
-        # Blender 4.2+ (Eevee Next) enables Raytracing by default or via different property
-        # We can try enabling Raytracing if available, or just pass
         try:
-            # For Blender 4.2+, 'use_raytracing' might be the key if it exists, 
-            # or it might just be 'on' by default for refraction if material requests it.
-            # Checking for 'use_raytracing' which replaced SSR in some contexts
             if hasattr(bpy.context.scene.eevee, "use_raytracing"):
                  bpy.context.scene.eevee.use_raytracing = True
-            
-            # Also ensure Refraction is enabled in Raytracing if applicable
-            # In some builds, it's purely material-based.
         except:
             pass

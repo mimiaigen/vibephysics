@@ -8,7 +8,7 @@ import argparse
 # Add parent directory to path to import foundation
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from foundation import physics, visuals, materials, lighting
+from foundation import physics, water, ground, objects, materials, lighting, point_tracking
 
 def parse_args():
     """Parse command-line arguments for storm simulation configuration.
@@ -79,6 +79,13 @@ def parse_args():
     camera_group.add_argument('--resolution-y', type=int, default=1080,
                              help='Render resolution height')
     
+    # Point Tracking Settings
+    tracking_group = parser.add_argument_group('Point Tracking Settings')
+    tracking_group.add_argument('--no-point-tracking', action='store_true',
+                               help='Disable point cloud tracking visualization')
+    tracking_group.add_argument('--points-per-object', type=int, default=30,
+                               help='Number of surface sample points per object')
+    
     # Output Settings
     output_group = parser.add_argument_group('Output Settings')
     output_group.add_argument('--output', type=str, default='storm_simulation.blend',
@@ -135,10 +142,10 @@ def run_simulation_setup(args):
         hide=not args.show_force_fields
     )
     
-    physics.create_seabed(z_bottom=args.z_bottom)
+    ground.create_seabed(z_bottom=args.z_bottom)
     
     # 2. Visual Environment - Stormy Sea
-    water_visual = visuals.create_visual_water(
+    water_visual = water.create_visual_water(
         scale=1.0,
         wave_scale=args.storm_intensity,  # Large, violent waves
         time=None,  # Animated
@@ -155,26 +162,23 @@ def run_simulation_setup(args):
     
     # For storm, we want them to drop from various heights, but not overlap in X/Y if possible to avoid initial explosions
     # We'll generate X/Y positions first
-    positions = physics.generate_scattered_positions(
+    positions = objects.generate_scattered_positions(
         num_points=len(debris_masses),
         spawn_radius=args.spawn_radius,
         min_dist=min_dist,
-        z_pos=0 # Placeholder Z
+        z_pos=2.0,
+        z_range=8.0 # Use range for storm debris
     )
     
     for i, mass in enumerate(debris_masses):
         if i < len(positions):
-            x, y, _ = positions[i]
-            
-            # Vary initial height for dramatic effect
-            z_pos = random.uniform(2.0, 8.0)
-            
-            pos = (x, y, z_pos)
-            sphere = physics.create_floating_sphere(i, mass, pos, args.num_debris)
+            # Use position directly
+            pos = positions[i]
+            sphere = objects.create_floating_sphere(i, mass, pos, args.num_debris)
             debris.append(sphere)
     
     # 4. Interactions - Very strong ripples for storm
-    visuals.setup_dynamic_paint_interaction(
+    water.setup_dynamic_paint_interaction(
         water_visual, 
         debris, 
         ripple_strength=15.0  # Intense for storm
@@ -200,14 +204,37 @@ def run_simulation_setup(args):
     # Adjust world background for storm (darker, more ominous)
     world = bpy.context.scene.world
     if world and world.use_nodes:
+        # Adjust sky texture for stormy look
+        sky = world.node_tree.nodes.get("Sky Texture")
+        if sky:
+            try:
+                # NISHITA sky (Blender 2.9-4.x)
+                sky.air_density = 3.0  # Thick atmosphere
+                sky.dust_density = 5.0  # Heavy dust/clouds
+                sky.sun_elevation = math.radians(15)  # Low sun
+            except AttributeError:
+                # HOSEK_WILKIE sky (Blender 5.0+)
+                sky.turbidity = 10.0  # Higher = hazier/stormier
+                sky.sun_direction = (0.0, 0.259, 0.966)  # Low sun (15 degrees)
+        # Reduce background strength for darker scene
         bg = world.node_tree.nodes.get("Background")
         if bg:
-            bg.inputs[0].default_value = (0.3, 0.3, 0.35, 1)  # Dark gray sky
+            bg.inputs['Strength'].default_value = 0.5
+    
+    # 6. Point Tracking Visualization (2nd viewport with colored point cloud)
+    if not args.no_point_tracking and debris:
+        point_tracking.setup_point_tracking_visualization(
+            tracked_objects=debris,
+            points_per_object=args.points_per_object,
+            setup_viewport=not bpy.app.background
+        )
     
     print("✅ Storm Simulation Ready!")
     print("   - Physics: Enhanced Rigid Body + Extreme Forces")
     print("   - Visuals: Violent Waves + Intense Ripples")
     print(f"   - {args.num_debris} debris objects in chaotic storm")
+    if not args.no_point_tracking:
+        print(f"   - Point Tracking: {args.points_per_object} points per object")
 
 if __name__ == "__main__":
     # Parse command-line arguments

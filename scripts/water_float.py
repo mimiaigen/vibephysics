@@ -8,7 +8,7 @@ import argparse
 # Add parent directory to path to import foundation
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from foundation import physics, visuals, materials, lighting
+from foundation import physics, water, ground, objects, materials, lighting, point_tracking
 
 def parse_args():
     """Parse command-line arguments for water simulation configuration.
@@ -81,7 +81,7 @@ def parse_args():
     
     # Camera Settings
     camera_group = parser.add_argument_group('Camera Settings')
-    camera_group.add_argument('--camera-radius', type=float, default=30.0,
+    camera_group.add_argument('--camera-radius', type=float, default=20.0,
                              help='Camera distance from center')
     camera_group.add_argument('--camera-height', type=float, default=2.0,
                              help='Camera height above water surface')
@@ -89,6 +89,13 @@ def parse_args():
                              help='Render resolution width')
     camera_group.add_argument('--resolution-y', type=int, default=1080,
                              help='Render resolution height')
+    
+    # Point Tracking Settings
+    tracking_group = parser.add_argument_group('Point Tracking Settings')
+    tracking_group.add_argument('--no-point-tracking', action='store_true',
+                               help='Disable point cloud tracking visualization')
+    tracking_group.add_argument('--points-per-object', type=int, default=30,
+                               help='Number of surface sample points per object')
     
     # Output Settings
     output_group = parser.add_argument_group('Output Settings')
@@ -143,10 +150,10 @@ def run_simulation_setup(args):
             hide=not args.show_force_fields
         )
         
-    physics.create_seabed(z_bottom=args.z_bottom)
+    ground.create_seabed(z_bottom=args.z_bottom)
     
     # 2. Visual Environment
-    water_visual = visuals.create_visual_water(
+    water_visual = water.create_visual_water(
         scale=1.0,
         wave_scale=args.wave_scale,
         time=args.fixed_wave_time,
@@ -164,11 +171,12 @@ def run_simulation_setup(args):
     
     if args.collision_spawn:
         # Random overlapping-safe spawning
-        positions = physics.generate_scattered_positions(
+        positions = objects.generate_scattered_positions(
             num_points=len(sphere_masses),
             spawn_radius=args.spawn_radius,
             min_dist=min_dist,
-            z_pos=base_z
+            z_pos=base_z,
+            z_range=5.0  # Allow stacking up to 5 meters high if needed
         )
         
         # If we couldn't fit all, just use what we have or fallback
@@ -176,11 +184,9 @@ def run_simulation_setup(args):
         for i, mass in enumerate(sphere_masses):
             if i < len(positions):
                 pos = positions[i]
-                # Add small Z variation to prevent perfect vertical stacking if we ran multiple layers (not doing that here)
-                # But let's stagger Z slightly just in case
-                pos = (pos[0], pos[1], base_z + (i * 0.1)) 
+                # Pos already includes Z from generator
                 
-                sphere = physics.create_floating_sphere(i, mass, pos, len(sphere_masses))
+                sphere = objects.create_floating_sphere(i, mass, pos, len(sphere_masses))
                 spheres.append(sphere)
     else:
         # Linear layout (grid or line)
@@ -189,11 +195,11 @@ def run_simulation_setup(args):
         
         for i, mass in enumerate(sphere_masses):
             pos = (start_x + i * spacing, 0.0, base_z + i * 0.1)
-            sphere = physics.create_floating_sphere(i, mass, pos, len(sphere_masses))
+            sphere = objects.create_floating_sphere(i, mass, pos, len(sphere_masses))
             spheres.append(sphere)
         
     # 4. Interactions
-    visuals.setup_dynamic_paint_interaction(water_visual, spheres, args.ripple_strength)
+    water.setup_dynamic_paint_interaction(water_visual, spheres, args.ripple_strength)
     
     # 5. Rendering
     lighting.setup_lighting_and_camera(
@@ -212,9 +218,19 @@ def run_simulation_setup(args):
         caustic_strength=args.caustic_strength
     )
     
+    # 6. Point Tracking Visualization (2nd viewport with colored point cloud)
+    if not args.no_point_tracking and spheres:
+        point_tracking.setup_point_tracking_visualization(
+            tracked_objects=spheres,
+            points_per_object=args.points_per_object,
+            setup_viewport=not bpy.app.background
+        )
+    
     print("✅ Simulation Ready!")
     print("   - Physics: Bullet Rigid Body + Force Fields (Buoyancy, Currents)")
     print("   - Visuals: Ocean Modifier + Dynamic Paint (Ripples)")
+    if not args.no_point_tracking:
+        print(f"   - Point Tracking: {args.points_per_object} points per object")
 
 if __name__ == "__main__":
     # Parse command-line arguments

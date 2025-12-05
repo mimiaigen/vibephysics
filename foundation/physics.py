@@ -114,6 +114,117 @@ def create_seabed(z_bottom):
     # Assign Material
     create_seabed_material(seabed)
 
+def create_bucket_container(z_bottom, z_surface, radius, wall_thickness=0.2):
+    """
+    Creates a cylindrical bucket container.
+    SIMULATION TYPE: Rigid Body (Passive / Static Mesh)
+    """
+    # Calculate dimensions
+    water_depth = z_surface - z_bottom
+    # Make container slightly taller than water surface to hold waves
+    container_height = water_depth + 2.0 
+    # Cylinder center Z
+    z_center = z_bottom + (container_height / 2.0)
+    
+    bpy.ops.mesh.primitive_cylinder_add(
+        vertices=128, 
+        radius=radius, 
+        depth=container_height, 
+        location=(0, 0, z_center)
+    )
+    container = bpy.context.active_object
+    container.name = "BucketContainer"
+    
+    # Delete top face to make it a bucket
+    bpy.ops.object.mode_set(mode='EDIT')
+    bpy.ops.mesh.select_all(action='DESELECT')
+    # Select top face: normal points up (Z > 0) and is at top Z
+    # Easier way: Select face at center top
+    bpy.ops.mesh.select_face_by_sides(number=0, type='NOTEQUAL', extend=False) # Select nothing
+    
+    # We can just delete the top face by index if we know it, but indices vary.
+    # Let's rely on bmesh or just select by location.
+    bpy.ops.object.mode_set(mode='OBJECT')
+    
+    # Using bmesh to delete top face
+    import bmesh
+    bm = bmesh.new()
+    bm.from_mesh(container.data)
+    bm.faces.ensure_lookup_table()
+    
+    # Find top face (highest Z center)
+    top_face = None
+    max_z = -float('inf')
+    for f in bm.faces:
+        if f.calc_center_median().z > max_z:
+            max_z = f.calc_center_median().z
+            top_face = f
+            
+    if top_face:
+        bm.faces.remove(top_face)
+        
+    bm.to_mesh(container.data)
+    bm.free()
+    
+    # Add Solidify to give walls thickness
+    mod = container.modifiers.new(name="Solidify", type='SOLIDIFY')
+    mod.thickness = wall_thickness
+    mod.offset = 1.0 # Extrude outwards, preserving inner radius
+    
+    # Add Bevel for nice edges (optional)
+    bevel = container.modifiers.new(name="Bevel", type='BEVEL')
+    bevel.width = 0.05
+    bevel.segments = 3
+    
+    bpy.ops.object.shade_smooth()
+    
+    # Physics
+    bpy.ops.rigidbody.object_add(type='PASSIVE')
+    container.rigid_body.collision_shape = 'MESH'
+    container.rigid_body.friction = 0.5
+    
+    # Assign Material (reuse seabed material logic or create new)
+    create_seabed_material(container)
+    
+    return container
+
+def generate_scattered_positions(num_points, spawn_radius, min_dist, z_pos):
+    """
+    Generates random positions within a circle, ensuring no overlap.
+    """
+    import math
+    import random
+    
+    positions = []
+    max_attempts = num_points * 100  # Prevent infinite loop
+    attempts = 0
+    
+    while len(positions) < num_points and attempts < max_attempts:
+        attempts += 1
+        
+        # Random point in circle (uniform distribution)
+        r = spawn_radius * math.sqrt(random.random())
+        theta = random.random() * 2 * math.pi
+        
+        x = r * math.cos(theta)
+        y = r * math.sin(theta)
+        
+        # Check collision with existing points
+        collision = False
+        for px, py, pz in positions:
+            dist_sq = (x - px)**2 + (y - py)**2
+            if dist_sq < min_dist**2:
+                collision = True
+                break
+        
+        if not collision:
+            positions.append((x, y, z_pos))
+            
+    if len(positions) < num_points:
+        print(f"⚠️ Warning: Could only fit {len(positions)}/{num_points} objects without overlap.")
+        
+    return positions
+
 def create_floating_sphere(i, mass_val, location, total_spheres):
     """
     Creates a floating object.

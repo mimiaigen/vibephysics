@@ -71,9 +71,9 @@ def parse_args():
     
     # Camera Settings
     camera_group = parser.add_argument_group('Camera Settings')
-    camera_group.add_argument('--camera-radius', type=float, default=20.0,
+    camera_group.add_argument('--camera-radius', type=float, default=10.0,
                              help='Camera distance from center')
-    camera_group.add_argument('--camera-height', type=float, default=5.0,
+    camera_group.add_argument('--camera-height', type=float, default=10.0,
                              help='Camera height above water surface')
     camera_group.add_argument('--resolution-x', type=int, default=1920,
                              help='Render resolution width')

@@ -290,6 +290,8 @@ def restore_viewports():
     
     # Setup Left (Scene)
     main_space = main_area.spaces[0]
+    main_space.shading.type = 'MATERIAL'
+    
     if main_space.local_view:
         with bpy.context.temp_override(area=main_area, region=main_area.regions[-1], space_data=main_space):
             bpy.ops.view3d.localview()

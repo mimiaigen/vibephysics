@@ -3,58 +3,111 @@ import os
 import bpy
 import math
 import random
+import argparse
 
 # Add parent directory to path to import src
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from src import physics, visuals, materials, lighting
 
-# --- USER CONFIGURATION ---
-# Simulation Settings
-N = 25  # Number of mass samples
-SPHERE_MASSES = [0.001 * (1/0.001) ** (i/(N-1)) for i in range(N)]  # Logarithmic scale from 0.001 to 1
-COLLISION_SPAWN = False
-SPAWN_RADIUS = 2.0
+def parse_args():
+    """Parse command-line arguments for water simulation configuration.
+    
+    When running with Blender, pass script arguments after '--':
+    blender -b -P script.py -- --num-spheres 10 --wave-scale 1.0
+    """
+    parser = argparse.ArgumentParser(
+        description='Generate a Blender water simulation with floating spheres',
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter
+    )
+    
+    # Simulation Settings
+    sim_group = parser.add_argument_group('Simulation Settings')
+    sim_group.add_argument('--num-spheres', type=int, default=25,
+                          help='Number of floating spheres with different masses')
+    sim_group.add_argument('--collision-spawn', action='store_true',
+                          help='Spawn spheres randomly in a circle (collision mode)')
+    sim_group.add_argument('--spawn-radius', type=float, default=2.0,
+                          help='Radius for random sphere spawning')
+    
+    # Physics Fields
+    physics_group = parser.add_argument_group('Physics Settings')
+    physics_group.add_argument('--no-buoyancy', action='store_true',
+                              help='Disable buoyancy force field')
+    physics_group.add_argument('--no-currents', action='store_true',
+                              help='Disable underwater currents')
+    physics_group.add_argument('--z-bottom', type=float, default=-5.0,
+                              help='Z coordinate of the ocean floor')
+    physics_group.add_argument('--z-surface', type=float, default=0.0,
+                              help='Z coordinate of the water surface')
+    physics_group.add_argument('--buoyancy-strength', type=float, default=10.0,
+                              help='Strength of buoyancy force (2.0 = typical, higher = stronger lift)')
+    physics_group.add_argument('--current-strength', type=float, default=20.0,
+                              help='Strength of underwater currents')
+    physics_group.add_argument('--turbulence-scale', type=float, default=1.0,
+                              help='Size of turbulence noise pattern (meters)')
+    physics_group.add_argument('--ripple-strength', type=float, default=10.0,
+                              help='Multiplier for ripple height (1.0 = default)')
+    physics_group.add_argument('--wave-scale', type=float, default=0.5,
+                              help='Scale of visual ocean waves (1.0 = default)')
+    physics_group.add_argument('--fixed-wave-time', type=float, default=None,
+                              help='Lock waves to specific time (None = animated)')
+    physics_group.add_argument('--show-force-fields', action='store_true',
+                              help='Show force field visualizations in viewport')
+    
+    # Visual Settings
+    visual_group = parser.add_argument_group('Visual Settings')
+    visual_group.add_argument('--water-color', type=float, nargs=4, 
+                             default=[0.0, 0.6, 1.0, 1.0],
+                             metavar=('R', 'G', 'B', 'A'),
+                             help='Water color as RGBA values (0.0-1.0)')
+    visual_group.add_argument('--no-caustics', action='store_true',
+                             help='Disable caustics lighting effects')
+    visual_group.add_argument('--caustic-strength', type=float, default=8000.0,
+                             help='Strength of caustic light patterns')
+    visual_group.add_argument('--caustic-scale', type=float, default=15.0,
+                             help='Scale of caustic light patterns')
+    visual_group.add_argument('--no-volumetric', action='store_true',
+                             help='Disable volumetric fog effects')
+    visual_group.add_argument('--volumetric-density', type=float, default=0.02,
+                             help='Density of underwater fog')
+    
+    # Animation Settings
+    anim_group = parser.add_argument_group('Animation Settings')
+    anim_group.add_argument('--start-frame', type=int, default=1,
+                           help='First frame of animation')
+    anim_group.add_argument('--end-frame', type=int, default=250,
+                           help='Last frame of animation')
+    
+    # Camera Settings
+    camera_group = parser.add_argument_group('Camera Settings')
+    camera_group.add_argument('--camera-radius', type=float, default=30.0,
+                             help='Camera distance from center')
+    camera_group.add_argument('--camera-height', type=float, default=2.0,
+                             help='Camera height above water surface')
+    camera_group.add_argument('--resolution-x', type=int, default=1920,
+                             help='Render resolution width')
+    camera_group.add_argument('--resolution-y', type=int, default=1080,
+                             help='Render resolution height')
+    
+    # Output Settings
+    output_group = parser.add_argument_group('Output Settings')
+    output_group.add_argument('--output', type=str, default='water_simulation.blend',
+                             help='Output blend file name')
+    
+    # Filter out Blender's arguments - only parse after '--'
+    argv = sys.argv
+    if '--' in argv:
+        argv = argv[argv.index('--') + 1:]
+    else:
+        argv = []  # No script arguments, use defaults
+    
+    return parser.parse_args(argv)
 
-# Physics Fields
-ENABLE_BUOYANCY = True
-ENABLE_CURRENTS = True
-
-# Field Dimensions (Z-Axis)
-FIELD_Z_BOTTOM = -5
-FIELD_Z_SURFACE = 0.0
-
-# Physics Strengths (User Control)
-BUOYANCY_STRENGTH = 10.0  # 2.0 floats typical objects. Increase for stronger lift.
-CURRENT_STRENGTH = 20.0   # Force of random currents.
-TURBULENCE_SCALE = 1      # Size of the noise pattern (meters)
-RIPPLE_STRENGTH = 10.0     # Multiplier for ripple height (1.0 = default)
-WATER_WAVE_SCALE = 0.5    # Scale of the visual ocean waves (1.0 = default)
-FIXED_WATER_WAVE_TIME = None # If set (e.g., 2.0), locks the wave to that time. None = animated.
-HIDE_FORCE_FIELDS = True   # Set to True to hide the "dotted line" representations (Eye icon)
-
-# Realism / Lighting Settings (Caustics & God Rays)
-WATER_COLOR = (0.0, 0.6, 1.0, 1.0) # Deep Blue-ish (RGBA)
-ENABLE_CAUSTICS = True
-CAUSTIC_STRENGTH = 8000.0     # Sun Strength (Sun is much brighter per unit than Spot)
-CAUSTIC_SCALE = 15.0       # Scale of the light patterns
-VOLUMETRIC_ENABLED = True
-VOLUMETRIC_DENSITY = 0.02  # Density of the water "fog"
-
-
-# Animation Settings
-START_FRAME = 1
-END_FRAME = 250
-
-# Camera Settings
-CAMERA_RADIUS = 30.0    # Distance from the center
-CAMERA_HEIGHT = 2.0     # Height above the water
-RESOLUTION_X = 1920
-RESOLUTION_Y = 1080
-# --------------------------
-
-def run_simulation_setup():
+def run_simulation_setup(args):
+    """Run the water simulation setup with the given arguments."""
     print("Initializing Water Simulation...")
+    print(f"Configuration: {args.num_spheres} spheres, wave scale {args.wave_scale}")
     
     # 0. Clear Handlers (avoid duplicates)
     bpy.app.handlers.frame_change_pre.clear()
@@ -63,51 +116,54 @@ def run_simulation_setup():
     bpy.ops.object.select_all(action='SELECT')
     bpy.ops.object.delete()
     
+    # Generate sphere masses (logarithmic scale from 0.001 to 1)
+    sphere_masses = [0.001 * (1/0.001) ** (i/(args.num_spheres-1)) for i in range(args.num_spheres)]
+    
     # 1. Physics Environment
     physics.setup_rigid_body_world()
     
-    if ENABLE_BUOYANCY:
+    if not args.no_buoyancy:
         physics.create_buoyancy_field(
-            z_bottom=FIELD_Z_BOTTOM,
-            z_surface=FIELD_Z_SURFACE,
-            strength=BUOYANCY_STRENGTH,
-            spawn_radius=SPAWN_RADIUS,
-            hide=HIDE_FORCE_FIELDS
+            z_bottom=args.z_bottom,
+            z_surface=args.z_surface,
+            strength=args.buoyancy_strength,
+            spawn_radius=args.spawn_radius,
+            hide=not args.show_force_fields
         )
         
-    if ENABLE_CURRENTS:
+    if not args.no_currents:
         # Calculate effective strength based on wave scale
-        effective_strength = CURRENT_STRENGTH * WATER_WAVE_SCALE
+        effective_strength = args.current_strength * args.wave_scale
         physics.create_underwater_currents(
-            z_bottom=FIELD_Z_BOTTOM,
-            z_surface=FIELD_Z_SURFACE,
+            z_bottom=args.z_bottom,
+            z_surface=args.z_surface,
             strength=effective_strength,
-            turbulence_scale=TURBULENCE_SCALE,
-            spawn_radius=SPAWN_RADIUS,
-            hide=HIDE_FORCE_FIELDS
+            turbulence_scale=args.turbulence_scale,
+            spawn_radius=args.spawn_radius,
+            hide=not args.show_force_fields
         )
         
-    physics.create_seabed(z_bottom=FIELD_Z_BOTTOM)
+    physics.create_seabed(z_bottom=args.z_bottom)
     
     # 2. Visual Environment
     water_visual = visuals.create_visual_water(
-        scale=1.0, # Fixed scale in original
-        wave_scale=WATER_WAVE_SCALE,
-        time=FIXED_WATER_WAVE_TIME,
-        start_frame=START_FRAME,
-        end_frame=END_FRAME
+        scale=1.0,
+        wave_scale=args.wave_scale,
+        time=args.fixed_wave_time,
+        start_frame=args.start_frame,
+        end_frame=args.end_frame
     )
-    materials.create_water_material(water_visual, color=WATER_COLOR)
+    materials.create_water_material(water_visual, color=tuple(args.water_color))
     
     # 3. Objects
     spheres = []
     base_z = 5.0
     spacing = 1.2
-    start_x = -((len(SPHERE_MASSES) - 1) * spacing) / 2.0
+    start_x = -((len(sphere_masses) - 1) * spacing) / 2.0
     
-    for i, mass in enumerate(SPHERE_MASSES):
-        if COLLISION_SPAWN:
-            r = SPAWN_RADIUS * math.sqrt(random.random())
+    for i, mass in enumerate(sphere_masses):
+        if args.collision_spawn:
+            r = args.spawn_radius * math.sqrt(random.random())
             theta = random.random() * 2 * math.pi
             
             x_pos = r * math.cos(theta)
@@ -118,27 +174,27 @@ def run_simulation_setup():
         else:
             pos = (start_x + i * spacing, 0.0, base_z + i * 0.5)
             
-        sphere = physics.create_floating_sphere(i, mass, pos, len(SPHERE_MASSES))
+        sphere = physics.create_floating_sphere(i, mass, pos, len(sphere_masses))
         spheres.append(sphere)
         
     # 4. Interactions
-    visuals.setup_dynamic_paint_interaction(water_visual, spheres, RIPPLE_STRENGTH)
+    visuals.setup_dynamic_paint_interaction(water_visual, spheres, args.ripple_strength)
     
     # 5. Rendering
     lighting.setup_lighting_and_camera(
-        camera_radius=CAMERA_RADIUS,
-        camera_height=CAMERA_HEIGHT,
-        resolution_x=RESOLUTION_X,
-        resolution_y=RESOLUTION_Y,
-        start_frame=START_FRAME,
-        end_frame=END_FRAME,
-        enable_caustics=ENABLE_CAUSTICS,
-        enable_volumetric=VOLUMETRIC_ENABLED,
-        z_surface=FIELD_Z_SURFACE,
-        z_bottom=FIELD_Z_BOTTOM,
-        volumetric_density=VOLUMETRIC_DENSITY,
-        caustic_scale=CAUSTIC_SCALE,
-        caustic_strength=CAUSTIC_STRENGTH
+        camera_radius=args.camera_radius,
+        camera_height=args.camera_height,
+        resolution_x=args.resolution_x,
+        resolution_y=args.resolution_y,
+        start_frame=args.start_frame,
+        end_frame=args.end_frame,
+        enable_caustics=not args.no_caustics,
+        enable_volumetric=not args.no_volumetric,
+        z_surface=args.z_surface,
+        z_bottom=args.z_bottom,
+        volumetric_density=args.volumetric_density,
+        caustic_scale=args.caustic_scale,
+        caustic_strength=args.caustic_strength
     )
     
     print("✅ Simulation Ready!")
@@ -146,7 +202,11 @@ def run_simulation_setup():
     print("   - Visuals: Ocean Modifier + Dynamic Paint (Ripples)")
 
 if __name__ == "__main__":
-    run_simulation_setup()
+    # Parse command-line arguments
+    args = parse_args()
+    
+    # Run simulation setup
+    run_simulation_setup(args)
     
     # CRITICAL: Disable disk cache RIGHT BEFORE saving to ensure it persists
     print("Disabling all disk caches before save...")
@@ -163,14 +223,18 @@ if __name__ == "__main__":
                             surface.point_cache.use_disk_cache = False
                             print(f"  - Disabled cache for {obj.name} - {surface.name}")
     
-    blend_path = os.path.abspath("water_simulation.blend")
+    # Save to output file
+    blend_path = os.path.abspath(args.output)
     bpy.ops.wm.save_as_mainfile(filepath=blend_path)
-    print("✅ Saved to water_simulation.blend")
+    print(f"✅ Saved to {args.output}")
     
     # Clean up blendcache folder (Blender creates it despite use_disk_cache=False)
     # This is a known Blender bug where the setting reverts to True on save
     import shutil
-    cache_folder = os.path.abspath("blendcache_water_simulation")
+    # Extract filename without extension for cache folder name
+    cache_name = os.path.splitext(os.path.basename(args.output))[0]
+    cache_folder = os.path.abspath(f"blendcache_{cache_name}")
     if os.path.exists(cache_folder):
         shutil.rmtree(cache_folder)
         print(f"🗑️  Removed cache folder: {cache_folder}")
+

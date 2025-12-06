@@ -10,7 +10,11 @@ import math
 import random
 from mathutils import Vector, Color
 
-from . import viewport
+# Import viewport from utils module (parent directory)
+import sys
+import os
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+from utils import viewport
 
 
 def sample_mesh_surface_points(obj, num_points=50, seed=None):

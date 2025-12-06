@@ -144,4 +144,39 @@ def create_bucket_container(z_bottom, z_surface, radius, wall_thickness=0.2):
     
     create_seabed_material(container)
     
+    create_seabed_material(container)
+    
     return container
+
+def apply_thickness(object, thickness=0.5, offset=-1.0):
+    """
+    Adds a Solidify modifier to the object to give it visual thickness.
+    """
+    mod = object.modifiers.new(name="SolidifyVisual", type='SOLIDIFY')
+    mod.thickness = thickness
+    mod.offset = offset
+    return mod
+
+def create_ground_cutter(terrain_obj, thickness=10.0, offset=-1.0):
+    """
+    Creates a duplicate of the terrain, solidified massively, to use as a Boolean Cutter.
+    Returns the cutter object (hidden by default).
+    """
+    # Duplicate
+    bpy.ops.object.select_all(action='DESELECT')
+    terrain_obj.select_set(True)
+    bpy.context.view_layer.objects.active = terrain_obj
+    bpy.ops.object.duplicate()
+    cutter = bpy.context.active_object
+    cutter.name = f"{terrain_obj.name}_Cutter"
+    
+    # Solidify
+    mod = cutter.modifiers.new(name="SolidifyCutter", type='SOLIDIFY')
+    mod.thickness = thickness
+    mod.offset = offset
+    
+    # Hide
+    cutter.hide_render = True
+    cutter.hide_viewport = True
+    
+    return cutter

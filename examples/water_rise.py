@@ -7,7 +7,8 @@ import argparse
 # Add parent directory to path to import foundation
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from foundation import physics, water, ground, objects, materials, lighting, point_tracking
+from foundation import physics, water, ground, objects, materials, lighting
+from annotation import point_tracking
 
 def parse_args():
     """Parse command-line arguments for water rise simulation configuration.

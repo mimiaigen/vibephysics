@@ -195,3 +195,136 @@ def setup_dynamic_paint_interaction(water_obj, brush_objs, ripple_strength):
         base_factor = min(current_mass * 4.0, 4.0)
         settings.wave_factor = base_factor * ripple_strength
         settings.wave_clamp = 5.0 * max(1.0, ripple_strength)
+
+def setup_custom_water_interaction(water_obj, interaction_groups):
+    """
+    Setup water interactions with specific settings for different groups.
+    interaction_groups should be a list of dictionaries:
+    [
+        {
+            'objects': [obj1, obj2],
+            'paint_distance': 0.5,
+            'wave_factor_scale': 1.5,
+            'wave_clamp': 10.0
+        },
+        ...
+    ]
+    """
+    # 1. Ensure Canvas
+    bpy.context.view_layer.objects.active = water_obj
+    if not any(m.type == 'DYNAMIC_PAINT' for m in water_obj.modifiers):
+        bpy.ops.object.modifier_add(type='DYNAMIC_PAINT')
+        
+    canvas_mod = next((m for m in water_obj.modifiers if m.type == 'DYNAMIC_PAINT'), None)
+    if canvas_mod:
+        if canvas_mod.ui_type != 'CANVAS':
+            canvas_mod.ui_type = 'CANVAS'
+            # Force update if needed, though usually ui_type set is enough for properties, 
+            # operator might be needed for internal data init
+            try:
+                bpy.ops.dpaint.type_toggle(type='CANVAS')
+            except:
+                pass
+            
+        # Ensure surface exists
+        if canvas_mod.canvas_settings and not canvas_mod.canvas_settings.canvas_surfaces:
+            bpy.ops.dpaint.output_toggle(output='A')
+            
+        if canvas_mod.canvas_settings and canvas_mod.canvas_settings.canvas_surfaces:
+            surface = canvas_mod.canvas_settings.canvas_surfaces[-1]
+            
+            if surface.point_cache:
+                surface.point_cache.use_disk_cache = False
+                surface.point_cache.use_library_path = False
+            
+            # Verify basic settings are reasonable (though they might be set by caller previously)
+            if surface.surface_type != 'WAVE':
+                surface.surface_type = 'WAVE'
+                surface.wave_timescale = 1.0
+                surface.wave_speed = 2.0
+                surface.wave_damping = 0.04
+                surface.wave_spring = 0.3
+                surface.wave_smoothness = 1.0
+                surface.use_wave_open_border = True
+        else:
+            print("Warning: Could not initialize Dynamic Paint Canvas settings.")
+
+    # 2. Setup Brushes
+    for group in interaction_groups:
+        objects = group.get('objects', [])
+        paint_dist = group.get('paint_distance', 0.25)
+        wave_scale = group.get('wave_factor_scale', 1.0)
+        clamp = group.get('wave_clamp', 5.0)
+        
+        for obj in objects:
+            bpy.context.view_layer.objects.active = obj
+            
+            # Remove existing if any (to reset)
+            # (Optional: might want to keep? But for now let's ensure clean state)
+            
+            if not any(m.type == 'DYNAMIC_PAINT' for m in obj.modifiers):
+                bpy.ops.object.modifier_add(type='DYNAMIC_PAINT')
+                
+            brush_mod = next((m for m in obj.modifiers if m.type == 'DYNAMIC_PAINT'), None)
+            if brush_mod:
+                brush_mod.ui_type = 'BRUSH'
+                if not brush_mod.brush_settings: # Toggle type if needed
+                    bpy.ops.dpaint.type_toggle(type='BRUSH')
+                
+                settings = brush_mod.brush_settings
+                settings.paint_source = 'VOLUME_DISTANCE'
+                settings.paint_distance = paint_dist
+                
+                # Mass-based factor
+                current_mass = 1.0
+                if obj.rigid_body:
+                    current_mass = obj.rigid_body.mass
+                
+                # Base logic: roughly mass * 4
+                base_strength = min(current_mass * 4.0, 4.0)
+                
+                settings.wave_factor = base_strength * wave_scale
+                settings.wave_clamp = clamp
+
+def create_puddle_water(z_level, size, ground_cutter_obj, color=None):
+    """
+    Creates a water plane that is cut by the ground_cutter to form puddles.
+    """
+    # Create plane
+    bpy.ops.mesh.primitive_plane_add(size=size, location=(0, 0, z_level))
+    water = bpy.context.active_object
+    water.name = "Water_Puddles"
+    
+    # Subdivide for ripples
+    bpy.ops.object.mode_set(mode='EDIT')
+    bpy.ops.mesh.subdivide(number_cuts=100)
+    bpy.ops.object.mode_set(mode='OBJECT')
+    
+    # Boolean Cut
+    if ground_cutter_obj:
+        mod_bool = water.modifiers.new(name="CutTerrain", type='BOOLEAN')
+        mod_bool.object = ground_cutter_obj
+        mod_bool.operation = 'DIFFERENCE'
+        
+        # Apply strict solver if needed, or stick to default (Exact in new Blender)
+        
+        # Apply
+        bpy.context.view_layer.objects.active = water
+        bpy.ops.object.modifier_apply(modifier="CutTerrain")
+    
+    # Visuals: Ripples (Displacement)
+    disp = water.modifiers.new(name="Ripples", type='DISPLACE')
+    tex = bpy.data.textures.new(name="WaterNoise", type='CLOUDS')
+    tex.noise_scale = 0.2
+    tex.noise_depth = 1
+    disp.texture = tex
+    disp.strength = 0.05
+    
+    bpy.ops.object.shade_smooth()
+    
+    # Subsurf
+    sub = water.modifiers.new(name="Subsurf", type='SUBSURF')
+    sub.levels = 1
+    sub.render_levels = 2
+    
+    return water

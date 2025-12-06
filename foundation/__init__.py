@@ -1,12 +1,25 @@
-# Foundation Module
-# Organized by functionality
+"""
+Foundation Module
 
-from . import physics        # Core physics: rigid body world, force fields
-from . import ground         # Terrain: seabed, uneven ground, containers
-from . import water          # Water: visual water, dynamic paint ripples
-from . import objects        # Floating objects: make any mesh floatable
-from . import materials      # Materials: water, ground, object shaders
-from . import lighting       # Lighting and camera setup
-from . import robot          # Robot character and procedural animation
-from . import viewport       # Viewport management: dual viewport, view sync
-from . import point_tracking # Point cloud tracking visualization
+Core physics simulation and scene setup utilities for Blender.
+This module provides the building blocks for creating physics-based
+simulations with water, ground, objects, and materials.
+
+Modules:
+- physics: Rigid body physics and force fields
+- water: Water surface creation and dynamics
+- ground: Terrain and seabed generation
+- objects: Object creation and scattering
+- materials: Material creation for various surfaces
+- lighting: Lighting and camera setup
+- robot: Robot loading and animation utilities
+"""
+
+# Import all submodules for convenient access
+from . import physics
+from . import water
+from . import ground
+from . import objects
+from . import materials
+from . import lighting
+from . import robot

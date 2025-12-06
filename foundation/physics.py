@@ -71,3 +71,21 @@ def create_underwater_currents(z_bottom, z_surface, strength, turbulence_scale, 
     if hide:
         brownian.hide_set(True)
     brownian.hide_render = True
+
+def setup_ground_physics(ground_object, friction=0.9, restitution=0.1):
+    """
+    Sets up rigid body physics for a ground object.
+    """
+    bpy.context.view_layer.objects.active = ground_object
+    try:
+        if not ground_object.rigid_body:
+            bpy.ops.rigidbody.object_add(type='PASSIVE')
+        
+        grb = ground_object.rigid_body
+        grb.type = 'PASSIVE'
+        grb.friction = friction
+        grb.restitution = restitution
+        grb.collision_shape = 'MESH'
+        grb.mesh_source = 'FINAL'
+    except Exception as e:
+        print(f"Physics setup warning: {e}")

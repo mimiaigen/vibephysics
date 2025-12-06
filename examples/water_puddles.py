@@ -8,7 +8,8 @@ import random
 # Add parent directory to path to import foundation
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from foundation import physics, water, ground, objects, materials, lighting, point_tracking
+from foundation import physics, water, ground, objects, materials, lighting
+from annotation import point_tracking
 
 def parse_args():
     """Parse command-line arguments for water puddles simulation."""
@@ -107,80 +108,31 @@ def run_simulation_setup(args):
         noise_scale=2.0, 
         strength=strength
     )
-    # 2a. Prepare Ground for Boolean (Duplicate)
-    # We need a solid block to cut the water, but we want the visual ground to be thinner/cleaner.
+    # 2a. Prepare Ground for Boolean (Solidify for cutting)
+    ground_cutter = ground.create_ground_cutter(terrain, thickness=10.0, offset=-1.0)
     
-    bpy.ops.object.select_all(action='DESELECT')
-    terrain.select_set(True)
-    bpy.context.view_layer.objects.active = terrain
-    bpy.ops.object.duplicate()
-    ground_cutter = bpy.context.active_object
-    ground_cutter.name = "Ground_Cutter"
-    
-    # Solidify the CUTTER downwards massively
-    mod_solid = ground_cutter.modifiers.new(name="SolidifyCutter", type='SOLIDIFY')
-    mod_solid.thickness = 10.0 
-    mod_solid.offset = -1.0 
-    
-    # Hide cutter
-    ground_cutter.hide_render = True
-    ground_cutter.hide_viewport = True
-    
-    # Visual Ground: Give it a small thickness so it's not a paper plane
-    mod_solid_vis = terrain.modifiers.new(name="SolidifyVisual", type='SOLIDIFY')
-    mod_solid_vis.thickness = 0.5 # Much thinner
-    mod_solid_vis.offset = -1.0
+    # Visual Ground: Give it a small thickness
+    ground.apply_thickness(terrain, thickness=0.5, offset=-1.0)
     
     materials.create_mud_material(terrain)
     
     # 3. Water Surface (Static Puddles)
     # We manually create a high-res plane with Noise Displacement to act as "Water"
-    # This avoids the "Ocean Grid" look and gives us independent-looking surface noise.
     
     # Calculate water level relative to ground variation
     z_water_level = args.z_ground - (strength * 0.15)
     
-    # Make water plane slightly smaller than terrain to avoid boundary artifacts/z-fighting
-    # at the square edges of the simulation area.
+    # Make water plane slightly smaller than terrain
     water_size = args.terrain_size * 0.95 
     
-    bpy.ops.mesh.primitive_plane_add(size=water_size, location=(0, 0, z_water_level))
-    water_visual = bpy.context.active_object
-    water_visual.name = "Water_Visual"
-    
-    # Subdivide heavily for ripples
-    bpy.ops.object.mode_set(mode='EDIT')
-    bpy.ops.mesh.subdivide(number_cuts=100) 
-    bpy.ops.object.mode_set(mode='OBJECT')
-    
-    # BOOLEAN CUT: Make independent puddles using the CUTTER
-    mod_bool = water_visual.modifiers.new(name="CutTerrain", type='BOOLEAN')
-    mod_bool.object = ground_cutter
-    mod_bool.operation = 'DIFFERENCE'
-    # mod_bool.solver = 'FAST' # Defaulting to EXACT
-    
-    # Apply Boolean to bake the geometry
-    bpy.context.view_layer.objects.active = water_visual
-    bpy.ops.object.modifier_apply(modifier="CutTerrain")
+    water_visual = water.create_puddle_water(
+        z_level=z_water_level, 
+        size=water_size, 
+        ground_cutter_obj=ground_cutter
+    )
     
     # Cleanup Cutter
     bpy.data.objects.remove(ground_cutter, do_unlink=True)
-
-    
-    # Add Noise Displacement (Static Ripples)
-    disp = water_visual.modifiers.new(name="Ripples", type='DISPLACE')
-    tex = bpy.data.textures.new(name="WaterNoise", type='CLOUDS')
-    tex.noise_scale = 0.2 # Small scale for ripples
-    tex.noise_depth = 1
-    disp.texture = tex
-    disp.strength = 0.05 # Very subtle height variation
-    
-    bpy.ops.object.shade_smooth()
-    
-    # Add Subsurf for extra smoothness
-    sub = water_visual.modifiers.new(name="Subsurf", type='SUBSURF')
-    sub.levels = 1
-    sub.render_levels = 2
     
     materials.create_water_material(water_visual, color=tuple(args.water_color))
     

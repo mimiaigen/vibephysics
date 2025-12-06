@@ -7,10 +7,10 @@ name = "vibephysics"
 version = "0.1.0"
 description = "Physics simulation and annotation tools for Blender"
 readme = "README.md"
-license = {text = "MIT"}
-requires-python = ">=3.9"
+license = {text = "AGPL-3.0"}
+requires-python = ">=3.11"
 authors = [
-    {name = "Your Name", email = "your.email@example.com"}
+    {name = "tsunyi", email = "tsunyi@mimiaigen.com"}
 ]
 keywords = [
     "blender",
@@ -25,11 +25,9 @@ classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
     "Intended Audience :: Science/Research",
-    "License :: OSI Approved :: MIT License",
+    "License :: OSI Approved :: GNU Affero General Public License v3",
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.9",
-    "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Topic :: Multimedia :: Graphics :: 3D Modeling",
     "Topic :: Scientific/Engineering :: Visualization",

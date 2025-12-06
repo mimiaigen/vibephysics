@@ -1,6 +1,6 @@
 # VibePhysics
 
-A Blender physics simulation framework for creating realistic water dynamics, robot animations, and comprehensive annotation tools.
+A Blender physics simulation framework for creating realistic robot animations, rigid body physics, water dynamics, and comprehensive annotation (point cloud track, bounding box, motion trails, ...) tools.
 
 ## Requirements
 
@@ -111,48 +111,6 @@ python examples/basics/demo_point_tracking.py
 python examples/basics/demo_all_annotations.py
 ```
 
-## Annotation System
-
-VibePhysics includes a unified annotation system for visualizing simulations:
-
-```python
-from vibephysics.annotation import AnnotationManager
-
-mgr = AnnotationManager()
-
-# Add bounding boxes
-mgr.add_bbox(cube, color=(1.0, 0.0, 0.0, 1.0))
-
-# Add motion trails
-mgr.add_motion_trail(sphere, color=(0.0, 1.0, 0.0, 1.0))
-
-# Add point tracking
-mgr.add_point_tracking([cube, sphere], points_per_object=50)
-
-# Finalize (registers handlers, creates scripts)
-mgr.finalize()
-```
-
-## Foundation Modules
-
-### `physics.py` - Core Physics
-- `setup_rigid_body_world()` - Initialize Bullet physics
-- `create_buoyancy_field()` - Upward force for floating
-- `create_underwater_currents()` - Turbulence forces
-
-### `water.py` - Water Visuals
-- `create_flat_surface()` - Flat water plane
-- `setup_robot_water_interaction()` - Ripple effects
-
-### `objects.py` - Objects
-- `create_falling_spheres()` - Physics-enabled spheres
-- `generate_scattered_positions()` - Random non-overlapping positions
-
-### `open_duck.py` - Robot Integration
-- `load_open_duck()` - Load Open Duck robot model
-- `animate_duck_walking()` - Walking animation along path
-- `setup_duck_collision()` - Physics collision setup
-
 ## Shell Scripts
 
 ```bash
@@ -179,4 +137,17 @@ mgr.finalize()
 
 ## License
 
-See LICENSE file.
+**© 2025 MIMI AI LTD, UK. All rights reserved.**
+
+### Academic & Student Use (Free)
+This software is **free to use** for:
+- Students
+- Academic research
+- Educational purposes
+
+### Commercial Use
+For business or enterprise use, please contact: **tsunyi@mimiaigen.com**
+
+
+### Dependency
+We use the [Open Duck blender model](https://github.com/pollen-robotics/Open_Duck_Blender) as demo purpose. We do not own the model. Please refer to the original github repo.

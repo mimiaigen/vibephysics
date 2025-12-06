@@ -69,32 +69,6 @@ vibephysics/
 
 ## Examples
 
-### Water Simulations
-
-```bash
-# Floating objects
-python examples/water/water_float.py --output output/water_float.blend
-
-# Rising water
-python examples/water/water_rise.py --output output/water_rise.blend
-
-# Storm with debris
-python examples/water/storm.py --output output/storm.blend
-
-# Water puddles
-python examples/water/water_puddles.py --output output/water_puddles.blend
-```
-
-### Robot Simulations
-
-```bash
-# Robot walking through puddles
-python examples/robot/robot_walking_water_puddle.py --output output/robot_walk.blend
-
-# Duck following waypoints
-python examples/robot/duck_waypoint_walk.py --waypoint-pattern exploration --output output/duck.blend
-```
-
 ### Annotation Demos
 
 ```bash
@@ -109,6 +83,32 @@ python examples/basics/demo_point_tracking.py
 
 # All annotations combined
 python examples/basics/demo_all_annotations.py
+```
+
+### Robot Simulations
+
+```bash
+# Robot walking through puddles
+python examples/robot/robot_walking_water_puddle.py --output output/duck_walk.blend
+
+# Duck following waypoints
+python examples/robot/duck_waypoint_walk.py --waypoint-pattern exploration --output output/duck.blend
+```
+
+### Water Simulations
+
+```bash
+# Floating objects
+python examples/water/water_float.py --output output/water_float.blend
+
+# Rising water
+python examples/water/water_rise.py --output output/water_rise.blend
+
+# Storm with debris
+python examples/water/storm.py --output output/storm.blend
+
+# Water puddles
+python examples/water/water_puddles.py --output output/water_puddles.blend
 ```
 
 ## Shell Scripts

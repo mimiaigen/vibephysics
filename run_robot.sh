@@ -11,7 +11,7 @@ fi
 mkdir -p output
 
 echo "Running Robot Walking Water Puddle..."
-python examples/robot/robot_walking_water_puddle.py --output output/robot_walk.blend
+python examples/robot/duck_walking_water_puddle.py --output output/robot_walk.blend
 
 echo "Running Duck Waypoint Walk (Exploration)..."
 python examples/robot/duck_waypoint_walk.py --waypoint-pattern exploration --output output/duck_exploration.blend

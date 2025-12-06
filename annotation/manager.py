@@ -240,6 +240,190 @@ class AnnotationManager:
             
         return results
     
+    def annotate_with_config(self, all_objects, center_object=None, config=None,
+                             start_frame=None, end_frame=None, trail_step=2,
+                             points_per_object=30, bbox_colors=None, trail_colors=None):
+        """
+        Apply annotations using a TrackingConfig for fine-grained control.
+        
+        This method gives you control over what objects to track for each
+        annotation type (bbox, trail, point tracking).
+        
+        Args:
+            all_objects: List of all objects that could be tracked
+            center_object: The main/center object (e.g., armature for robots)
+            config: TrackingConfig instance (defaults to robot_default)
+            start_frame: Start frame for trails (None = scene start)
+            end_frame: End frame for trails (None = scene end)
+            trail_step: Frame step for trail sampling
+            points_per_object: Points per object for tracking
+            bbox_colors: Colors for bboxes (auto if None)
+            trail_colors: Colors for trails (auto if None)
+            
+        Returns:
+            Dict with 'bboxes', 'trails', 'point_cloud' keys
+            
+        Example:
+            from annotation import AnnotationManager, TrackingConfig, TrackingTarget
+            
+            mgr = AnnotationManager()
+            
+            # Track bbox for all, trail for center only, points for all
+            config = TrackingConfig(
+                bbox=TrackingTarget.ALL,
+                trail=TrackingTarget.CENTER,
+                points=TrackingTarget.ALL
+            )
+            
+            mgr.annotate_with_config(
+                all_objects=robot_parts + debris,
+                center_object=armature,
+                config=config
+            )
+        """
+        # Default to robot-friendly config
+        if config is None:
+            config = base.TrackingConfig.robot_default()
+        
+        results = {
+            'bboxes': [],
+            'trails': [],
+            'point_cloud': None
+        }
+        
+        # Get objects for each annotation type
+        bbox_objects = config.get_bbox_objects(all_objects, center_object)
+        trail_objects = config.get_trail_objects(all_objects, center_object)
+        points_objects = config.get_points_objects(all_objects, center_object)
+        
+        # Apply bounding boxes
+        if bbox_objects:
+            results['bboxes'] = self.add_bboxes(bbox_objects, colors=bbox_colors)
+        
+        # Apply motion trails
+        if trail_objects:
+            results['trails'] = self.add_motion_trails(
+                trail_objects,
+                start_frame=start_frame,
+                end_frame=end_frame,
+                step=trail_step,
+                colors=trail_colors
+            )
+        
+        # Apply point tracking
+        if points_objects:
+            # Filter to mesh objects only
+            mesh_objects = [obj for obj in points_objects if obj.type == 'MESH']
+            if mesh_objects:
+                results['point_cloud'] = self.add_point_tracking(
+                    mesh_objects,
+                    points_per_object=points_per_object
+                )
+        
+        return results
+    
+    def annotate_robot(self, robot_parts, center_object, debris_objects=None,
+                       bbox_robot=True, bbox_debris=True,
+                       trail_center=True, trail_debris=False,
+                       point_tracking=True,
+                       start_frame=None, end_frame=None, trail_step=2,
+                       points_per_object=30):
+        """
+        Convenience method for annotating robot simulations.
+        
+        Provides explicit control over what to track for robots vs debris.
+        
+        Args:
+            robot_parts: List of robot mesh parts
+            center_object: Robot center/armature for trail tracking
+            debris_objects: Optional list of debris/environment objects
+            bbox_robot: Add bbox to robot parts
+            bbox_debris: Add bbox to debris objects
+            trail_center: Add trail to center object
+            trail_debris: Add trails to debris objects
+            point_tracking: Add point tracking to all objects
+            start_frame: Start frame for trails
+            end_frame: End frame for trails
+            trail_step: Frame step for trail sampling
+            points_per_object: Points per object for tracking
+            
+        Returns:
+            Dict with 'bboxes', 'trails', 'point_cloud' keys
+        """
+        from mathutils import Color
+        
+        debris_objects = debris_objects or []
+        
+        results = {
+            'bboxes': [],
+            'trails': [],
+            'point_cloud': None
+        }
+        
+        # Bounding boxes
+        if bbox_robot and robot_parts:
+            print(f"  - Adding {len(robot_parts)} robot bboxes...")
+            # Warm colors for robot (orange to yellow)
+            robot_colors = []
+            for i in range(len(robot_parts)):
+                hue = 0.05 + (i / max(len(robot_parts), 1)) * 0.15
+                c = Color()
+                c.hsv = (hue, 0.9, 0.95)
+                robot_colors.append((c.r, c.g, c.b, 1.0))
+            results['bboxes'].extend(self.add_bboxes(robot_parts, colors=robot_colors))
+        
+        if bbox_debris and debris_objects:
+            print(f"  - Adding {len(debris_objects)} debris bboxes...")
+            # Cool colors for debris (cyan to blue)
+            debris_colors = []
+            for i in range(len(debris_objects)):
+                hue = 0.5 + (i / max(len(debris_objects), 1)) * 0.2
+                c = Color()
+                c.hsv = (hue, 0.7, 0.9)
+                debris_colors.append((c.r, c.g, c.b, 1.0))
+            results['bboxes'].extend(self.add_bboxes(debris_objects, colors=debris_colors))
+        
+        # Motion trails
+        if trail_center and center_object:
+            print(f"  - Adding center trail...")
+            trail = self.add_motion_trail(
+                center_object,
+                start_frame=start_frame,
+                end_frame=end_frame,
+                step=trail_step,
+                color=(1.0, 0.8, 0.2, 1.0)  # Golden yellow
+            )
+            if trail:
+                results['trails'].append(trail)
+        
+        if trail_debris and debris_objects:
+            print(f"  - Adding {len(debris_objects)} debris trails...")
+            debris_trails = self.add_motion_trails(
+                debris_objects,
+                start_frame=start_frame,
+                end_frame=end_frame,
+                step=trail_step
+            )
+            results['trails'].extend(debris_trails)
+        
+        # Point tracking
+        if point_tracking:
+            all_mesh_objects = []
+            if robot_parts:
+                all_mesh_objects.extend([p for p in robot_parts if p.type == 'MESH'])
+            if debris_objects:
+                all_mesh_objects.extend([d for d in debris_objects if d.type == 'MESH'])
+            
+            if all_mesh_objects:
+                print(f"  - Adding point tracking for {len(all_mesh_objects)} objects...")
+                pts_per = max(5, points_per_object // len(all_mesh_objects))
+                results['point_cloud'] = self.add_point_tracking(
+                    all_mesh_objects,
+                    points_per_object=pts_per
+                )
+        
+        return results
+    
     # =========================================================================
     # Handler & Script Registration
     # =========================================================================

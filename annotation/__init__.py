@@ -35,6 +35,9 @@ from .base import (
     BaseAnnotation,
     AnnotationType,
     create_annotation,
+    # Tracking configuration
+    TrackingTarget,
+    TrackingConfig,
 )
 
 # Individual annotation modules
@@ -95,6 +98,10 @@ __all__ = [
     'BaseAnnotation',
     'AnnotationType',
     'create_annotation',
+    
+    # Tracking configuration
+    'TrackingTarget',
+    'TrackingConfig',
     
     # BBox
     'create_bbox_annotation',

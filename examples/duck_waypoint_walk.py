@@ -2,22 +2,21 @@
 Duck Waypoint Walk
 
 Demonstrates the Open Duck robot walking through custom waypoints
-in a smooth, curvy path. Shows off the trajectory.create_waypoint_path()
-function with the duck's waddle animation.
+in a smooth, curvy path. Features full annotation support 
+(bounding boxes, motion trails, point tracking).
 """
 
 import sys
 import os
 import bpy
 import argparse
-from mathutils import Vector
+from mathutils import Vector, Color
 
 # Add parent directory to path
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from foundation import scene, physics, ground, water, open_duck, objects, materials, lighting, trajectory
-from annotation import point_tracking
-from utils import viewport
+from annotation import AnnotationManager, point_tracking, viewport
 
 
 def parse_args():
@@ -62,11 +61,22 @@ def parse_args():
     visual_group.add_argument('--show-waypoints', action='store_true',
                              help='Show waypoint markers in scene')
     
-    tracking_group = parser.add_argument_group('Point Tracking')
-    tracking_group.add_argument('--no-point-tracking', action='store_true',
-                               help='Disable point tracking visualization')
-    tracking_group.add_argument('--points-per-object', type=int, default=20,
-                               help='Number of tracked points')
+    # Annotation Settings
+    annotation_group = parser.add_argument_group('Annotation Settings')
+    annotation_group.add_argument('--no-annotations', action='store_true',
+                                 help='Disable all annotations')
+    annotation_group.add_argument('--no-bbox', action='store_true',
+                                 help='Disable bounding box annotations')
+    annotation_group.add_argument('--no-trail', action='store_true',
+                                 help='Disable motion trail annotations')
+    annotation_group.add_argument('--trail-parts', action='store_true',
+                                 help='Add trails to robot parts (feet) in addition to center')
+    annotation_group.add_argument('--no-point-tracking', action='store_true',
+                                 help='Disable point tracking visualization')
+    annotation_group.add_argument('--points-per-object', type=int, default=30,
+                                 help='Number of tracked points per object')
+    annotation_group.add_argument('--trail-step', type=int, default=2,
+                                 help='Frame step for motion trail sampling')
     
     output_group = parser.add_argument_group('Output Settings')
     output_group.add_argument('--output', type=str, default='duck_waypoint_walk.blend',
@@ -167,12 +177,10 @@ def create_waypoint_pattern(pattern, scale=8.0):
     return waypoints
 
 
-# Waypoint marker creation moved to foundation/objects.py
-# Use: objects.create_waypoint_markers(waypoints, z_height)
-
-
 def run_simulation_setup(args):
-    print("🦆 Duck Waypoint Walk Simulation")
+    print("=" * 60)
+    print("  🦆 Duck Waypoint Walk Simulation")
+    print("=" * 60)
     print(f"   Pattern: {args.waypoint_pattern}")
     print(f"   Frames: {args.start_frame} - {args.end_frame}")
     
@@ -212,7 +220,7 @@ def run_simulation_setup(args):
         objects.create_waypoint_markers(waypoints, z_height=0.5, size=0.3)
     
     # 5. Create smooth path through waypoints
-    print(f"  - creating path through {len(waypoints)} waypoints...")
+    print(f"\n  - Creating path through {len(waypoints)} waypoints...")
     path = trajectory.create_waypoint_path(
         waypoints=waypoints,
         closed=True,  # Loop back to start
@@ -221,7 +229,7 @@ def run_simulation_setup(args):
     )
     
     # 6. Load and setup Open Duck
-    print(f"  - loading Open Duck robot...")
+    print(f"  - Loading Open Duck robot...")
     armature, robot_parts = open_duck.load_open_duck(
         transform={'location': (0, 0, 0), 'rotation': (0, 0, 0), 'scale': 0.3}
     )
@@ -231,7 +239,7 @@ def run_simulation_setup(args):
         return
     
     # 7. Animate duck walking along waypoint path
-    print(f"  - animating duck walking...")
+    print(f"  - Animating duck walking...")
     open_duck.animate_duck_walking(
         armature=armature,
         path_curve=path,
@@ -252,14 +260,40 @@ def run_simulation_setup(args):
         ripple_strength=12.0
     )
     
-    # 10. Point Tracking Visualization
-    # Creates dual viewport: Left=scene, Right=point cloud tracking
-    if not args.no_point_tracking and robot_parts:
-        point_tracking.setup_point_tracking_visualization(
-            tracked_objects=robot_parts,
-            points_per_object=max(5, args.points_per_object // len(robot_parts)) if robot_parts else 5,
-            setup_viewport=not bpy.app.background
+    # 10. Full Annotation Setup using AnnotationManager
+    # Uses the annotate_robot() method for unified control
+    
+    if not args.no_annotations and robot_parts:
+        print("\n📊 Setting up Annotations...")
+        
+        mgr = AnnotationManager(collection_name="AnnotationViz")
+        
+        # Determine what to track based on args
+        bbox_robot = not args.no_bbox
+        trail_center = not args.no_trail
+        trail_parts = args.trail_parts  # Disabled by default, enable with --trail-parts
+        point_tracking = not args.no_point_tracking
+        
+        # Use the unified annotate_robot method
+        # Duck has no debris, so we just pass robot parts
+        mgr.annotate_robot(
+            robot_parts=robot_parts,
+            center_object=armature,
+            debris_objects=None,
+            bbox_robot=bbox_robot,
+            bbox_debris=False,
+            trail_center=trail_center,
+            trail_debris=trail_parts,  # Reuse trail_debris for robot parts trails
+            point_tracking=point_tracking,
+            start_frame=args.start_frame,
+            end_frame=args.end_frame,
+            trail_step=args.trail_step,
+            points_per_object=args.points_per_object
         )
+        
+        # Finalize - register handlers and create scripts
+        mgr.finalize(setup_viewport=False)
+        viewport.create_viewport_restore_script("AnnotationViz")
     
     # 11. Lighting and Camera
     lighting.setup_lighting_and_camera(
@@ -282,10 +316,12 @@ def run_simulation_setup(args):
         lighting.setup_camera_tracking(armature, track_axis='TRACK_NEGATIVE_Z', up_axis='UP_Y')
     
     # 12. Bake physics
-    print("  - baking physics...")
+    print("\n  - Baking physics...")
     physics.bake_all()
     
+    print("\n" + "=" * 60)
     print("✅ Duck Waypoint Walk Complete!")
+    print("=" * 60)
     print(f"   Waypoint pattern: {args.waypoint_pattern}")
     print(f"   Total waypoints: {len(waypoints)}")
     print(f"   Animation: {args.end_frame} frames")

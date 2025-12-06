@@ -1,3 +1,10 @@
+"""
+Robot Walking Water Puddle Simulation
+
+Open Duck robot walking through uneven terrain with water puddles.
+Features full annotation support (bounding boxes, motion trails, point tracking).
+"""
+
 import sys
 import os
 import bpy
@@ -10,8 +17,8 @@ from mathutils import Vector, Matrix, Euler
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from foundation import scene, physics, water, ground, objects, materials, lighting, open_duck
-from annotation import point_tracking
-from utils import viewport
+from annotation import AnnotationManager, point_tracking, viewport
+
 
 def parse_args():
     """Parse command-line arguments."""
@@ -50,11 +57,26 @@ def parse_args():
     camera_group.add_argument('--resolution-y', type=int, default=1080,
                              help='Render resolution height')
     
-    tracking_group = parser.add_argument_group('Point Tracking Settings')
-    tracking_group.add_argument('--no-point-tracking', action='store_true',
-                               help='Disable point cloud tracking visualization')
-    tracking_group.add_argument('--points-per-object', type=int, default=100,
-                               help='Number of surface sample points per object')
+    # Annotation Settings
+    annotation_group = parser.add_argument_group('Annotation Settings')
+    annotation_group.add_argument('--no-annotations', action='store_true',
+                                 help='Disable all annotations')
+    annotation_group.add_argument('--no-bbox', action='store_true',
+                                 help='Disable bounding box annotations')
+    annotation_group.add_argument('--no-bbox-robot', action='store_true',
+                                 help='Disable bounding boxes on robot parts')
+    annotation_group.add_argument('--no-bbox-debris', action='store_true',
+                                 help='Disable bounding boxes on debris')
+    annotation_group.add_argument('--no-trail', action='store_true',
+                                 help='Disable motion trail annotations')
+    annotation_group.add_argument('--trail-debris', action='store_true',
+                                 help='Add trails to debris objects (disabled by default)')
+    annotation_group.add_argument('--no-point-tracking', action='store_true',
+                                 help='Disable point cloud tracking visualization')
+    annotation_group.add_argument('--points-per-object', type=int, default=50,
+                                 help='Number of surface sample points per object')
+    annotation_group.add_argument('--trail-step', type=int, default=3,
+                                 help='Frame step for motion trail sampling')
     
     output_group = parser.add_argument_group('Output Settings')
     output_group.add_argument('--output', type=str, default='robot_walk.blend',
@@ -68,8 +90,11 @@ def parse_args():
     
     return parser.parse_args(argv)
 
+
 def run_simulation_setup(args):
-    print("Initializing Robot Walking Simulation...")
+    print("=" * 60)
+    print("  Robot Walking Water Puddle Simulation")
+    print("=" * 60)
     
     # 1. Universal scene initialization
     scene.init_simulation(
@@ -103,8 +128,6 @@ def run_simulation_setup(args):
         subdivisions=200
     )
     materials.create_water_material(water_visual, color=tuple(args.water_color))
-    
-    # Note: No buoyancy field - balls just fall and create ripples, no floating needed
     
     # 3a. Add 25 falling balls
     z_spawn = z_water_level + 3.0
@@ -142,15 +165,40 @@ def run_simulation_setup(args):
         ripple_strength=15.0
     )
     
-    # 9. Point Tracking Visualization
-    # Creates dual viewport: Left=scene, Right=point cloud tracking
-    tracked_objects = robot_parts + debris_objects
-    if not args.no_point_tracking and tracked_objects:
-        point_tracking.setup_point_tracking_visualization(
-            tracked_objects=tracked_objects,
-            points_per_object=max(5, args.points_per_object // len(tracked_objects)) if tracked_objects else 10,
-            setup_viewport=not bpy.app.background
+    # 9. Full Annotation Setup using AnnotationManager
+    # Uses the new annotate_robot() method for fine-grained control
+    
+    if not args.no_annotations and (robot_parts or debris_objects):
+        print("\n📊 Setting up Annotations...")
+        
+        mgr = AnnotationManager(collection_name="AnnotationViz")
+        
+        # Determine what to track based on args
+        bbox_robot = not args.no_bbox and not args.no_bbox_robot
+        bbox_debris = not args.no_bbox and not args.no_bbox_debris
+        trail_center = not args.no_trail
+        trail_debris = args.trail_debris  # Disabled by default, enable with --trail-debris
+        point_tracking = not args.no_point_tracking
+        
+        # Use the unified annotate_robot method
+        mgr.annotate_robot(
+            robot_parts=robot_parts,
+            center_object=armature,
+            debris_objects=debris_objects,
+            bbox_robot=bbox_robot,
+            bbox_debris=bbox_debris,
+            trail_center=trail_center,
+            trail_debris=trail_debris,
+            point_tracking=point_tracking,
+            start_frame=args.start_frame,
+            end_frame=args.end_frame,
+            trail_step=args.trail_step,
+            points_per_object=args.points_per_object
         )
+        
+        # Finalize - register handlers and create scripts
+        mgr.finalize(setup_viewport=False)
+        viewport.create_viewport_restore_script("AnnotationViz")
     
     # 10. Lighting and Camera
     lighting.setup_lighting_and_camera(
@@ -172,10 +220,13 @@ def run_simulation_setup(args):
     lighting.setup_camera_tracking(armature)
     
     # Bake physics
-    print("  - baking physics...")
+    print("\n  - Baking physics...")
     physics.bake_all()
 
-    print("✅ Duck Walking Simulation Ready!")
+    print("\n" + "=" * 60)
+    print("✅ Robot Walking Simulation Complete!")
+    print("=" * 60)
+
 
 if __name__ == "__main__":
     # Parse command-line arguments
@@ -187,4 +238,4 @@ if __name__ == "__main__":
     # Save to output file
     blend_path = os.path.abspath(args.output)
     bpy.ops.wm.save_as_mainfile(filepath=blend_path)
-    print(f"✅ Saved to {args.output}")
+    print(f"💾 Saved to {args.output}")

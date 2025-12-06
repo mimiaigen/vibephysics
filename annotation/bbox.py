@@ -133,7 +133,7 @@ def create_bbox_annotation(target_obj, color=(1.0, 0.6, 0.0, 1.0), thickness=2.0
     """
     if not target_obj:
         return None
-    
+        
     # Ensure collection exists
     collection = base.ensure_collection(collection_name)
         
@@ -176,7 +176,7 @@ def update_bbox(bbox_obj, depsgraph=None):
     
     if len(bbox_obj.data.vertices) != 8:
         return
-        
+    
     for i, corner in enumerate(corners):
         if i < len(bbox_obj.data.vertices):
             bbox_obj.data.vertices[i].co = corner
@@ -207,10 +207,10 @@ def register():
     # Also ensure the embedded script is registered to run on load
     if "bbox_driver.py" in bpy.data.texts:
         bpy.data.texts["bbox_driver.py"].use_module = True
-
+            
     def bbox_frame_handler(scene):
         update_all_bboxes(scene)
-    
+        
     base.register_frame_handler(bbox_frame_handler, "bbox_frame_handler")
     print("✅ BBox Annotation Handler Registered")
 

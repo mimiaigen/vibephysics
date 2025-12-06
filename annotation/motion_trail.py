@@ -42,7 +42,7 @@ def create_motion_trail(target_obj, start_frame=None, end_frame=None, step=1,
         start_frame = scene.frame_start
     if end_frame is None:
         end_frame = scene.frame_end
-    
+        
     # Ensure collection exists
     collection = base.ensure_collection(collection_name)
         

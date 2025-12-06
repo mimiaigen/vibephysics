@@ -344,6 +344,140 @@ class BaseAnnotation(ABC):
 
 
 # =============================================================================
+# Tracking Target Configuration
+# =============================================================================
+
+class TrackingTarget:
+    """
+    Configuration for what objects to track.
+    
+    Use these constants with AnnotationManager to control tracking:
+    - NONE: Don't track anything
+    - CENTER: Track only the center/main object (e.g., armature)
+    - ALL: Track all objects
+    - CUSTOM: Use a custom filter function
+    """
+    NONE = "none"
+    CENTER = "center"
+    ALL = "all"
+    CUSTOM = "custom"
+
+
+class TrackingConfig:
+    """
+    Configuration class for controlling what to track for each annotation type.
+    
+    Usage:
+        config = TrackingConfig(
+            bbox=TrackingTarget.ALL,
+            trail=TrackingTarget.CENTER,
+            points=TrackingTarget.ALL
+        )
+        
+        # Or with custom filters:
+        config = TrackingConfig(
+            bbox=TrackingTarget.CUSTOM,
+            bbox_filter=lambda obj: 'Robot' in obj.name
+        )
+    """
+    
+    def __init__(self, 
+                 bbox=TrackingTarget.ALL,
+                 trail=TrackingTarget.CENTER,
+                 points=TrackingTarget.ALL,
+                 bbox_filter=None,
+                 trail_filter=None,
+                 points_filter=None):
+        """
+        Initialize tracking configuration.
+        
+        Args:
+            bbox: TrackingTarget for bounding boxes
+            trail: TrackingTarget for motion trails
+            points: TrackingTarget for point tracking
+            bbox_filter: Custom filter function for bbox (obj -> bool)
+            trail_filter: Custom filter function for trails (obj -> bool)
+            points_filter: Custom filter function for points (obj -> bool)
+        """
+        self.bbox = bbox
+        self.trail = trail
+        self.points = points
+        self.bbox_filter = bbox_filter
+        self.trail_filter = trail_filter
+        self.points_filter = points_filter
+    
+    def get_bbox_objects(self, all_objects, center_object=None):
+        """Get objects to apply bbox to based on config."""
+        return self._filter_objects(
+            all_objects, center_object, 
+            self.bbox, self.bbox_filter
+        )
+    
+    def get_trail_objects(self, all_objects, center_object=None):
+        """Get objects to apply trails to based on config."""
+        return self._filter_objects(
+            all_objects, center_object,
+            self.trail, self.trail_filter
+        )
+    
+    def get_points_objects(self, all_objects, center_object=None):
+        """Get objects to apply point tracking to based on config."""
+        return self._filter_objects(
+            all_objects, center_object,
+            self.points, self.points_filter
+        )
+    
+    def _filter_objects(self, all_objects, center_object, target, custom_filter):
+        """Internal method to filter objects based on target type."""
+        if target == TrackingTarget.NONE:
+            return []
+        elif target == TrackingTarget.CENTER:
+            return [center_object] if center_object else []
+        elif target == TrackingTarget.ALL:
+            return list(all_objects)
+        elif target == TrackingTarget.CUSTOM and custom_filter:
+            return [obj for obj in all_objects if custom_filter(obj)]
+        else:
+            return list(all_objects)
+    
+    @classmethod
+    def all(cls):
+        """Shortcut: Track everything for all annotation types."""
+        return cls(
+            bbox=TrackingTarget.ALL,
+            trail=TrackingTarget.ALL,
+            points=TrackingTarget.ALL
+        )
+    
+    @classmethod
+    def center_only(cls):
+        """Shortcut: Track only center object for all annotation types."""
+        return cls(
+            bbox=TrackingTarget.CENTER,
+            trail=TrackingTarget.CENTER,
+            points=TrackingTarget.CENTER
+        )
+    
+    @classmethod
+    def minimal(cls):
+        """Shortcut: Minimal tracking (center trail, all points, no bbox)."""
+        return cls(
+            bbox=TrackingTarget.NONE,
+            trail=TrackingTarget.CENTER,
+            points=TrackingTarget.ALL
+        )
+    
+    @classmethod
+    def robot_default(cls):
+        """Shortcut: Default for robots (bbox all, trail center only, points all)."""
+        return cls(
+            bbox=TrackingTarget.ALL,
+            trail=TrackingTarget.CENTER,
+            points=TrackingTarget.ALL
+        )
+
+
+# =============================================================================
 # Annotation Factory
 # =============================================================================
 

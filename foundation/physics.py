@@ -89,3 +89,7 @@ def setup_ground_physics(ground_object, friction=0.9, restitution=0.1):
         grb.mesh_source = 'FINAL'
     except Exception as e:
         print(f"Physics setup warning: {e}")
+
+def bake_all():
+    """Bake all physics caches (rigid body, dynamic paint, etc.)."""
+    bpy.ops.ptcache.bake_all(bake=True)

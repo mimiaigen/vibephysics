@@ -9,18 +9,12 @@ import bpy
 import math
 from mathutils import Euler
 
+from . import base
+
 
 def find_layer_collection(layer_collection, collection_name):
     """Recursively find a layer collection by name."""
-    if layer_collection.name == collection_name:
-        return layer_collection
-    
-    for child in layer_collection.children:
-        result = find_layer_collection(child, collection_name)
-        if result:
-            return result
-    
-    return None
+    return base.find_layer_collection(layer_collection, collection_name)
 
 
 def get_view3d_areas(screen):

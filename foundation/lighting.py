@@ -221,3 +221,21 @@ def setup_lighting_and_camera(camera_radius, camera_height, resolution_x, resolu
                  bpy.context.scene.eevee.use_raytracing = True
         except:
             pass
+
+def setup_camera_tracking(target_object, track_axis='TRACK_NEGATIVE_Z', up_axis='UP_Y'):
+    """
+    Make the scene camera track a target object.
+    Hides low-level constraint setup.
+    
+    Args:
+        target_object: Object for camera to track
+        track_axis: Which camera axis points at target
+        up_axis: Which camera axis points up
+    """
+    cam = bpy.context.scene.camera
+    if cam:
+        constraint = cam.constraints.new(type='TRACK_TO')
+        constraint.target = target_object
+        constraint.track_axis = track_axis
+        constraint.up_axis = up_axis
+    return cam

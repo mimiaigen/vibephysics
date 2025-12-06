@@ -8,7 +8,7 @@ import random
 # Add parent directory to path to import foundation
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from foundation import physics, water, ground, objects, materials, lighting
+from foundation import scene, physics, water, ground, objects, materials, lighting
 from annotation import point_tracking
 
 def parse_args():
@@ -81,12 +81,11 @@ def parse_args():
 def run_simulation_setup(args):
     print("Initializing Water Puddles Simulation...")
     
-    # Cleanup
-    bpy.ops.object.select_all(action='SELECT')
-    bpy.ops.object.delete()
-    
-    # 1. Physics Environment
-    physics.setup_rigid_body_world()
+    # 1. Scene initialization
+    scene.init_simulation(
+        start_frame=args.start_frame,
+        end_frame=args.end_frame
+    )
     
     # Create Buoyancy Field (Global, but only effective below water level)
     # Objects on high ground won't be affected because they are physically supported by the mesh
@@ -99,7 +98,6 @@ def run_simulation_setup(args):
     )
     
     # 2. Terrain (Uneven Ground)
-    # Increase strength to create deeper puddles
     strength = args.puddle_depth * 2.0
     
     terrain = ground.create_uneven_ground(
@@ -108,38 +106,23 @@ def run_simulation_setup(args):
         noise_scale=2.0, 
         strength=strength
     )
-    # 2a. Prepare Ground for Boolean (Solidify for cutting)
-    ground_cutter = ground.create_ground_cutter(terrain, thickness=10.0, offset=-1.0)
-    
-    # Visual Ground: Give it a small thickness
     ground.apply_thickness(terrain, thickness=0.5, offset=-1.0)
-    
     materials.create_mud_material(terrain)
     
-    # 3. Water Surface (Static Puddles)
-    # We manually create a high-res plane with Noise Displacement to act as "Water"
-    
-    # Calculate water level relative to ground variation
+    # 3. Water Surface (Puddles with Boolean cutting)
     z_water_level = args.z_ground - (strength * 0.15)
-    
-    # Make water plane slightly smaller than terrain
     water_size = args.terrain_size * 0.95 
     
+    # Create cutter and water (cutter is auto-cleaned by create_puddle_water)
+    ground_cutter = ground.create_ground_cutter(terrain, thickness=10.0, offset=-1.0)
     water_visual = water.create_puddle_water(
         z_level=z_water_level, 
         size=water_size, 
         ground_cutter_obj=ground_cutter
     )
-    
-    # Cleanup Cutter
-    bpy.data.objects.remove(ground_cutter, do_unlink=True)
-    
     materials.create_water_material(water_visual, color=tuple(args.water_color))
     
-    # 4. Scatter Debris (Small objects)
-    debris_objects = []
-    
-    # Spawn them in the air so they fall
+    # 4. Scatter Debris
     z_spawn = z_water_level + 2.0
     
     positions = objects.generate_scattered_positions(
@@ -149,23 +132,12 @@ def run_simulation_setup(args):
         z_pos=z_spawn
     )
     
-    for i, pos in enumerate(positions):
-        # Small randomized objects
-        bpy.ops.mesh.primitive_cube_add(size=random.uniform(0.2, 0.4), location=pos)
-        obj = bpy.context.active_object
-        obj.name = f"Debris_{i}"
-        
-        # Random rotation
-        obj.rotation_euler = (random.random(), random.random(), random.random())
-        
-        # Physics
-        bpy.ops.rigidbody.object_add(type='ACTIVE')
-        obj.rigid_body.mass = 0.2 # Light
-        obj.rigid_body.friction = 0.7
-        
-        # Add material
-        materials.create_sphere_material(obj, i, args.num_debris) # Reuse simple colored material
-        debris_objects.append(obj)
+    debris_objects = objects.create_falling_cubes(
+        positions=positions,
+        size_range=(0.2, 0.4),
+        physics={'mass': 0.2, 'friction': 0.7},
+        num_total=args.num_debris
+    )
 
     # 5. Interactions
     water.setup_dynamic_paint_interaction(
@@ -190,7 +162,8 @@ def run_simulation_setup(args):
         caustic_scale=10.0
     )
     
-    # 7. Point Tracking Visualization (2nd viewport with colored point cloud)
+    # 7. Point Tracking Visualization
+    # Creates dual viewport: Left=scene, Right=point cloud tracking
     if not args.no_point_tracking and debris_objects:
         point_tracking.setup_point_tracking_visualization(
             tracked_objects=debris_objects,
@@ -203,19 +176,13 @@ def run_simulation_setup(args):
         print(f"   - Point Tracking: {args.points_per_object} points per object")
 
 if __name__ == "__main__":
-    try:
-        args = parse_args()
-        run_simulation_setup(args)
-        
-        # Disable cache and save
-        if bpy.context.scene.rigidbody_world and bpy.context.scene.rigidbody_world.point_cache:
-            bpy.context.scene.rigidbody_world.point_cache.use_disk_cache = False
-            
-        blend_path = os.path.abspath(args.output)
-        bpy.ops.wm.save_as_mainfile(filepath=blend_path)
-        print(f"✅ Saved to {args.output}")
-    except Exception as e:
-        print(f"❌ Error: {e}")
-        import traceback
-        traceback.print_exc()
-        sys.exit(1)
+    # Parse command-line arguments
+    args = parse_args()
+    
+    # Run simulation setup
+    run_simulation_setup(args)
+    
+    # Save to output file
+    blend_path = os.path.abspath(args.output)
+    bpy.ops.wm.save_as_mainfile(filepath=blend_path)
+    print(f"✅ Saved to {args.output}")

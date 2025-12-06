@@ -13,7 +13,7 @@ echo "Frames: $START_FRAME to $FRAMES"
 echo ""
 
 # 1. Water Float - Classic floating spheres
-echo "[1/6] Running Water Float Simulation..."
+echo "[1/7] Running Water Float Simulation..."
 if [ -f "water_float_sim.blend" ]; then
     echo "  ⚠️  File exists, skipping..."
 else
@@ -37,7 +37,7 @@ fi
 echo ""
 
 # 2. Water Rise - Calm water rising from z=0 to z=10
-echo "[2/6] Running Water Rise Simulation..."
+echo "[2/7] Running Water Rise Simulation..."
 if [ -f "water_rise_sim.blend" ]; then
     echo "  ⚠️  File exists, skipping..."
 else
@@ -63,7 +63,7 @@ fi
 echo ""
 
 # 3. Water Bucket - Periodic waves
-echo "[3/6] Running Water Bucket Simulation..."
+echo "[3/7] Running Water Bucket Simulation..."
 if [ -f "water_bucket_sim.blend" ]; then
     echo "  ⚠️  File exists, skipping..."
 else
@@ -88,7 +88,7 @@ fi
 echo ""
 
 # 4. Storm - Violent weather with debris
-echo "[4/6] Running Storm Simulation..."
+echo "[4/7] Running Storm Simulation..."
 if [ -f "storm_sim.blend" ]; then
     echo "  ⚠️  File exists, skipping..."
 else
@@ -113,7 +113,7 @@ fi
 echo ""
 
 # 5. Water Puddles - Uneven terrain with shallow water
-echo "[5/6] Running Water Puddles Simulation..."
+echo "[5/7] Running Water Puddles Simulation..."
 if [ -f "water_puddles_sim.blend" ]; then
     echo "  ⚠️  File exists, skipping..."
 else
@@ -138,7 +138,7 @@ fi
 echo ""
 
 # 6. Robot Walking - Duck robot walking through water puddles
-echo "[6/6] Running Robot Walking Simulation..."
+echo "[6/7] Running Robot Walking Simulation..."
 if [ -f "robot_walk.blend" ]; then
     echo "  ⚠️  File exists, skipping..."
 else
@@ -162,18 +162,46 @@ else
 fi
 echo ""
 
+# 7. Duck Waypoint Walk - Duck following custom waypoints
+echo "[7/7] Running Duck Waypoint Walk Simulation..."
+if [ -f "duck_waypoint_walk.blend" ]; then
+    echo "  ⚠️  File exists, skipping..."
+else
+    echo "  - Duck walks through custom waypoints"
+    echo "  - Smooth curvy path (exploration pattern)"
+    echo "  - 400 frames for longer walk"
+    $BLENDER -b --python-use-system-env -P examples/duck_waypoint_walk.py -- \
+      --waypoint-pattern exploration \
+      --waypoint-scale 8.0 \
+      --walk-speed 0.8 \
+      --follow-duck \
+      --show-waypoints \
+      --start-frame $START_FRAME \
+      --end-frame 400 \
+      --output duck_waypoint_walk.blend
+
+    if [ $? -eq 0 ]; then
+        echo "✅ Duck Waypoint Walk completed successfully"
+    else
+        echo "❌ Duck Waypoint Walk failed"
+        exit 1
+    fi
+fi
+echo ""
+
 # Summary
 echo "======================================"
 echo "  All Simulations Completed!"
 echo "======================================"
 echo ""
 echo "Generated files:"
-echo "  1. water_float_sim.blend   (Classic floating)"
-echo "  2. water_rise_sim.blend    (Rising water)"
-echo "  3. water_bucket_sim.blend  (Water bucket)"
-echo "  4. storm_sim.blend         (Storm)"
-echo "  5. water_puddles_sim.blend (Water Puddles)"
-echo "  6. robot_walk.blend        (Robot Walking)"
+echo "  1. water_float_sim.blend      (Classic floating)"
+echo "  2. water_rise_sim.blend       (Rising water)"
+echo "  3. water_bucket_sim.blend     (Water bucket)"
+echo "  4. storm_sim.blend            (Storm)"
+echo "  5. water_puddles_sim.blend    (Water Puddles)"
+echo "  6. robot_walk.blend           (Robot Walking)"
+echo "  7. duck_waypoint_walk.blend   (Duck Waypoint Walk)"
 echo ""
 echo "To view a simulation:"
 echo "  open water_float_sim.blend"

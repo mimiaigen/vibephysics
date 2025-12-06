@@ -1,14 +1,18 @@
 """
 Robot Foundation Module
 
-Handles creation of paths, simple robots, and procedural walking animation
-adapted to uneven terrain.
+General-purpose rigged robot/character control.
+Not model-specific - works with any rigged armature.
+
+For model-specific control (e.g. Open Duck), see foundation/open_duck.py
+For trajectory creation, see foundation/trajectory.py
 """
 
 import bpy
 import math
 import os
 from mathutils import Vector, Matrix, Euler
+from . import trajectory
 
 def raycast_ground(scene, xy_point, start_height=10.0, ground_objects=None):
     """
@@ -29,74 +33,16 @@ def raycast_ground(scene, xy_point, start_height=10.0, ground_objects=None):
     return 0.0 # Default floor
 
 
-def evaluate_curve_at_t(curve_obj, t):
-    """
-    Evaluate position and tangent of a curve at factor t (0-1).
-    Returns (position, tangent) vectors in world space.
-    """
-    if not curve_obj.data.splines:
-        return Vector((0,0,0)), Vector((0,1,0))
-    
-    spline = curve_obj.data.splines[0]
-    depsgraph = bpy.context.evaluated_depsgraph_get()
-    curve_eval = curve_obj.evaluated_get(depsgraph)
-    mesh = curve_eval.to_mesh()
-    
-    if len(mesh.vertices) < 2:
-        curve_eval.to_mesh_clear()
-        return curve_obj.location, Vector((0,1,0))
-        
-    total_verts = len(mesh.vertices)
-    
-    if spline.use_cyclic_u:
-        idx_float = t * total_verts
-    else:
-        idx_float = t * (total_verts - 1)
-        
-    idx = int(idx_float)
-    next_idx = (idx + 1) % total_verts
-    fraction = idx_float - idx
-    
-    v1 = mesh.vertices[idx].co
-    v2 = mesh.vertices[next_idx].co
-    
-    # Interpolate local position
-    pos_local = v1.lerp(v2, fraction)
-    
-    # Calculate tangent (direction to next point)
-    tangent_local = (v2 - v1).normalized()
-    if tangent_local.length_squared == 0:
-        tangent_local = Vector((0,1,0))
-        
-    # Transform to world
-    pos_world = curve_obj.matrix_world @ pos_local
-    
-    # Transform tangent (rotation only)
-    tangent_world = curve_obj.matrix_world.to_3x3() @ tangent_local
-    tangent_world.normalize()
-    
-    curve_eval.to_mesh_clear()
-    
-    return pos_world, tangent_world
-
-def create_circular_path(radius=10.0, scale_y=0.5, name="RobotPath"):
-    """
-    Creates a circular/oval bezier path.
-    """
-    bpy.ops.curve.primitive_bezier_circle_add(radius=radius, location=(0, 0, 0))
-    path = bpy.context.active_object
-    path.name = name
-    
-    path.scale = (1.0, scale_y, 1.0)
-    bpy.ops.object.transform_apply(scale=True)
-    
-    return path
+# Trajectory functions moved to foundation/trajectory.py
+# Import and use: from foundation import trajectory
+# trajectory.evaluate_curve_at_t(), trajectory.create_circular_path(), etc.
 
 def setup_collision_meshes(part_objects, kinematic=True, friction=0.8, restitution=0.1):
     """
     Sets up collision for robot parts/meshes.
     If kinematic=True, they follow animation but collide with other active objects.
     """
+    print("  - setting up robot collision physics...")
     count = 0
     for part in part_objects:
         # Add rigid body
@@ -118,11 +64,12 @@ def setup_collision_meshes(part_objects, kinematic=True, friction=0.8, restituti
         except Exception as e:
             print(f"Warning: Could not add rigid body to {part.name}: {e}")
             
+    print(f"    Added collision to {count} mesh parts")
     return count
 
 def animate_walking(armature, path_curve, ground_object, 
                    start_frame=1, end_frame=250, speed=1.0,
-                   scale_mult=1.0,
+                   scale_mult=None,
                    hips_height_ratio=0.33, 
                    stride_ratio=1.6,
                    step_height_ratio=0.8,
@@ -131,10 +78,15 @@ def animate_walking(armature, path_curve, ground_object,
     """
     Animates a rigged robot (using IK) walking along a path on uneven ground.
     
-    scale_mult: General scaling factor for the robot size.
+    scale_mult: General scaling factor (auto-computed from armature.scale if None)
     ratios: Parameters relative to scale_mult.
     """
+    print("  - animating walk cycle...")
     scene = bpy.context.scene
+    
+    # Auto-compute scale multiplier if not provided
+    if scale_mult is None:
+        scale_mult = armature.scale[0]
     
     bpy.context.view_layer.objects.active = armature
     bpy.ops.object.mode_set(mode='POSE')
@@ -178,7 +130,7 @@ def animate_walking(armature, path_curve, ground_object,
         t = (frame - start_frame) / (end_frame - start_frame)
         t = min(t, 0.9999)
         
-        path_pos_world, tangent_world = evaluate_curve_at_t(path_curve, t)
+        path_pos_world, tangent_world = trajectory.evaluate_curve_at_t(path_curve, t)
         
         # Get ground height
         ground_z = raycast_ground(scene, path_pos_world, start_height=20.0, 
@@ -265,11 +217,18 @@ def animate_walking(armature, path_curve, ground_object,
     
     bpy.ops.object.mode_set(mode='OBJECT')
 
-def load_rigged_robot(filepath):
+def load_rigged_robot(filepath, transform=None):
     """
     Generic loader for a robot from a blend file.
     Expects 1 Armature and associated Meshes.
+    
+    Args:
+        filepath: Path to .blend file
+        transform: Optional dict with 'location', 'rotation', 'scale' keys
+                  e.g. {'location': (0,0,0), 'rotation': (0,0,0), 'scale': 0.3}
     """
+    print(f"  - Loading robot from {os.path.basename(filepath)}...")
+    
     if not os.path.exists(filepath):
         print(f"Error: Robot file not found at {filepath}")
         return None, []
@@ -292,5 +251,23 @@ def load_rigged_robot(filepath):
                 armature = obj
             elif obj.type == 'MESH':
                 robot_parts.append(obj)
+    
+    # Apply transform if provided
+    if armature and transform:
+        if 'location' in transform:
+            armature.location = transform['location']
+        if 'rotation' in transform:
+            armature.rotation_euler = transform['rotation']
+        if 'scale' in transform:
+            scale_val = transform['scale']
+            if isinstance(scale_val, (int, float)):
+                armature.scale = (scale_val, scale_val, scale_val)
+            else:
+                armature.scale = scale_val
+    
+    if armature:
+        print(f"    Found armature: {armature.name}, {len(robot_parts)} mesh parts")
+    else:
+        print("    WARNING: No armature found!")
                 
     return armature, robot_parts

@@ -145,6 +145,31 @@ def create_visual_water(scale, wave_scale, radius=None, time=None, start_frame=1
     
     return water
 
+def create_flat_surface(size, z_level, subdivisions=200, name="Water_Visual"):
+    """
+    Creates a flat high-resolution grid for dynamic paint water ripples.
+    Hides bpy.ops calls for grid creation.
+    
+    Args:
+        size: Size of the square water plane
+        z_level: Z-coordinate for water surface
+        subdivisions: Grid resolution (higher = smoother ripples)
+        name: Object name
+        
+    Returns:
+        water object
+    """
+    bpy.ops.mesh.primitive_grid_add(
+        x_subdivisions=subdivisions,
+        y_subdivisions=subdivisions,
+        size=size,
+        location=(0, 0, z_level)
+    )
+    water = bpy.context.active_object
+    water.name = name
+    bpy.ops.object.shade_smooth()
+    return water
+
 def setup_dynamic_paint_interaction(water_obj, brush_objs, ripple_strength):
     """
     Sets up the Ripple Interaction.
@@ -285,6 +310,37 @@ def setup_custom_water_interaction(water_obj, interaction_groups):
                 
                 settings.wave_factor = base_strength * wave_scale
                 settings.wave_clamp = clamp
+
+def setup_robot_water_interaction(water_obj, robot_parts, debris_objects, ripple_strength=15.0):
+    """
+    Simplified water interaction setup for robot + debris scenario.
+    Robot parts get larger paint distance, debris gets normal.
+    
+    Args:
+        water_obj: Water surface object
+        robot_parts: List of robot mesh objects
+        debris_objects: List of debris/ball objects
+        ripple_strength: Overall ripple intensity multiplier
+    """
+    print("  - setting up water ripple interactions...")
+    interaction_config = [
+        # Robot: Larger paint distance for small parts
+        {
+            'objects': robot_parts,
+            'paint_distance': 0.5,
+            'wave_factor_scale': 1.5,
+            'wave_clamp': 10.0
+        },
+        # Debris: Normal paint distance
+        {
+            'objects': debris_objects,
+            'paint_distance': 0.3,
+            'wave_factor_scale': 1.0,
+            'wave_clamp': 8.0
+        }
+    ]
+    
+    setup_custom_water_interaction(water_obj, interaction_config)
 
 def create_puddle_water(z_level, size, ground_cutter_obj, color=None):
     """

@@ -9,7 +9,7 @@ from mathutils import Vector, Matrix, Euler
 # Add parent directory to path to import foundation
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from foundation import physics, water, ground, robot, objects, materials, lighting
+from foundation import scene, physics, water, ground, objects, materials, lighting, open_duck
 from annotation import point_tracking
 from utils import viewport
 
@@ -71,20 +71,12 @@ def parse_args():
 def run_simulation_setup(args):
     print("Initializing Robot Walking Simulation...")
     
-    # Cleanup
-    bpy.ops.object.select_all(action='SELECT')
-    bpy.ops.object.delete()
-    
-    # 1. Physics Environment
-    physics.setup_rigid_body_world()
-    
-    scene = bpy.context.scene
-    if scene.rigidbody_world:
-        scene.rigidbody_world.substeps_per_frame = 20
-        scene.rigidbody_world.solver_iterations = 20
-        # IMPORTANT: Extend rigid body cache to match animation length
-        scene.rigidbody_world.point_cache.frame_start = args.start_frame
-        scene.rigidbody_world.point_cache.frame_end = args.end_frame + 50  # Extra buffer
+    # 1. Universal scene initialization
+    scene.init_simulation(
+        start_frame=args.start_frame,
+        end_frame=args.end_frame,
+        physics_config={'substeps': 20, 'solver_iters': 20, 'cache_buffer': 50}
+    )
     
     # 2. Terrain (Uneven Ground)
     z_ground = -1.0
@@ -103,134 +95,57 @@ def run_simulation_setup(args):
     materials.create_mud_material(terrain)
     physics.setup_ground_physics(terrain)
     
-    # 3. Water Surface - Simple high-res GRID for Dynamic Paint ripples
-    z_water_level = z_ground + 0.1  # Slightly above ground base
-    
-    # Create simple water grid (no edge pinning = no edge artifacts)
-    water_size = args.terrain_size * 0.9
-    bpy.ops.mesh.primitive_grid_add(
-        x_subdivisions=200,  # High resolution for ripples
-        y_subdivisions=200,
-        size=water_size,
-        location=(0, 0, z_water_level)
+    # 3. Water Surface
+    z_water_level = z_ground + 0.1
+    water_visual = water.create_flat_surface(
+        size=args.terrain_size * 0.9,
+        z_level=z_water_level,
+        subdivisions=200
     )
-    water_visual = bpy.context.active_object
-    water_visual.name = "Water_Visual"
-    
-    bpy.ops.object.shade_smooth()
-    
     materials.create_water_material(water_visual, color=tuple(args.water_color))
     
     # Note: No buoyancy field - balls just fall and create ripples, no floating needed
     
-    # 3a. Add 25 falling balls (debris)
-    print("  - creating 25 falling balls...")
-    debris_objects = []
-    z_spawn = z_water_level + 3.0  # Spawn above water
-    
+    # 3a. Add 25 falling balls
+    z_spawn = z_water_level + 3.0
     positions = objects.generate_scattered_positions(
         num_points=25,
         spawn_radius=args.terrain_size / 3.0,
         min_dist=0.8,
         z_pos=z_spawn
     )
-    
-    for i, pos in enumerate(positions):
-        # Create small spheres
-        bpy.ops.mesh.primitive_uv_sphere_add(radius=random.uniform(0.15, 0.3), location=pos)
-        obj = bpy.context.active_object
-        obj.name = f"Ball_{i}"
-        
-        # Random rotation
-        obj.rotation_euler = (random.random(), random.random(), random.random())
-        
-        # Physics - active rigid body that falls
-        bpy.ops.rigidbody.object_add(type='ACTIVE')
-        obj.rigid_body.mass = 0.3
-        obj.rigid_body.friction = 0.7
-        obj.rigid_body.restitution = 0.3
-        
-        # Add colored material
-        materials.create_sphere_material(obj, i, 25)
-        debris_objects.append(obj)
-    
-    print(f"    Created {len(debris_objects)} balls")
-    
-    # 4. Robot
-    duck_path = "/Users/shamangary/codeDemo/Open_Duck_Blender/open-duck-mini.blend"
-    
-    # Use generic loader
-    armature, robot_parts = robot.load_rigged_robot(duck_path)
-    
-    if not armature:
-        print("Failed to load Duck! Aborting.")
-        return
-        
-    print(f"    Found armature: {armature.name}")
-    print(f"    Found {len(robot_parts)} mesh parts.")
-
-    # Configure Duck specifically
-    armature.location = (0, 0, 0)
-    armature.rotation_euler = (0, 0, 0)
-    armature.scale = (0.3, 0.3, 0.3) 
-
-    # 5. Walk Path
-    # 0.35 * scale, flattened slightly
-    path = robot.create_circular_path(radius=args.terrain_size * 0.35, scale_y=0.5)
-    path.location.z = 2.0 
-    
-    # 6. Animate Walking (Kinematic Driver)
-    print("  - animating walk cycle...")
-    
-    scale_mult = armature.scale[0]
-    
-    robot.animate_walking(
-        armature=armature,
-        path_curve=path,
-        ground_object=terrain,
-        start_frame=args.start_frame,
-        end_frame=args.end_frame,
-        speed=args.walk_speed,
-        scale_mult=scale_mult,
-        # Duck proportions
-        hips_height_ratio=0.1,    # Low slung
-        stride_ratio=0.5,         # Short steps
-        step_height_ratio=0.25,   # High steps (waddle)
-        foot_spacing_ratio=0.2,   # Narrow stance
-        foot_ik_names=('leg_ik.l', 'leg_ik.r')
+    debris_objects = objects.create_falling_spheres(
+        positions=positions,
+        radius_range=(0.15, 0.3),
+        physics={'mass': 0.3, 'friction': 0.7, 'restitution': 0.3},
+        num_total=25
     )
     
-    # 7. Setup Robot Collision (Meshes stay rigged, but can collide)
-    print("  - setting up robot collision physics...")
-    count = robot.setup_collision_meshes(robot_parts, kinematic=True)
-    print(f"    Added collision to {count} mesh parts")
+    # 4. Open Duck Robot (model-specific setup)
+    duck_result = open_duck.setup_duck_simulation(
+        terrain=terrain,
+        terrain_size=args.terrain_size,
+        start_frame=args.start_frame,
+        end_frame=args.end_frame,
+        walk_speed=args.walk_speed
+    )
     
-    # 8. Water Interactions - Custom setup for robot with larger paint_distance
-    print("  - setting up water ripple interactions...")
+    armature = duck_result['armature']
+    robot_parts = duck_result['parts']
+    path = duck_result['path']
     
-    interaction_config = [
-        # Robot: Larger paint distance (0.5), stronger ripples (1.5x)
-        {
-            'objects': robot_parts,
-            'paint_distance': 0.5,
-            'wave_factor_scale': 1.5,
-            'wave_clamp': 10.0
-        },
-        # Debris: Normal paint distance (0.3), normal ripples
-        {
-            'objects': debris_objects,
-            'paint_distance': 0.3,
-            'wave_factor_scale': 1.0,
-            'wave_clamp': 8.0
-        }
-    ]
+    # 8. Water Interactions
+    water.setup_robot_water_interaction(
+        water_visual, 
+        robot_parts, 
+        debris_objects, 
+        ripple_strength=15.0
+    )
     
-    water.setup_custom_water_interaction(water_visual, interaction_config)
-    
-    # 9. Point Tracking (track both robot and debris)
+    # 9. Point Tracking Visualization
+    # Creates dual viewport: Left=scene, Right=point cloud tracking
     tracked_objects = robot_parts + debris_objects
     if not args.no_point_tracking and tracked_objects:
-        print("  - setting up point tracking...")
         point_tracking.setup_point_tracking_visualization(
             tracked_objects=tracked_objects,
             points_per_object=max(5, args.points_per_object // len(tracked_objects)) if tracked_objects else 10,
@@ -253,23 +168,23 @@ def run_simulation_setup(args):
         caustic_scale=10.0
     )
     
-    cam = bpy.context.scene.camera
-    if cam:
-        constraint = cam.constraints.new(type='TRACK_TO')
-        constraint.target = armature
-        constraint.track_axis = 'TRACK_NEGATIVE_Z'
-        constraint.up_axis = 'UP_Y'
-        
-    # Bake rigid body physics (dynamic paint WAVE simulates in real-time)
+    # Camera tracks robot
+    lighting.setup_camera_tracking(armature)
+    
+    # Bake physics
     print("  - baking physics...")
-    bpy.ops.ptcache.bake_all(bake=True)
+    physics.bake_all()
 
     print("✅ Duck Walking Simulation Ready!")
 
 if __name__ == "__main__":
+    # Parse command-line arguments
     args = parse_args()
+    
+    # Run simulation setup
     run_simulation_setup(args)
     
+    # Save to output file
     blend_path = os.path.abspath(args.output)
     bpy.ops.wm.save_as_mainfile(filepath=blend_path)
     print(f"✅ Saved to {args.output}")

@@ -195,3 +195,154 @@ def generate_scattered_positions(num_points, spawn_radius, min_dist, z_pos, z_ra
         print(f"⚠️ Warning: Could only fit {len(positions)}/{num_points} objects without overlap.")
         
     return positions
+
+def create_falling_spheres(positions, radius_range=(0.15, 0.3), physics=None, num_total=None):
+    """
+    Create multiple rigid body spheres with physics and colored materials.
+    Hides low-level bpy.ops calls for sphere creation.
+    
+    Args:
+        positions: List of (x, y, z) tuples for sphere locations
+        radius_range: Tuple of (min_radius, max_radius) for random sizing
+        physics: Dict with 'mass', 'friction', 'restitution' keys
+        num_total: Total count for material coloring (defaults to len(positions))
+        
+    Returns:
+        List of sphere objects
+    """
+    print(f"  - creating {len(positions)} falling balls...")
+    
+    if physics is None:
+        physics = {'mass': 0.3, 'friction': 0.7, 'restitution': 0.3}
+    
+    if num_total is None:
+        num_total = len(positions)
+    
+    spheres = []
+    for i, pos in enumerate(positions):
+        # Create sphere with random radius
+        radius = random.uniform(radius_range[0], radius_range[1])
+        bpy.ops.mesh.primitive_uv_sphere_add(radius=radius, location=pos)
+        obj = bpy.context.active_object
+        obj.name = f"Ball_{i}"
+        
+        # Random rotation
+        obj.rotation_euler = (random.random(), random.random(), random.random())
+        
+        # Physics - active rigid body that falls
+        bpy.ops.rigidbody.object_add(type='ACTIVE')
+        obj.rigid_body.mass = physics.get('mass', 0.3)
+        obj.rigid_body.friction = physics.get('friction', 0.7)
+        obj.rigid_body.restitution = physics.get('restitution', 0.3)
+        
+        # Add colored material
+        create_sphere_material(obj, i, num_total)
+        spheres.append(obj)
+    
+    print(f"    Created {len(spheres)} balls")
+    return spheres
+
+def create_falling_cubes(positions, size_range=(0.2, 0.4), physics=None, num_total=None):
+    """
+    Create multiple rigid body cubes with physics and colored materials.
+    
+    Args:
+        positions: List of (x, y, z) tuples for cube locations
+        size_range: Tuple of (min_size, max_size) for random sizing
+        physics: Dict with 'mass', 'friction' keys
+        num_total: Total count for material coloring (defaults to len(positions))
+        
+    Returns:
+        List of cube objects
+    """
+    if physics is None:
+        physics = {'mass': 0.2, 'friction': 0.7}
+    
+    if num_total is None:
+        num_total = len(positions)
+    
+    cubes = []
+    for i, pos in enumerate(positions):
+        # Create cube with random size
+        size = random.uniform(size_range[0], size_range[1])
+        bpy.ops.mesh.primitive_cube_add(size=size, location=pos)
+        obj = bpy.context.active_object
+        obj.name = f"Debris_{i}"
+        
+        # Random rotation
+        obj.rotation_euler = (random.random(), random.random(), random.random())
+        
+        # Physics
+        bpy.ops.rigidbody.object_add(type='ACTIVE')
+        obj.rigid_body.mass = physics.get('mass', 0.2)
+        obj.rigid_body.friction = physics.get('friction', 0.7)
+        
+        # Add colored material
+        create_sphere_material(obj, i, num_total)
+        cubes.append(obj)
+    
+    return cubes
+
+
+def create_waypoint_markers(waypoints, z_height=0.5, size=0.3):
+    """
+    Create visual cone markers at waypoints with color gradient.
+    Useful for debugging paths and trajectories.
+    
+    Args:
+        waypoints: List of (x, y) or (x, y, z) tuples
+        z_height: Height of markers above ground (ignored if waypoint has z)
+        size: Size of cone markers
+        
+    Returns:
+        List of marker objects
+    """
+    print(f"  - creating {len(waypoints)} waypoint markers...")
+    markers = []
+    
+    for i, wp in enumerate(waypoints):
+        # Extract position
+        if len(wp) == 2:
+            x, y = wp
+            z = z_height
+        else:
+            x, y, z = wp
+        
+        # Create cone marker
+        bpy.ops.mesh.primitive_cone_add(
+            radius1=size,
+            radius2=0.0,
+            depth=size * 2.67,  # Proportional to size
+            location=(x, y, z)
+        )
+        marker = bpy.context.active_object
+        marker.name = f"Waypoint_Marker_{i}"
+        
+        # Create colored material with gradient
+        mat = bpy.data.materials.new(name=f"Waypoint_Mat_{i}")
+        mat.use_nodes = True
+        nodes = mat.node_tree.nodes
+        bsdf = nodes.get('Principled BSDF')
+        
+        # Color gradient: red -> yellow -> green
+        t = i / len(waypoints) if len(waypoints) > 1 else 0
+        if t < 0.5:
+            color = (1.0, t * 2, 0.0, 1.0)  # Red to yellow
+        else:
+            color = ((1.0 - (t - 0.5) * 2), 1.0, 0.0, 1.0)  # Yellow to green
+        
+        bsdf.inputs['Base Color'].default_value = color
+        
+        # Handle different Blender versions for Emission
+        if 'Emission' in bsdf.inputs:
+            bsdf.inputs['Emission'].default_value = color
+            bsdf.inputs['Emission Strength'].default_value = 2.0
+        elif 'Emission Color' in bsdf.inputs:  # Blender 5.0+
+            bsdf.inputs['Emission Color'].default_value = color
+            bsdf.inputs['Emission Strength'].default_value = 2.0
+        
+        marker.data.materials.append(mat)
+        markers.append(marker)
+    
+    print(f"    Created {len(markers)} markers")
+    return markers

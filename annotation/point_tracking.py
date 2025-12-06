@@ -10,11 +10,8 @@ import math
 import random
 from mathutils import Vector, Color
 
-# Import viewport from utils module (parent directory)
-import sys
-import os
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-from utils import viewport
+from . import base
+from . import viewport
 
 
 def sample_mesh_surface_points(obj, num_points=50, seed=None):
@@ -33,7 +30,10 @@ def sample_mesh_surface_points(obj, num_points=50, seed=None):
         random.seed(seed)
     
     # Get evaluated mesh (with modifiers applied)
-    depsgraph = bpy.context.evaluated_depsgraph_get()
+    depsgraph = base.get_depsgraph()
+    if not depsgraph:
+        depsgraph = bpy.context.evaluated_depsgraph_get()
+        
     obj_eval = obj.evaluated_get(depsgraph)
     mesh = obj_eval.to_mesh()
     
@@ -120,7 +120,8 @@ def generate_distinct_colors(num_colors, saturation=0.8, value=0.9):
     return colors
 
 
-def create_point_cloud_tracker(tracked_objects, points_per_object=50, point_size=0.03):
+def create_point_cloud_tracker(tracked_objects, points_per_object=50, point_size=0.03, 
+                                collection_name=None):
     """
     Create a point cloud mesh that tracks points on multiple objects.
     
@@ -128,6 +129,7 @@ def create_point_cloud_tracker(tracked_objects, points_per_object=50, point_size
         tracked_objects: List of Blender objects to track
         points_per_object: Number of sample points per object
         point_size: Size of each point (icosphere radius)
+        collection_name: Name of collection to put point cloud in
         
     Returns:
         The point cloud object and tracking data
@@ -136,13 +138,8 @@ def create_point_cloud_tracker(tracked_objects, points_per_object=50, point_size
         print("⚠️ No objects to track for point cloud")
         return None, None
     
-    # Create a collection for point cloud visualization
-    collection_name = "PointTrackingViz"
-    if collection_name not in bpy.data.collections:
-        collection = bpy.data.collections.new(collection_name)
-        bpy.context.scene.collection.children.link(collection)
-    else:
-        collection = bpy.data.collections[collection_name]
+    # Ensure collection exists
+    collection = base.ensure_collection(collection_name)
     
     # Sample points from each object and store tracking data
     tracking_data = []
@@ -223,25 +220,12 @@ def create_point_cloud_tracker(tracked_objects, points_per_object=50, point_size
     point_cloud_obj = bpy.data.objects.new("PointCloudTracker", mesh)
     collection.objects.link(point_cloud_obj)
     
-    # Create material with vertex colors
-    mat = bpy.data.materials.new(name="PointCloudMaterial")
-    mat.use_nodes = True
-    nodes = mat.node_tree.nodes
-    links = mat.node_tree.links
-    nodes.clear()
-    
-    # Nodes for vertex color display
-    node_out = nodes.new(type='ShaderNodeOutputMaterial')
-    node_emission = nodes.new(type='ShaderNodeEmission')
-    node_vcol = nodes.new(type='ShaderNodeVertexColor')
-    node_vcol.layer_name = "PointColors"
-    
-    # Emission for bright, unshaded points
-    node_emission.inputs['Strength'].default_value = 2.0
-    
-    links.new(node_vcol.outputs['Color'], node_emission.inputs['Color'])
-    links.new(node_emission.outputs['Emission'], node_out.inputs['Surface'])
-    
+    # Create material with vertex colors using base utility
+    mat = base.create_vertex_color_material(
+        "PointCloudMaterial",
+        color_layer_name="PointColors",
+        strength=2.0
+    )
     point_cloud_obj.data.materials.append(mat)
     
     # Clean up template mesh
@@ -251,6 +235,7 @@ def create_point_cloud_tracker(tracked_objects, points_per_object=50, point_size
     point_cloud_obj["tracking_data_count"] = len(tracking_data)
     point_cloud_obj["points_per_sphere"] = template_verts
     point_cloud_obj["point_size"] = point_size
+    point_cloud_obj["annotation_type"] = "point_tracking"
     
     # Store object references and local positions as custom properties
     tracking_info = []
@@ -285,11 +270,7 @@ def update_point_cloud_positions(point_cloud_obj, scene=None):
     mesh = point_cloud_obj.data
     
     # Get evaluated depsgraph for physics
-    depsgraph = None
-    if scene:
-        depsgraph = bpy.context.evaluated_depsgraph_get()
-    elif bpy.context.evaluated_depsgraph_get():
-        depsgraph = bpy.context.evaluated_depsgraph_get()
+    depsgraph = base.get_depsgraph()
         
     # Update vertex positions
     for pt_idx, info in enumerate(tracking_info):
@@ -305,11 +286,8 @@ def update_point_cloud_positions(point_cloud_obj, scene=None):
         world_matrix = obj.matrix_world
         
         if depsgraph:
-            try:
-                obj_eval = obj.evaluated_get(depsgraph)
-                world_matrix = obj_eval.matrix_world
-            except:
-                pass
+            obj_eval = base.get_evaluated_object(obj, depsgraph)
+            world_matrix = obj_eval.matrix_world
         
         # Get world position of the local point
         world_pos = world_matrix @ local_pos
@@ -358,7 +336,7 @@ import bpy
 import json
 from mathutils import Vector
 
-def update_point_cloud_positions(scene):
+def pointcloud_update_positions(scene):
     """Update point cloud positions using evaluated dependency graph."""
     point_cloud_obj = bpy.data.objects.get("PointCloudTracker")
     if not point_cloud_obj or "tracking_info" not in point_cloud_obj:
@@ -400,13 +378,6 @@ def update_point_cloud_positions(scene):
         # Move whole icosphere
         if base_vert_idx + verts_per_point <= len(mesh.vertices):
             # Calculate current centroid to move relative
-            # (Simple approximation for sphere)
-            current_pos = mesh.vertices[base_vert_idx].co # First vertex
-            # We need absolute positioning. 
-            # To be robust, we should have stored vertex offsets.
-            # But since we don't change topology, we can just move all verts.
-            
-            # Better approach: Calculate vector from current centroid to target
             centroid = Vector((0,0,0))
             for i in range(verts_per_point):
                 centroid += mesh.vertices[base_vert_idx + i].co
@@ -426,26 +397,23 @@ def update_point_cloud_positions(scene):
                 if area.type == 'VIEW_3D':
                     area.tag_redraw()
 
-def frame_handler(scene):
-    update_point_cloud_positions(scene)
+def pointcloud_frame_handler(scene):
+    pointcloud_update_positions(scene)
 
 # Register
 def register():
-    # Clean old handlers
+    # Clean old handlers with this specific name
     handlers = bpy.app.handlers.frame_change_post
     for h in list(handlers):
-        if h.__name__ == 'frame_handler':
+        if hasattr(h, '__name__') and h.__name__ == 'pointcloud_frame_handler':
             handlers.remove(h)
-    handlers.append(frame_handler)
+    handlers.append(pointcloud_frame_handler)
     print("✅ Point Cloud Tracking Handler Registered")
 
-if __name__ == "__main__":
-    register()
+# Auto-register on load
+register()
 '''
-    text_block = bpy.data.texts.new(script_name)
-    text_block.write(script_text)
-    text_block.use_module = True
-    return text_block
+    return base.create_embedded_script(script_name, script_text)
 
 
 def register_frame_handler(point_cloud_obj):
@@ -455,29 +423,22 @@ def register_frame_handler(point_cloud_obj):
     # Create the embedded script so it works when file is re-opened
     create_embedded_tracking_script()
     
-    def frame_change_handler(scene):
+    # Ensure it's marked as module to run on load
+    if "point_cloud_driver.py" in bpy.data.texts:
+        bpy.data.texts["point_cloud_driver.py"].use_module = True
+    
+    def pointcloud_frame_handler(scene):
         # Re-fetch object to ensure it's valid
         if point_cloud_obj and point_cloud_obj.name in bpy.data.objects:
             pc_obj = bpy.data.objects[point_cloud_obj.name]
             update_point_cloud_positions(pc_obj, scene)
     
-    # Store handler reference
-    frame_change_handler.__name__ = f"point_cloud_update_{point_cloud_obj.name}"
-    
-    # Remove any existing handler with same name
-    handlers_to_remove = []
-    for handler in bpy.app.handlers.frame_change_post:
-        if hasattr(handler, '__name__') and handler.__name__ == frame_change_handler.__name__:
-            handlers_to_remove.append(handler)
-    
-    for handler in handlers_to_remove:
-        bpy.app.handlers.frame_change_post.remove(handler)
-    
-    bpy.app.handlers.frame_change_post.append(frame_change_handler)
+    base.register_frame_handler(pointcloud_frame_handler, "pointcloud_frame_handler")
     print(f"✅ Registered frame handler for point cloud updates")
 
 
-def create_point_tracking_camera(point_cloud_obj, distance=40.0, angle=45.0):
+def create_point_tracking_camera(point_cloud_obj, distance=40.0, angle=45.0, 
+                                  collection_name=None):
     """
     Create a dedicated camera for the point tracking view.
     
@@ -485,12 +446,9 @@ def create_point_tracking_camera(point_cloud_obj, distance=40.0, angle=45.0):
         point_cloud_obj: The point cloud object to track
         distance: Camera distance from center
         angle: Camera elevation angle in degrees
+        collection_name: Collection to put camera in
     """
-    collection_name = "PointTrackingViz"
-    if collection_name not in bpy.data.collections:
-        return
-    
-    collection = bpy.data.collections[collection_name]
+    collection = base.ensure_collection(collection_name)
     
     # Create camera
     angle_rad = math.radians(angle)
@@ -524,7 +482,8 @@ def create_point_tracking_camera(point_cloud_obj, distance=40.0, angle=45.0):
     print(f"  - Created PointTrackingCamera at {tracking_cam.location}")
 
 
-def setup_point_tracking_visualization(tracked_objects, points_per_object=30, setup_viewport=True):
+def setup_point_tracking_visualization(tracked_objects, points_per_object=30, 
+                                        setup_viewport=True, collection_name=None):
     """
     Main entry point for setting up point tracking visualization.
     
@@ -532,6 +491,7 @@ def setup_point_tracking_visualization(tracked_objects, points_per_object=30, se
         tracked_objects: List of objects to track (e.g., floating spheres)
         points_per_object: Number of surface sample points per object
         setup_viewport: Whether to create a dual viewport setup
+        collection_name: Collection to use
         
     Returns:
         point_cloud_obj: The created point cloud object
@@ -551,7 +511,8 @@ def setup_point_tracking_visualization(tracked_objects, points_per_object=30, se
     point_cloud_obj, tracking_data = create_point_cloud_tracker(
         mesh_objects, 
         points_per_object=points_per_object,
-        point_size=0.05
+        point_size=0.05,
+        collection_name=collection_name
     )
     
     if not point_cloud_obj:
@@ -561,27 +522,28 @@ def setup_point_tracking_visualization(tracked_objects, points_per_object=30, se
     register_frame_handler(point_cloud_obj)
     
     # Get tracking collection objects
-    tracking_collection = bpy.data.collections.get("PointTrackingViz")
+    coll_name = collection_name or base.DEFAULT_COLLECTION_NAME
+    tracking_collection = bpy.data.collections.get(coll_name)
     tracking_objects = list(tracking_collection.objects) if tracking_collection else []
     
     # Setup dual viewport if requested and running in UI mode
     if setup_viewport and not bpy.app.background:
-        viewport.setup_dual_viewport(tracking_objects, "PointTrackingViz")
-        viewport.register_viewport_restore_handler("PointTrackingViz")
-        viewport.create_viewport_restore_script("PointTrackingViz")
+        viewport.setup_dual_viewport(tracking_objects, coll_name)
+        viewport.register_viewport_restore_handler(coll_name)
+        viewport.create_viewport_restore_script(coll_name)
     else:
         print("  - Skipping viewport setup (background mode or disabled)")
         if tracking_collection:
             tracking_collection.hide_render = True
             print("  - Point cloud hidden from renders")
-        viewport.create_viewport_restore_script("PointTrackingViz")
+        viewport.create_viewport_restore_script(coll_name)
     
     # Add point cloud camera for dedicated view
-    create_point_tracking_camera(point_cloud_obj)
+    create_point_tracking_camera(point_cloud_obj, collection_name=coll_name)
     
     print("✅ Point Tracking Visualization Ready!")
     print(f"   - Total tracked points: {len(tracking_data) if tracking_data else 0}")
-    print("   - View the 'PointTrackingViz' collection for point cloud")
+    print(f"   - View the '{coll_name}' collection for point cloud")
     print("   - Use 'PointTrackingCamera' for dedicated tracking view")
     
     return point_cloud_obj

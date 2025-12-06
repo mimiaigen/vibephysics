@@ -56,7 +56,15 @@ def create_water_material(water_obj, color=(0.0, 0.6, 1.0, 1.0)):
     Visual Material with Transparent Shadows hack.
     Allows the 'Fake Caustic' light to pass through the surface without being blocked.
     Includes EEVEE/Viewport transparency fixes.
+    
+    Args:
+        water_obj: Water surface object
+        color: RGB or RGBA tuple (if RGB, alpha=1.0 is added)
     """
+    # Convert RGB to RGBA if needed
+    if len(color) == 3:
+        color = (color[0], color[1], color[2], 1.0)
+    
     mat = bpy.data.materials.new(name="OceanMat")
     mat.use_nodes = True
     nodes = mat.node_tree.nodes

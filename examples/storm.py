@@ -8,7 +8,7 @@ import argparse
 # Add parent directory to path to import foundation
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from foundation import physics, water, ground, objects, materials, lighting
+from foundation import scene, physics, water, ground, objects, materials, lighting
 from annotation import point_tracking
 
 def parse_args():
@@ -106,22 +106,15 @@ def run_simulation_setup(args):
     print("Initializing Storm Simulation...")
     print(f"Configuration: {args.num_debris} debris objects, storm intensity {args.storm_intensity}")
     
-    # 0. Clear Handlers (avoid duplicates)
-    bpy.app.handlers.frame_change_pre.clear()
-    
-    # cleanup
-    bpy.ops.object.select_all(action='SELECT')
-    bpy.ops.object.delete()
-    
-    # Generate debris masses (standardized to match water_float.py)
-    # Logarithmic scale from 0.001 to 1.0
-    debris_masses = [0.001 * (1/0.001) ** (i/(args.num_debris-1)) for i in range(args.num_debris)]
-    
-    # 1. Physics Environment
-    physics.setup_rigid_body_world(
-        substeps=80,  # Higher for storm chaos stability
-        solver_iters=80
+    # 1. Scene initialization with high physics precision for storm
+    scene.init_simulation(
+        start_frame=args.start_frame,
+        end_frame=args.end_frame,
+        physics_config={'substeps': 80, 'solver_iters': 80}
     )
+    
+    # Generate debris masses (logarithmic scale from 0.001 to 1.0)
+    debris_masses = [0.001 * (1/0.001) ** (i/(args.num_debris-1)) for i in range(args.num_debris)]
     
     # Create strong buoyancy field
     physics.create_buoyancy_field(
@@ -222,7 +215,8 @@ def run_simulation_setup(args):
         if bg:
             bg.inputs['Strength'].default_value = 0.5
     
-    # 6. Point Tracking Visualization (2nd viewport with colored point cloud)
+    # 6. Point Tracking Visualization
+    # Creates dual viewport: Left=scene, Right=point cloud tracking
     if not args.no_point_tracking and debris:
         point_tracking.setup_point_tracking_visualization(
             tracked_objects=debris,
@@ -244,30 +238,7 @@ if __name__ == "__main__":
     # Run simulation setup
     run_simulation_setup(args)
     
-    # CRITICAL: Disable disk cache RIGHT BEFORE saving to ensure it persists
-    print("Disabling all disk caches before save...")
-    if bpy.context.scene.rigidbody_world and bpy.context.scene.rigidbody_world.point_cache:
-        bpy.context.scene.rigidbody_world.point_cache.use_disk_cache = False
-        print("  - Disabled Rigid Body World cache")
-        
-    for obj in bpy.data.objects:
-        for mod in obj.modifiers:
-            if mod.type == 'DYNAMIC_PAINT':
-                if mod.canvas_settings:
-                    for surface in mod.canvas_settings.canvas_surfaces:
-                        if hasattr(surface, "point_cache") and surface.point_cache:
-                            surface.point_cache.use_disk_cache = False
-                            print(f"  - Disabled cache for {obj.name} - {surface.name}")
-    
     # Save to output file
     blend_path = os.path.abspath(args.output)
     bpy.ops.wm.save_as_mainfile(filepath=blend_path)
     print(f"✅ Saved to {args.output}")
-    
-    # Clean up blendcache folder
-    import shutil
-    cache_name = os.path.splitext(os.path.basename(args.output))[0]
-    cache_folder = os.path.abspath(f"blendcache_{cache_name}")
-    if os.path.exists(cache_folder):
-        shutil.rmtree(cache_folder)
-        print(f"🗑️  Removed cache folder: {cache_folder}")

@@ -3,10 +3,11 @@ import os
 import bpy
 import math
 
-# Add parent directory to path to import foundation
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+# Setup imports (works with both pip install and local development)
+_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
+sys.path.insert(0, os.path.join(_root, 'src'))
 
-from annotation import point_tracking
+from vibephysics.annotation import point_tracking
 
 def setup_demo_scene():
     # Clear existing objects
@@ -41,7 +42,7 @@ def run():
     point_tracking.setup_point_tracking_visualization(objects, points_per_object=200, setup_viewport=True)
     
     # Save
-    output_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'output'))
+    output_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', 'output'))
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
     output_file = os.path.join(output_dir, "demo_point_tracking.blend")

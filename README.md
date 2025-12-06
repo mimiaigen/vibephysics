@@ -1,293 +1,181 @@
 # VibePhysics
 
-A Blender physics simulation framework for creating realistic water and fluid dynamics simulations.
+A Blender physics simulation framework for creating realistic water dynamics, robot animations, and comprehensive annotation tools.
+
+## Requirements
+
+- **Python 3.11** (required for bpy compatibility)
+- **bpy** (Blender as a Python module)
+
+## Installation
+
+```bash
+# Create conda environment with Python 3.11
+conda create -n vibephysics python=3.11
+conda activate vibephysics
+
+# Install bpy (Blender as Python module)
+pip install bpy
+
+# Install vibephysics
+pip install vibephysics
+
+# Or install from source
+pip install -e .
+```
+
+## Quick Start
+
+```bash
+# Run water simulation
+python examples/water/water_float.py --output output/water_float.blend
+
+# Run robot simulation
+./run_robot.sh
+
+# Run all simulations
+./run_water.sh
+```
 
 ## Project Structure
 
 ```
 vibephysics/
-├── foundation/          # Mid-level physics implementation
-│   ├── physics.py      # Core physics: rigid body world, force fields
-│   ├── ground.py       # Terrain: seabed, uneven ground, containers
-│   ├── water.py        # Water: visual water, dynamic paint ripples
-│   ├── objects.py      # Floating objects: make any mesh floatable
-│   ├── materials.py    # Material shaders (water, seabed, objects)
-│   └── lighting.py     # Lighting and camera setup
-├── scripts/            # High-level simulation scenarios
-│   ├── water_float.py  # Floating spheres with mass variations
-│   ├── water_rise.py   # Calm water rising simulation
-│   ├── water_bucket.py # Periodic water bucket
-│   ├── storm.py        # Intense storm with debris
-│   └── water_puddles.py # Shallow puddles on uneven ground
-└── README.md
+├── src/vibephysics/
+│   ├── foundation/         # Core simulation modules
+│   │   ├── physics.py      # Rigid body world, force fields
+│   │   ├── ground.py       # Terrain generation
+│   │   ├── water.py        # Water surfaces, ripples
+│   │   ├── objects.py      # Floating objects
+│   │   ├── materials.py    # Shaders (water, mud, etc.)
+│   │   ├── lighting.py     # Lighting and camera
+│   │   ├── open_duck.py    # Open Duck robot integration
+│   │   ├── trajectory.py   # Waypoint paths
+│   │   └── scene.py        # Scene initialization
+│   └── annotation/         # Visualization tools
+│       ├── bbox.py         # Bounding box annotations
+│       ├── motion_trail.py # Motion path visualization
+│       ├── point_tracking.py # Point cloud tracking
+│       ├── viewport.py     # Dual viewport setup
+│       └── manager.py      # Unified annotation API
+├── examples/
+│   ├── basics/             # Annotation demos
+│   ├── water/              # Water simulations
+│   └── robot/              # Robot simulations
+├── run_water.sh            # Run water examples
+├── run_robot.sh            # Run robot examples
+└── run_annotation.sh       # Run annotation demos
 ```
 
-## Foundation Module
+## Examples
 
-The `foundation` directory contains reusable mid-level physics implementations:
+### Water Simulations
+
+```bash
+# Floating objects
+python examples/water/water_float.py --output output/water_float.blend
+
+# Rising water
+python examples/water/water_rise.py --output output/water_rise.blend
+
+# Storm with debris
+python examples/water/storm.py --output output/storm.blend
+
+# Water puddles
+python examples/water/water_puddles.py --output output/water_puddles.blend
+```
+
+### Robot Simulations
+
+```bash
+# Robot walking through puddles
+python examples/robot/robot_walking_water_puddle.py --output output/robot_walk.blend
+
+# Duck following waypoints
+python examples/robot/duck_waypoint_walk.py --waypoint-pattern exploration --output output/duck.blend
+```
+
+### Annotation Demos
+
+```bash
+# Bounding boxes
+python examples/basics/demo_bbox.py
+
+# Motion trails
+python examples/basics/demo_motion_trail.py
+
+# Point tracking
+python examples/basics/demo_point_tracking.py
+
+# All annotations combined
+python examples/basics/demo_all_annotations.py
+```
+
+## Annotation System
+
+VibePhysics includes a unified annotation system for visualizing simulations:
+
+```python
+from vibephysics.annotation import AnnotationManager
+
+mgr = AnnotationManager()
+
+# Add bounding boxes
+mgr.add_bbox(cube, color=(1.0, 0.0, 0.0, 1.0))
+
+# Add motion trails
+mgr.add_motion_trail(sphere, color=(0.0, 1.0, 0.0, 1.0))
+
+# Add point tracking
+mgr.add_point_tracking([cube, sphere], points_per_object=50)
+
+# Finalize (registers handlers, creates scripts)
+mgr.finalize()
+```
+
+## Foundation Modules
 
 ### `physics.py` - Core Physics
-- **`setup_rigid_body_world()`** - Initializes Bullet physics with optimized substeps
-- **`create_buoyancy_field()`** - Upward force field simulating water buoyancy
-- **`create_underwater_currents()`** - Turbulence force for water movement
-
-### `ground.py` - Terrain
-- **`create_seabed()`** - Flat ocean floor collision mesh
-- **`create_uneven_ground()`** - Procedural terrain with noise displacement
-- **`create_bucket_container()`** - Cylindrical container with physics walls
+- `setup_rigid_body_world()` - Initialize Bullet physics
+- `create_buoyancy_field()` - Upward force for floating
+- `create_underwater_currents()` - Turbulence forces
 
 ### `water.py` - Water Visuals
-- **`create_visual_water()`** - Ocean modifier for realistic wave surfaces
-- **`setup_dynamic_paint_interaction()`** - Ripple effects from object interactions
+- `create_flat_surface()` - Flat water plane
+- `setup_robot_water_interaction()` - Ripple effects
 
-### `objects.py` - Floating Objects
-- **`make_object_floatable()`** - Makes ANY mesh object physics-enabled and floatable
-- **`create_floating_sphere()`** - Convenience function for spheres
-- **`create_floating_mesh()`** - Create various mesh types (sphere, cube, cylinder, cone, torus, monkey)
-- **`generate_scattered_positions()`** - Non-overlapping random positions
+### `objects.py` - Objects
+- `create_falling_spheres()` - Physics-enabled spheres
+- `generate_scattered_positions()` - Random non-overlapping positions
 
-### `materials.py`
-- **`create_water_material()`** - Transparent water shader with caustics support
-- **`create_seabed_material()`** - Ground material
-- **`create_sphere_material()`** - Colorful materials for objects
+### `open_duck.py` - Robot Integration
+- `load_open_duck()` - Load Open Duck robot model
+- `animate_duck_walking()` - Walking animation along path
+- `setup_duck_collision()` - Physics collision setup
 
-### `lighting.py`
-- **`setup_lighting_and_camera()`** - Complete scene lighting with caustics and volumetrics
-- **`create_caustics_light()`** - Animated caustic pattern projection
-- **`create_underwater_volume()`** - Volumetric god rays
+## Shell Scripts
 
-## Simulation Scripts
-
-Each script in the `scripts/` directory demonstrates different physics scenarios using the foundation modules:
-
-### 1. **water_float.py** - Classic Floating Objects
-Demonstrates objects with different masses floating and interacting with water.
-
-**Features:**
-- Multiple spheres with logarithmic mass distribution
-- Buoyancy force fields
-- Underwater currents
-- Dynamic paint ripples
-- Customizable wave intensity
-
-**Usage:**
 ```bash
-blender -b -P scripts/water_float.py -- --num-spheres 25 --wave-scale 1.0
+# Run all water simulations
+./run_water.sh
+
+# Run robot simulations (auto-downloads Open Duck model)
+./run_robot.sh
+
+# Run annotation demos
+./run_annotation.sh
 ```
 
-**Key Arguments:**
-- `--num-spheres` - Number of floating objects
-- `--wave-scale` - Wave intensity (0.1 = calm, 2.0 = rough)
-- `--buoyancy-strength` - Upward force strength
-- `--output` - Output .blend file name
+## Common Arguments
 
----
-
-### 2. **water_rise.py** - Rising Water Level
-Simulates calm water rising from z=0 to a specified height, revealing how objects float as water level increases.
-
-**Features:**
-- Animated water level rise
-- Very calm waves (wave_scale = 0.1)
-- Objects initially resting on seabed
-- Realistic buoyancy as water rises
-
-**Usage:**
-```bash
-blender -b -P scripts/water_rise.py -- --rise-height 10.0 --rise-duration 200
-```
-
-**Key Arguments:**
-- `--rise-height` - Final water height (default: 10.0)
-- `--rise-duration` - Number of frames for rise (default: 200)
-- `--calm-wave-scale` - Wave scale for calm water (default: 0.1)
-- `--num-objects` - Number of floating objects
-
----
-
-### 3. **water_bucket.py** - Water Bucket Simulation
-Simulates a water bucket with periodic waves and multiple floating objects distributed across the surface.
-
-**Features:**
-- Grid distribution of floats
-- Periodic wave patterns
-- Enhanced underwater currents
-- Strong ripple interactions
-
-**Usage:**
-```bash
-blender -b -P scripts/water_bucket.py -- --wave-intensity 1.5 --num-floats 20
-```
-
-**Key Arguments:**
-- `--wave-intensity` - Wave strength multiplier
-- `--num-floats` - Number of floating objects
-- `--bucket-radius` - Radius of the bucket area
-- `--ripple-strength` - Ripple intensity
-
----
-
-### 4. **storm.py** - Storm Simulation
-Extreme weather simulation with violent waves, chaotic forces, and debris being tossed around.
-
-**Features:**
-- Intense wave patterns (storm_intensity = 3.0)
-- Chaotic turbulence forces
-- Random debris distribution
-- Dense atmospheric fog
-- Dark, dramatic lighting
-
-**Usage:**
-```bash
-blender -b -P scripts/storm.py -- --storm-intensity 3.0 --num-debris 30
-```
-
-**Key Arguments:**
-- `--storm-intensity` - Overall storm severity (1.0-5.0)
-- `--wind-chaos` - Turbulence force strength
-- `--num-debris` - Number of debris objects
-- `--volumetric-density` - Fog density
-
----
-
-### 5. **water_puddles.py** - Water Puddles
-Simulates uneven muddy terrain with shallow water puddles and scattered debris.
-
-**Features:**
-- Procedural uneven ground generation
-- Mud materials
-- Partial submersion (puddles vs dry land)
-- Buoyancy only affects objects in the "water" zones
-
-**Usage:**
-```bash
-blender -b -P scripts/water_puddles.py -- --terrain-size 20.0
-```
-
-**Key Arguments:**
-- `--puddle-depth` - Depth variation of the terrain
-- `--z-water` - Water level height
-- `--num-debris` - Number of scattered objects
-
----
-
-## Common Arguments (All Scripts)
-
-### Physics
-- `--z-bottom` - Ocean floor Z coordinate
-- `--z-surface` - Water surface Z coordinate
-- `--show-force-fields` - Visualize force fields in viewport
-
-### Animation
-- `--start-frame` - First frame (default: 1)
-- `--end-frame` - Last frame (default: 250)
-
-### Camera
-- `--camera-radius` - Distance from center
-- `--camera-height` - Height above water
-- `--resolution-x` - Render width (default: 1920)
-- `--resolution-y` - Render height (default: 1080)
-
-### Visual Effects
-- `--water-color` - RGBA color (e.g., `0.0 0.6 1.0 1.0`)
-- `--no-caustics` - Disable light caustics
-- `--no-volumetric` - Disable god rays
-- `--caustic-strength` - Intensity of caustic patterns
-- `--volumetric-density` - Fog/scatter density
-
-### Output
-- `--output` - Output .blend filename
-
-## Creating Custom Simulations
-
-To create your own simulation:
-
-1. **Import foundation modules:**
-```python
-from foundation import physics, ground, water, objects, materials, lighting
-```
-
-2. **Setup physics environment:**
-```python
-physics.setup_rigid_body_world()
-physics.create_buoyancy_field(z_bottom=-5, z_surface=0, strength=10.0)
-physics.create_underwater_currents(z_bottom=-5, z_surface=0, strength=20.0)
-ground.create_seabed(z_bottom=-5)
-```
-
-3. **Create visual water:**
-```python
-water_obj = water.create_visual_water(scale=1.0, wave_scale=1.0)
-materials.create_water_material(water_obj)
-```
-
-4. **Add floating objects (ANY mesh!):**
-```python
-# Option 1: Create a sphere
-sphere = objects.create_floating_sphere(index=0, mass=1.0, location=(0,0,5), total_count=1)
-
-# Option 2: Make ANY existing object floatable
-import bpy
-bpy.ops.mesh.primitive_monkey_add(location=(0, 0, 5))
-monkey = bpy.context.active_object
-objects.make_object_floatable(monkey, mass=0.5, z_surface=0.0)
-```
-
-5. **Setup interactions:**
-```python
-water.setup_dynamic_paint_interaction(water_obj, [sphere, monkey], ripple_strength=10.0)
-```
-
-6. **Configure rendering:**
-```python
-lighting.setup_lighting_and_camera(
-    camera_radius=30, 
-    camera_height=5,
-    enable_caustics=True,
-    enable_volumetric=True
-)
-```
-
-## Physics Principles
-
-### Buoyancy System
-- Uses **Wind force field** pointing upward
-- Strength determines lift force
-- `flow` parameter adds water resistance/drag
-- Limited to `z_bottom` → `z_surface` range
-
-### Underwater Currents
-- Uses **Turbulence force field**
-- Creates random Brownian motion
-- Simulates water circulation patterns
-- Scaled with wave intensity
-
-### Adaptive Damping
-Objects have **Z-dependent damping**:
-- **Above water (z > 0.5)**: Low damping (0.01) - air resistance
-- **Below water (z < 0.5)**: High damping (mass-based) - water resistance
-
-This creates realistic behavior where objects slow down when submerged.
-
-### Dynamic Paint Ripples
-- Water surface acts as **Canvas** (wave equation)
-- Objects act as **Brushes** (wave source)
-- Ripple strength scales with object mass
-- **Note:** Ripples are visual only (don't push objects)
-
-## Technical Notes
-
-- **Rigid Body Substeps**: Set to 60+ for stability with light objects (0.001kg)
-- **Ocean Resolution**: Optimized to level 12 for performance
-- **Subdivision Levels**: Viewport = 1, Render = 2 (performance vs quality)
-- **Cycles Samples**: 128 (balance of quality and speed)
-- **Disk Cache**: Automatically disabled to prevent `blendcache` folders
-
-## Requirements
-
-- Blender 3.0+ (tested on 3.6, 4.0, 4.2)
-- Cycles render engine (for caustics and volumetrics)
-- Python 3.x (bundled with Blender)
+| Argument | Description |
+|----------|-------------|
+| `--output` | Output .blend file path |
+| `--start-frame` | Animation start frame |
+| `--end-frame` | Animation end frame |
+| `--num-spheres` | Number of floating objects |
+| `--wave-scale` | Wave intensity |
+| `--no-annotations` | Disable annotations |
 
 ## License
 

@@ -5,11 +5,12 @@ import math
 import random
 import argparse
 
-# Add parent directory to path to import foundation
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+# Setup imports (works with both pip install and local development)
+_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
+sys.path.insert(0, os.path.join(_root, 'src'))
 
-from foundation import scene, physics, water, ground, objects, materials, lighting
-from annotation import point_tracking
+from vibephysics.foundation import scene, physics, water, ground, objects, materials, lighting
+from vibephysics.annotation import point_tracking
 
 def parse_args():
     """Parse command-line arguments for water simulation configuration.
@@ -103,12 +104,11 @@ def parse_args():
     output_group.add_argument('--output', type=str, default='water_simulation.blend',
                              help='Output blend file name')
     
-    # Filter out Blender's arguments - only parse after '--'
-    argv = sys.argv
-    if '--' in argv:
-        argv = argv[argv.index('--') + 1:]
+    # Support both: python script.py --arg  AND  blender -P script.py -- --arg
+    if '--' in sys.argv:
+        argv = sys.argv[sys.argv.index('--') + 1:]
     else:
-        argv = []  # No script arguments, use defaults
+        argv = sys.argv[1:]
     
     return parser.parse_args(argv)
 

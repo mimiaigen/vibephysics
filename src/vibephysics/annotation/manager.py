@@ -465,7 +465,7 @@ class AnnotationManager:
             viewport_module.register_viewport_restore_handler(self.collection_name)
     
     def finalize(self, register_handlers=True, create_scripts=True, 
-                 setup_viewport=False):
+                 setup_viewport=False, sync_frame=True):
         """
         Finalize annotation setup.
         
@@ -476,6 +476,7 @@ class AnnotationManager:
             register_handlers: Whether to register frame handlers
             create_scripts: Whether to create embedded scripts
             setup_viewport: Whether to setup dual viewport
+            sync_frame: Whether to sync annotations to frame 1 before saving
         """
         if register_handlers:
             self.register_handlers()
@@ -485,11 +486,44 @@ class AnnotationManager:
             
         if setup_viewport:
             self.setup_viewport()
+        
+        # Sync to frame 1 so annotations match when file is opened
+        if sync_frame:
+            self.sync_to_frame(bpy.context.scene.frame_start)
             
         print(f"✅ Annotation Manager finalized:")
         print(f"   - {len(self.bboxes)} bounding boxes")
         print(f"   - {len(self.trails)} motion trails")
         print(f"   - {len(self.point_clouds)} point clouds")
+    
+    def sync_to_frame(self, frame=1):
+        """
+        Sync all annotations to a specific frame.
+        
+        This ensures bboxes and point clouds match their targets
+        at the specified frame. Call before saving to ensure
+        correct initial state when file is reopened.
+        
+        Args:
+            frame: Frame number to sync to
+        """
+        scene = bpy.context.scene
+        
+        # Set frame
+        scene.frame_set(frame)
+        
+        # Force depsgraph update
+        depsgraph = bpy.context.evaluated_depsgraph_get()
+        
+        # Update all bboxes
+        for bbox_obj in self.bboxes:
+            if bbox_obj:
+                bbox_module.update_bbox(bbox_obj, depsgraph)
+        
+        # Update point clouds
+        for pc_obj in self.point_clouds:
+            if pc_obj:
+                tracking_module.update_point_cloud_positions(pc_obj, scene)
         
     # =========================================================================
     # Utilities

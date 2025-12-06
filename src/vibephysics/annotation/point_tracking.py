@@ -409,6 +409,9 @@ def register():
             handlers.remove(h)
     handlers.append(pointcloud_frame_handler)
     print("✅ Point Cloud Tracking Handler Registered")
+    
+    # Force initial update for current frame
+    pointcloud_update_positions(bpy.context.scene)
 
 # Auto-register on load
 register()

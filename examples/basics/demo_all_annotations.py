@@ -15,10 +15,11 @@ import bpy
 import math
 import random
 
-# Add parent directory to path to import foundation
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+# Setup imports (works with both pip install and local development)
+_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
+sys.path.insert(0, os.path.join(_root, 'src'))
 
-from annotation import AnnotationManager, bbox, motion_trail, point_tracking, viewport
+from vibephysics.annotation import AnnotationManager, bbox, motion_trail, point_tracking, viewport
 
 
 def setup_demo_scene():
@@ -144,7 +145,7 @@ def run():
     # ==========================================================================
     # Save
     # ==========================================================================
-    output_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'output'))
+    output_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', 'output'))
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
         

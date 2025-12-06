@@ -17,11 +17,12 @@ import os
 import bpy
 import argparse
 
-# Add parent directory to path
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+# Setup imports (works with both pip install and local development)
+_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
+sys.path.insert(0, os.path.join(_root, 'src'))
 
-from foundation import scene, physics, ground, water, open_duck, objects, materials, lighting, trajectory
-from annotation import AnnotationManager, viewport
+from vibephysics.foundation import scene, physics, ground, water, open_duck, objects, materials, lighting, trajectory
+from vibephysics.annotation import AnnotationManager, viewport
 
 
 def parse_args():
@@ -87,11 +88,11 @@ def parse_args():
     output_group.add_argument('--output', type=str, default='duck_waypoint_walk.blend',
                              help='Output blend file name')
     
-    # Parse args
+    # Support both: python script.py --arg  AND  blender -P script.py -- --arg
     if '--' in sys.argv:
         argv = sys.argv[sys.argv.index('--') + 1:]
     else:
-        argv = []
+        argv = sys.argv[1:]
     
     return parser.parse_args(argv)
 
@@ -251,11 +252,7 @@ def main():
     run_simulation_setup(args)
     
     # Save blend file
-    if not bpy.app.background:
-        output_path = os.path.join(os.getcwd(), args.output)
-    else:
-        output_path = args.output
-    
+    output_path = os.path.abspath(args.output)
     bpy.ops.wm.save_as_mainfile(filepath=output_path)
     print(f"💾 Saved to: {output_path}")
 

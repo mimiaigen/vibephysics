@@ -3,10 +3,11 @@ import os
 import bpy
 import math
 
-# Add parent directory to path to import foundation
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+# Setup imports (works with both pip install and local development)
+_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
+sys.path.insert(0, os.path.join(_root, 'src'))
 
-from annotation import motion_trail
+from vibephysics.annotation import motion_trail
 
 def setup_demo_scene():
     # Clear existing objects
@@ -46,11 +47,11 @@ def run():
     motion_trail.create_motion_trail(obj, start_frame=1, end_frame=100, step=1)
     
     # Create viewport restore script (runs when file is opened in UI mode)
-    from annotation import viewport
+    from vibephysics.annotation import viewport
     viewport.create_viewport_restore_script("AnnotationViz")
     
     # Save
-    output_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'output'))
+    output_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', 'output'))
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
     output_file = os.path.join(output_dir, "demo_motion_trail.blend")

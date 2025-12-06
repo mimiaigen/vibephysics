@@ -1,5 +1,39 @@
-__pycache__*
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Blender
 blendcache_*
+*.blend1
+*.blend2
+
+# Build/Package
+build/
+dist/
+*.egg-info/
+*.egg
+.eggs/
+wheels/
+pip-wheel-metadata/
+
+# Virtual environments
+venv/
+env/
+.venv/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
 .DS_Store*
-*.blend*
+Thumbs.db
+
+# Project specific
 output/
+*.blend

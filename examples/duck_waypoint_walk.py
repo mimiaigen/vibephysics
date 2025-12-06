@@ -4,19 +4,24 @@ Duck Waypoint Walk
 Demonstrates the Open Duck robot walking through custom waypoints
 in a smooth, curvy path. Features full annotation support 
 (bounding boxes, motion trails, point tracking).
+
+This script is a composition of foundation and annotation modules.
+All core functionality is provided by:
+- foundation.trajectory: Waypoint patterns and path creation
+- foundation.open_duck: Duck loading and animation
+- annotation.AnnotationManager: Unified annotation control
 """
 
 import sys
 import os
 import bpy
 import argparse
-from mathutils import Vector, Color
 
 # Add parent directory to path
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from foundation import scene, physics, ground, water, open_duck, objects, materials, lighting, trajectory
-from annotation import AnnotationManager, point_tracking, viewport
+from annotation import AnnotationManager, viewport
 
 
 def parse_args():
@@ -38,7 +43,7 @@ def parse_args():
     
     waypoint_group = parser.add_argument_group('Waypoint Settings')
     waypoint_group.add_argument('--waypoint-pattern', type=str, default='exploration',
-                               choices=['exploration', 's_curve', 'figure_eight', 'spiral', 'zigzag'],
+                               choices=trajectory.WAYPOINT_PATTERNS,
                                help='Waypoint pattern to follow')
     waypoint_group.add_argument('--waypoint-scale', type=float, default=8.0,
                                help='Scale of waypoint pattern')
@@ -91,92 +96,6 @@ def parse_args():
     return parser.parse_args(argv)
 
 
-def create_waypoint_pattern(pattern, scale=8.0):
-    """
-    Create different waypoint patterns.
-    
-    Args:
-        pattern: Pattern name
-        scale: Size scaling factor
-        
-    Returns:
-        List of (x, y) waypoints
-    """
-    if pattern == 'exploration':
-        # Exploration pattern - visits different areas
-        waypoints = [
-            (0, 0),
-            (scale, scale * 0.5),
-            (scale * 0.5, scale),
-            (-scale * 0.3, scale * 0.8),
-            (-scale, scale * 0.2),
-            (-scale * 0.8, -scale * 0.5),
-            (0, -scale),
-            (scale * 0.6, -scale * 0.7),
-            (scale * 0.8, 0),
-        ]
-    
-    elif pattern == 's_curve':
-        # Smooth S-curve
-        waypoints = [
-            (-scale, -scale),
-            (-scale * 0.5, -scale * 0.3),
-            (0, 0),
-            (scale * 0.5, scale * 0.3),
-            (scale, scale),
-            (scale * 0.5, scale * 0.7),
-            (0, scale * 0.4),
-            (-scale * 0.5, 0),
-        ]
-    
-    elif pattern == 'figure_eight':
-        # Figure-8 with more control points for smoothness
-        waypoints = [
-            (0, 0),
-            (scale * 0.7, scale * 0.5),
-            (scale * 0.9, scale * 0.9),
-            (scale * 0.5, scale),
-            (0, scale * 0.7),
-            (-scale * 0.5, scale),
-            (-scale * 0.9, scale * 0.9),
-            (-scale * 0.7, scale * 0.5),
-            (0, 0),
-            (scale * 0.7, -scale * 0.5),
-            (scale * 0.9, -scale * 0.9),
-            (scale * 0.5, -scale),
-            (0, -scale * 0.7),
-            (-scale * 0.5, -scale),
-            (-scale * 0.9, -scale * 0.9),
-            (-scale * 0.7, -scale * 0.5),
-        ]
-    
-    elif pattern == 'spiral':
-        # Outward spiral
-        import math
-        waypoints = []
-        num_points = 12
-        for i in range(num_points):
-            angle = (i / num_points) * 2 * math.pi * 2  # 2 full rotations
-            radius = scale * (0.2 + i / num_points * 0.8)  # Grow from 0.2 to 1.0
-            x = radius * math.cos(angle)
-            y = radius * math.sin(angle)
-            waypoints.append((x, y))
-    
-    elif pattern == 'zigzag':
-        # Zigzag pattern
-        waypoints = [
-            (-scale, -scale * 0.8),
-            (scale, -scale * 0.5),
-            (-scale * 0.8, -scale * 0.2),
-            (scale * 0.9, scale * 0.1),
-            (-scale, scale * 0.4),
-            (scale * 0.8, scale * 0.7),
-            (-scale * 0.7, scale),
-        ]
-    
-    return waypoints
-
-
 def run_simulation_setup(args):
     print("=" * 60)
     print("  🦆 Duck Waypoint Walk Simulation")
@@ -212,8 +131,8 @@ def run_simulation_setup(args):
     )
     materials.create_water_material(water_visual, color=tuple(args.water_color))
     
-    # 4. Create waypoint pattern
-    waypoints = create_waypoint_pattern(args.waypoint_pattern, args.waypoint_scale)
+    # 4. Create waypoint pattern (from foundation.trajectory)
+    waypoints = trajectory.create_waypoint_pattern(args.waypoint_pattern, args.waypoint_scale)
     
     # Show waypoint markers if requested
     if args.show_waypoints:

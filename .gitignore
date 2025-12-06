@@ -2,3 +2,4 @@ __pycache__*
 blendcache_*
 .DS_Store*
 *.blend*
+output/

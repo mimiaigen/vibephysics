@@ -72,64 +72,6 @@ def create_floating_sphere(index, mass, location, total_count, z_surface=0.0):
     
     return sphere
 
-def create_floating_cube(index, mass, location, size=0.5, z_surface=0.0):
-    """
-    Creates a cube and makes it floatable.
-    """
-    bpy.ops.mesh.primitive_cube_add(size=size, location=location)
-    cube = bpy.context.active_object
-    cube.name = f"FloatingCube_{index}_Mass_{mass}"
-    
-    make_object_floatable(cube, mass, z_surface, collision_shape='BOX')
-    
-    return cube
-
-def create_floating_mesh(index, mesh_type, mass, location, z_surface=0.0, **kwargs):
-    """
-    Creates various mesh types and makes them floatable.
-    
-    Args:
-        mesh_type: 'SPHERE', 'CUBE', 'CYLINDER', 'CONE', 'TORUS', 'MONKEY'
-        **kwargs: Additional parameters for the mesh (e.g., radius, size, depth)
-    """
-    mesh_type = mesh_type.upper()
-    
-    if mesh_type == 'SPHERE':
-        radius = kwargs.get('radius', 0.5)
-        bpy.ops.mesh.primitive_uv_sphere_add(radius=radius, location=location)
-        collision = 'SPHERE'
-    elif mesh_type == 'CUBE':
-        size = kwargs.get('size', 1.0)
-        bpy.ops.mesh.primitive_cube_add(size=size, location=location)
-        collision = 'BOX'
-    elif mesh_type == 'CYLINDER':
-        radius = kwargs.get('radius', 0.5)
-        depth = kwargs.get('depth', 1.0)
-        bpy.ops.mesh.primitive_cylinder_add(radius=radius, depth=depth, location=location)
-        collision = 'CYLINDER'
-    elif mesh_type == 'CONE':
-        radius1 = kwargs.get('radius1', 0.5)
-        depth = kwargs.get('depth', 1.0)
-        bpy.ops.mesh.primitive_cone_add(radius1=radius1, depth=depth, location=location)
-        collision = 'CONE'
-    elif mesh_type == 'TORUS':
-        major_radius = kwargs.get('major_radius', 0.5)
-        minor_radius = kwargs.get('minor_radius', 0.2)
-        bpy.ops.mesh.primitive_torus_add(major_radius=major_radius, minor_radius=minor_radius, location=location)
-        collision = 'CONVEX_HULL'
-    elif mesh_type == 'MONKEY':
-        bpy.ops.mesh.primitive_monkey_add(size=kwargs.get('size', 1.0), location=location)
-        collision = 'CONVEX_HULL'
-    else:
-        raise ValueError(f"Unknown mesh_type: {mesh_type}")
-    
-    obj = bpy.context.active_object
-    obj.name = f"Floating{mesh_type.capitalize()}_{index}"
-    bpy.ops.object.shade_smooth()
-    
-    make_object_floatable(obj, mass, z_surface, collision_shape=collision)
-    
-    return obj
 
 def generate_scattered_positions(num_points, spawn_radius, min_dist, z_pos, z_range=0.0):
     """

@@ -90,77 +90,6 @@ def create_circular_path(radius=10.0, scale_y=0.5, z_location=0.0, name="Path"):
     return path
 
 
-def create_linear_path(start, end, z_location=0.0, name="LinearPath"):
-    """
-    Creates a straight line path between two points.
-    
-    Args:
-        start: (x, y) start point
-        end: (x, y) end point
-        z_location: Z-coordinate for path
-        name: Object name
-        
-    Returns:
-        Blender curve object
-    """
-    curve_data = bpy.data.curves.new(name=name, type='CURVE')
-    curve_data.dimensions = '3D'
-    
-    spline = curve_data.splines.new('BEZIER')
-    spline.bezier_points.add(1)  # Add one more point (starts with 1)
-    
-    spline.bezier_points[0].co = (start[0], start[1], z_location)
-    spline.bezier_points[1].co = (end[0], end[1], z_location)
-    
-    # Set handles to auto for smooth interpolation
-    for point in spline.bezier_points:
-        point.handle_left_type = 'AUTO'
-        point.handle_right_type = 'AUTO'
-    
-    curve_obj = bpy.data.objects.new(name, curve_data)
-    bpy.context.scene.collection.objects.link(curve_obj)
-    
-    return curve_obj
-
-
-def create_figure_eight_path(radius=10.0, z_location=0.0, name="FigureEightPath"):
-    """
-    Creates a figure-8 path.
-    
-    Args:
-        radius: Size of each loop
-        z_location: Z-coordinate for path
-        name: Object name
-        
-    Returns:
-        Blender curve object
-    """
-    curve_data = bpy.data.curves.new(name=name, type='CURVE')
-    curve_data.dimensions = '3D'
-    
-    spline = curve_data.splines.new('BEZIER')
-    spline.bezier_points.add(3)  # 4 points total
-    spline.use_cyclic_u = True
-    
-    # Define figure-8 control points
-    points = [
-        (-radius, 0, z_location),
-        (0, radius, z_location),
-        (radius, 0, z_location),
-        (0, -radius, z_location)
-    ]
-    
-    for i, pos in enumerate(points):
-        spline.bezier_points[i].co = pos
-        spline.bezier_points[i].handle_left_type = 'AUTO'
-        spline.bezier_points[i].handle_right_type = 'AUTO'
-    
-    curve_obj = bpy.data.objects.new(name, curve_data)
-    bpy.context.scene.collection.objects.link(curve_obj)
-    
-    return curve_obj
-
-
 def create_waypoint_path(waypoints, closed=False, z_location=None, name="WaypointPath"):
     """
     Creates a path through multiple waypoints.
@@ -197,3 +126,133 @@ def create_waypoint_path(waypoints, closed=False, z_location=None, name="Waypoin
     bpy.context.scene.collection.objects.link(curve_obj)
     
     return curve_obj
+
+
+# =============================================================================
+# Waypoint Pattern Presets
+# =============================================================================
+
+# Available pattern names for reference
+WAYPOINT_PATTERNS = ['exploration', 's_curve', 'figure_eight', 'spiral', 'zigzag', 'circle', 'rectangle']
+
+
+def create_waypoint_pattern(pattern, scale=8.0):
+    """
+    Create predefined waypoint patterns for path following.
+    
+    Args:
+        pattern: Pattern name - one of:
+            - 'exploration': Visits different areas randomly
+            - 's_curve': Smooth S-curve
+            - 'figure_eight': Figure-8 pattern
+            - 'spiral': Outward spiral (2 rotations)
+            - 'zigzag': Zigzag pattern
+            - 'circle': Simple circle
+            - 'rectangle': Rectangular path
+        scale: Size scaling factor
+        
+    Returns:
+        List of (x, y) waypoints
+        
+    Example:
+        waypoints = trajectory.create_waypoint_pattern('exploration', scale=10.0)
+        path = trajectory.create_waypoint_path(waypoints, closed=True)
+    """
+    import math
+    
+    if pattern == 'exploration':
+        # Exploration pattern - visits different areas
+        waypoints = [
+            (0, 0),
+            (scale, scale * 0.5),
+            (scale * 0.5, scale),
+            (-scale * 0.3, scale * 0.8),
+            (-scale, scale * 0.2),
+            (-scale * 0.8, -scale * 0.5),
+            (0, -scale),
+            (scale * 0.6, -scale * 0.7),
+            (scale * 0.8, 0),
+        ]
+    
+    elif pattern == 's_curve':
+        # Smooth S-curve
+        waypoints = [
+            (-scale, -scale),
+            (-scale * 0.5, -scale * 0.3),
+            (0, 0),
+            (scale * 0.5, scale * 0.3),
+            (scale, scale),
+            (scale * 0.5, scale * 0.7),
+            (0, scale * 0.4),
+            (-scale * 0.5, 0),
+        ]
+    
+    elif pattern == 'figure_eight':
+        # Figure-8 with more control points for smoothness
+        waypoints = [
+            (0, 0),
+            (scale * 0.7, scale * 0.5),
+            (scale * 0.9, scale * 0.9),
+            (scale * 0.5, scale),
+            (0, scale * 0.7),
+            (-scale * 0.5, scale),
+            (-scale * 0.9, scale * 0.9),
+            (-scale * 0.7, scale * 0.5),
+            (0, 0),
+            (scale * 0.7, -scale * 0.5),
+            (scale * 0.9, -scale * 0.9),
+            (scale * 0.5, -scale),
+            (0, -scale * 0.7),
+            (-scale * 0.5, -scale),
+            (-scale * 0.9, -scale * 0.9),
+            (-scale * 0.7, -scale * 0.5),
+        ]
+    
+    elif pattern == 'spiral':
+        # Outward spiral (2 full rotations)
+        waypoints = []
+        num_points = 12
+        for i in range(num_points):
+            angle = (i / num_points) * 2 * math.pi * 2  # 2 full rotations
+            radius = scale * (0.2 + i / num_points * 0.8)  # Grow from 0.2 to 1.0
+            x = radius * math.cos(angle)
+            y = radius * math.sin(angle)
+            waypoints.append((x, y))
+    
+    elif pattern == 'zigzag':
+        # Zigzag pattern
+        waypoints = [
+            (-scale, -scale * 0.8),
+            (scale, -scale * 0.5),
+            (-scale * 0.8, -scale * 0.2),
+            (scale * 0.9, scale * 0.1),
+            (-scale, scale * 0.4),
+            (scale * 0.8, scale * 0.7),
+            (-scale * 0.7, scale),
+        ]
+    
+    elif pattern == 'circle':
+        # Simple circle with 8 points
+        waypoints = []
+        num_points = 8
+        for i in range(num_points):
+            angle = (i / num_points) * 2 * math.pi
+            x = scale * math.cos(angle)
+            y = scale * math.sin(angle)
+            waypoints.append((x, y))
+    
+    elif pattern == 'rectangle':
+        # Rectangular path
+        waypoints = [
+            (-scale, -scale * 0.5),
+            (scale, -scale * 0.5),
+            (scale, scale * 0.5),
+            (-scale, scale * 0.5),
+        ]
+    
+    else:
+        # Default to exploration if unknown pattern
+        print(f"⚠️ Unknown pattern '{pattern}', using 'exploration'")
+        return create_waypoint_pattern('exploration', scale)
+    
+    return waypoints

@@ -224,7 +224,7 @@ def run_simulation_setup(args):
             tracked_objects=spheres,
             points_per_object=args.points_per_object,
             setup_viewport=not bpy.app.background
-        )
+    )
     
     print("✅ Simulation Ready!")
     print("   - Physics: Bullet Rigid Body + Force Fields (Buoyancy, Currents)")

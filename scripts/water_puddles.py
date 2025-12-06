@@ -244,7 +244,7 @@ def run_simulation_setup(args):
             tracked_objects=debris_objects,
             points_per_object=args.points_per_object,
             setup_viewport=not bpy.app.background
-        )
+    )
     
     print("✅ Water Puddles Simulation Ready!")
     if not args.no_point_tracking:

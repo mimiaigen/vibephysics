@@ -239,7 +239,7 @@ def run_simulation_setup(args):
             tracked_objects=floating_objs,
             points_per_object=args.points_per_object,
             setup_viewport=not bpy.app.background
-        )
+    )
     
     print("✅ Water Rise Simulation Ready!")
     print("   - Physics: Rigid Body + Buoyancy")

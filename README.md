@@ -68,8 +68,13 @@ pip install -e .
 # Run annotation demo
 sh ./run_annotation.sh
 
-# Run robot simulation
+# Run robot simulation (with mounted POV camera by default)
 sh ./run_robot.sh
+
+# Run robot simulation with different camera views
+sh ./run_robot.sh mounted    # First-person POV (default)
+sh ./run_robot.sh center     # Overview from multiple angles
+sh ./run_robot.sh following  # Third-person tracking shot
 
 # Run water simulations
 sh ./run_water.sh
@@ -99,6 +104,74 @@ start output/robot_waypoint.blend
 
 Once in Blender, press **Spacebar** to play the animation and view your physics simulation!
 
+## Camera System
+
+VibePhysics includes a flexible multi-camera system with three camera rig types:
+
+| Camera Type | Description | Best For |
+|-------------|-------------|----------|
+| **Center** | Multiple cameras arranged in a circle, pointing at scene center | Overview shots, multi-angle captures |
+| **Following** | Single camera that follows and tracks a target object | Third-person view, tracking shots |
+| **Mounted** | Cameras attached directly to an object (e.g., robot head) | First-person POV, onboard views |
+
+### Usage Example
+
+```python
+from vibephysics.camera import CameraManager
+
+cam_manager = CameraManager()
+
+# Center-pointing cameras (fixed position, looking at origin)
+center_rig = cam_manager.add_center_pointing('center', num_cameras=4, radius=25, height=12)
+center_rig.create(target_location=(0, 0, 0))
+
+# Following camera (tracks a moving object)
+follow_rig = cam_manager.add_following('following', height=12, look_angle=60)
+follow_rig.create(target=robot_armature)
+
+# Mounted cameras (attached to robot head for POV shots)
+mounted_rig = cam_manager.add_object_mounted('mounted', num_cameras=4, distance=0.15)
+mounted_rig.create(parent_object=robot_head, lens=10)
+
+# Activate a specific camera
+cam_manager.activate_rig('mounted', camera_index=0)  # Front camera
+```
+
+### Command Line Options
+
+Robot simulations support camera selection via shell script or Python:
+
+```bash
+# Via shell script (recommended)
+sh run_robot.sh mounted    # First-person POV (default)
+sh run_robot.sh center     # Overview from multiple angles
+sh run_robot.sh following  # Third-person tracking shot
+
+# Via Python directly
+python examples/robot/robot_waypoint_walk.py --active-camera mounted
+python examples/robot/robot_waypoint_walk.py --active-camera center
+python examples/robot/robot_waypoint_walk.py --active-camera following
+```
+
+### Switching Cameras in Blender
+
+**All three camera rigs are created in every `.blend` file** — the command line option only sets which one is active by default. You can manually switch between any camera directly in Blender:
+
+1. **Open the `.blend` file** in Blender
+2. **Press `Numpad 0`** to view through the active camera
+3. **Switch cameras** using one of these methods:
+   - **Outliner (Easiest)**: In the top-right Outliner panel, find camera objects (e.g., `MountedCam_0`, `CenterCam_0`, `FollowingCam`) → Click the **green camera icon** 🎥 next to the camera name to make it active
+   - **Right-click Menu**: Right-click a camera in Outliner → **Set Active Camera**
+   - **Keyboard**: Select a camera → Press `Ctrl + Numpad 0` to make it active
+   - **View Menu**: View → Cameras → Set Active Object as Camera
+
+> 💻 **Mac Users**: MacBooks don't have a numpad. Enable **Emulate Numpad** in Blender:
+> - Go to **Edit → Preferences → Input**
+> - Check **Emulate Numpad**
+> - Now use regular number keys: `0` for camera view, `Ctrl + 0` to set active camera
+
+This means you can generate a single `.blend` file and render from any camera angle without re-running the simulation.
+
 ## Project Structure
 
 ```
@@ -115,13 +188,19 @@ vibephysics/
 │   │   ├── open_duck.py    # Open Duck robot integration
 │   │   ├── trajectory.py   # Waypoint paths
 │   │   └── scene.py        # Scene initialization
-│   └── annotation/         # Visualization tools
-│       ├── base.py         # Base annotation classes
-│       ├── bbox.py         # Bounding box annotations
-│       ├── motion_trail.py # Motion path visualization
-│       ├── point_tracking.py # Point cloud tracking
-│       ├── viewport.py     # Dual viewport setup
-│       └── manager.py      # Unified annotation API
+│   ├── annotation/         # Visualization tools
+│   │   ├── base.py         # Base annotation classes
+│   │   ├── bbox.py         # Bounding box annotations
+│   │   ├── motion_trail.py # Motion path visualization
+│   │   ├── point_tracking.py # Point cloud tracking
+│   │   ├── viewport.py     # Dual viewport setup
+│   │   └── manager.py      # Unified annotation API
+│   └── camera/             # Camera system
+│       ├── base.py         # Base camera classes
+│       ├── center.py       # Center-pointing cameras
+│       ├── following.py    # Following camera rig
+│       ├── mounted.py      # Object-mounted cameras
+│       └── manager.py      # Camera manager API
 ├── examples/
 │   ├── basics/             # Annotation demos
 │   ├── water/              # Water simulations

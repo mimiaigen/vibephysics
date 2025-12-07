@@ -101,7 +101,7 @@ def setup_collision_meshes(part_objects, kinematic=True, friction=0.8, restituti
     if skipped > 0:
         print(f"    Added collision to {count} mesh parts (skipped {skipped} children to avoid cycles)")
     else:
-    print(f"    Added collision to {count} mesh parts")
+        print(f"    Added collision to {count} mesh parts")
     return count
 
 def animate_walking(armature, path_curve, ground_object, 

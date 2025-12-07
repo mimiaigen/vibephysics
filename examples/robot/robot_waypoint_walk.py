@@ -59,7 +59,7 @@ def parse_args():
                              help='Camera distance from center (for center rig)')
     camera_group.add_argument('--camera-height', type=float, default=12.0,
                              help='Camera height')
-    camera_group.add_argument('--active-camera', type=str, default='center',
+    camera_group.add_argument('--active-camera', type=str, default='mounted',
                              choices=['center', 'following', 'mounted'],
                              help='Which camera rig to activate by default')
     camera_group.add_argument('--center-cameras', type=int, default=4,

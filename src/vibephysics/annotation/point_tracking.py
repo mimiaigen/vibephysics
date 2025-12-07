@@ -46,7 +46,7 @@ def sample_mesh_surface_points(obj, num_points=50, seed=None):
     
     if not mesh or not mesh.polygons:
         if mesh:
-        obj_eval.to_mesh_clear()
+            obj_eval.to_mesh_clear()
         return []
     
     # Build list of triangles with their areas
@@ -78,7 +78,7 @@ def sample_mesh_surface_points(obj, num_points=50, seed=None):
             
             if area > 0:
                 triangles.append((v0.copy(), v1.copy(), v2.copy(), area))
-        total_area += area
+                total_area += area
     
     if total_area == 0 or not triangles:
         obj_eval.to_mesh_clear()

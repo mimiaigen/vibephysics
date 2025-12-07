@@ -6,7 +6,7 @@
 
 ## 🎬 Example Results
 
-![Result Demo](result_demo_compressed.gif)
+![Result Demo](result_demo.gif)
 
 *Robot walking simulation with rigid body physics, interacting with uneven ground, puddles, and real-time annotation overlay.*
 

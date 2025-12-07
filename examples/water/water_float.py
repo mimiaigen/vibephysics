@@ -214,9 +214,9 @@ def run_simulation_setup(args):
         caustic_strength=args.caustic_strength
     )
     
-    # Setup camera
+    # Setup camera (4 cameras around scene center)
     create_center_cameras(
-        num_cameras=1,
+        num_cameras=4,
         radius=args.camera_radius,
         height=args.camera_height
     )

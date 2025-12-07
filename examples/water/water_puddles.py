@@ -163,9 +163,9 @@ def run_simulation_setup(args):
         caustic_scale=10.0
     )
     
-    # Setup camera
+    # Setup camera (4 cameras around scene center)
     create_center_cameras(
-        num_cameras=1,
+        num_cameras=4,
         radius=args.terrain_size * 0.8,
         height=8.0
     )

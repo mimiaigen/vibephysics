@@ -8,7 +8,7 @@
 
 ![Result Demo](result_demo.gif)
 
-*Robot walking simulation with water physics, react to the uneven ground with puddles, and real-time annotation overlay.*
+*Robot walking simulation with rigid body physics colliding with balls on the ground, and interact with uneven ground with puddles, and real-time annotation overlay.*
 
 ## 📊 Annotation Tools Demo
 

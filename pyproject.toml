@@ -4,10 +4,9 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "vibephysics"
-version = "0.1.1"
+version = "0.1.2"
 description = "Physics simulation and annotation tools for Blender"
 readme = "README.md"
-license = {text = "AGPL-3.0"}
 requires-python = ">=3.11"
 authors = [
     {name = "tsunyi", email = "tsunyi@mimiaigen.com"}
@@ -25,7 +24,6 @@ classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
     "Intended Audience :: Science/Research",
-    "License :: OSI Approved :: GNU Affero General Public License v3",
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.11",
@@ -48,6 +46,9 @@ Homepage = "https://github.com/yourusername/vibephysics"
 Documentation = "https://github.com/yourusername/vibephysics#readme"
 Repository = "https://github.com/yourusername/vibephysics.git"
 Issues = "https://github.com/yourusername/vibephysics/issues"
+
+[tool.setuptools]
+license-files = []
 
 [tool.setuptools.packages.find]
 where = ["src"]

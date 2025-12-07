@@ -5,6 +5,7 @@ Demonstrates the unified annotation system with:
 - Bounding boxes (animated)
 - Motion trails (baked paths)
 - Point tracking (surface point cloud)
+- Camera systems (center-pointing, following, object-mounted)
 
 Uses the new AnnotationManager for simplified API.
 """
@@ -20,6 +21,7 @@ _root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
 sys.path.insert(0, os.path.join(_root, 'src'))
 
 from vibephysics.annotation import AnnotationManager, bbox, motion_trail, point_tracking, viewport
+from vibephysics.camera import CameraManager
 
 
 def setup_demo_scene():
@@ -73,13 +75,73 @@ def setup_demo_scene():
         torus.keyframe_insert(data_path="location", frame=f)
         torus.keyframe_insert(data_path="rotation_euler", frame=f)
 
-    # Setup Camera
-    bpy.ops.object.camera_add(location=(0, -12, 8))
-    cam = bpy.context.active_object
-    cam.rotation_euler = (math.radians(60), 0, 0)
-    bpy.context.scene.camera = cam
-    
+    # Camera setup is handled separately to demonstrate different camera systems
     return objects
+
+
+def setup_camera_systems(objects):
+    """
+    Demonstrate the three camera system types.
+    
+    Camera Types:
+    1. CenterPointingCameraRig: 6 cameras pointing at scene center
+    2. FollowingCamera: Camera following the bouncing sphere
+    3. ObjectMountedCameraRig: 4 cameras attached to the cube (front/right/back/left)
+    """
+    cube, sphere, torus = objects
+    
+    print("\n📷 Setting up Camera Systems...")
+    
+    # Create camera manager to organize all camera rigs
+    cam_manager = CameraManager()
+    
+    # ==========================================================================
+    # Camera Type 1: Center-Pointing Cameras (4 cameras around scene)
+    # ==========================================================================
+    print("  📷 Type 1: Center-pointing cameras (4 cameras)")
+    center_rig = cam_manager.add_center_pointing(
+        name='center', 
+        num_cameras=4, 
+        radius=15.0, 
+        height=8.0
+    )
+    center_rig.create(target_location=(0, 0, 1))  # Point at scene center, slightly elevated
+    
+    # ==========================================================================
+    # Camera Type 2: Following Camera (bird's eye view following sphere)
+    # ==========================================================================
+    print("  📷 Type 2: Following camera (tracks sphere)")
+    follow_rig = cam_manager.add_following(
+        name='follow',
+        height=10.0,
+        look_angle=50  # 50 degrees from vertical
+    )
+    follow_rig.create(target=sphere)  # Follow the bouncing sphere
+    
+    # ==========================================================================
+    # Camera Type 3: Object-Mounted Cameras (4 cameras on cube, looking outward)
+    # ==========================================================================
+    print("  📷 Type 3: Object-mounted cameras (4 POV cameras on cube)")
+    mounted_rig = cam_manager.add_object_mounted(
+        name='mounted',
+        num_cameras=4,
+        distance=3.0,  # Distance from cube center
+        height_offset=0.5,
+        directions=['front', 'right', 'back', 'left']
+    )
+    mounted_rig.create(parent_object=cube)  # Cameras move with the cube!
+    
+    # ==========================================================================
+    # Set default active camera (center pointing, camera at 270°)
+    # ==========================================================================
+    cam_manager.activate_rig('center', camera_index=3)  # Camera_3_Angle_270
+    
+    print(f"\n  Total cameras created: {len(cam_manager.get_all_cameras())}")
+    print("    - 4 center-pointing cameras (fixed positions, track center)")
+    print("    - 1 following camera (bird's eye view, tracks sphere)")
+    print("    - 4 mounted cameras (attached to cube, move with it)")
+    
+    return cam_manager
 
 
 def run():
@@ -90,6 +152,12 @@ def run():
     
     objects = setup_demo_scene()
     cube, sphere, torus = objects
+    
+    # ==========================================================================
+    # Camera Systems Setup
+    # ==========================================================================
+    # Demonstrate all three camera types before annotations
+    cam_manager = setup_camera_systems(objects)
     
     # ==========================================================================
     # Method 1: Using AnnotationManager (Recommended)
@@ -160,10 +228,18 @@ def run():
     print(f"   - {len(mgr.bboxes)} bounding boxes (cube, sphere, torus)")
     print(f"   - {len(mgr.trails)} motion trails (cube, sphere, torus)")
     print(f"   - {len(mgr.point_clouds)} point cloud tracker")
+    print("\nCamera Summary:")
+    print(f"   - {len(cam_manager.get_all_cameras())} total cameras")
+    print("   - Type 1: 4 center-pointing cameras (fixed, track center)")
+    print("   - Type 2: 1 following camera (bird's eye, tracks sphere)")
+    print("   - Type 3: 4 object-mounted cameras (attached to cube)")
+    print("   - Default view: Camera_3_Angle_270")
     print("\nTo view in Blender:")
     print("   1. Open the .blend file")
     print("   2. Run 'restore_point_tracking_viewport.py' from Text Editor")
     print("   3. Press Space to play animation")
+    print("   4. Use Numpad 0 to view through active camera")
+    print("   5. Switch cameras in Properties > Scene > Camera")
 
 
 if __name__ == "__main__":

@@ -1,5 +1,19 @@
+"""
+Lighting Module
+
+Provides scene lighting setup: sky/world, caustics, volumetrics, and render settings.
+
+For camera setup, use the dedicated camera module:
+    from vibephysics.camera import (
+        CenterPointingCameraRig,
+        FollowingCamera,
+        ObjectMountedCameraRig,
+    )
+"""
+
 import bpy
 import math
+
 
 def create_caustics_light(scale, energy=20.0):
     """
@@ -122,56 +136,31 @@ def create_underwater_volume(z_surface, z_bottom, density):
     vol.visible_shadow = False
 
 
-def setup_lighting_and_camera(camera_radius, camera_height, resolution_x, resolution_y, start_frame, end_frame, 
-                              enable_caustics, enable_volumetric, z_surface, z_bottom, volumetric_density, caustic_scale, 
-                              caustic_strength=8000.0, water_obj_name="Water_Visual"):
-    """Visual Scene Setup (Non-Physics) - Natural lighting from sky only"""
-    # Cameras - Create 6 cameras evenly distributed around the circle
-    cameras = []
-    num_cameras = 6
+def setup_lighting(resolution_x, resolution_y, start_frame, end_frame, 
+                   enable_caustics=False, enable_volumetric=False, 
+                   z_surface=0.0, z_bottom=-5.0, volumetric_density=0.1, 
+                   caustic_scale=10.0, caustic_strength=8000.0):
+    """
+    Setup scene lighting, world/sky, and render settings.
     
-    for i in range(num_cameras):
-        angle_deg = i * (360.0 / num_cameras)
-        angle_rad = math.radians(angle_deg)
-        
-        # Calculate position on circle
-        cam_x = camera_radius * math.cos(angle_rad)
-        cam_y = camera_radius * math.sin(angle_rad)
-        cam_z = camera_height
-        
-        bpy.ops.object.camera_add(location=(cam_x, cam_y, cam_z))
-        cam = bpy.context.active_object
-        cam.name = f"Camera_{i}_Angle_{int(angle_deg)}"
-        cameras.append(cam)
-        
-        # Point camera at center or water object
-        constraint = cam.constraints.new(type='TRACK_TO')
-        target_obj = bpy.data.objects.get(water_obj_name)
-        
-        if target_obj:
-            # Track the water object if it exists
-            constraint.target = target_obj
-        else:
-            # Fallback: Create an empty at (0,0,0) to track the center
-            if not bpy.data.objects.get("Camera_Target_Center"):
-                bpy.ops.object.empty_add(type='PLAIN_AXES', location=(0, 0, 0))
-                center_empty = bpy.context.active_object
-                center_empty.name = "Camera_Target_Center"
-                center_empty.empty_display_size = 0.5
-                center_empty.hide_render = True
-            constraint.target = bpy.data.objects.get("Camera_Target_Center")
-        
-        constraint.track_axis = 'TRACK_NEGATIVE_Z'
-        constraint.up_axis = 'UP_Y'
-        
-    # Set the active camera (Default to first one)
-    if cameras:
-        bpy.context.scene.camera = cameras[0]
+    For camera setup, use the dedicated camera module:
+        from vibephysics.camera import CenterPointingCameraRig, FollowingCamera
     
-    # NO artificial lights - only environment lighting
-    # Caustics disabled by default for natural look
+    Args:
+        resolution_x: Render width in pixels
+        resolution_y: Render height in pixels
+        start_frame: Animation start frame
+        end_frame: Animation end frame
+        enable_caustics: Enable caustic light effects
+        enable_volumetric: Enable underwater volumetric effects
+        z_surface: Water surface Z level (for volumetrics)
+        z_bottom: Water bottom Z level (for volumetrics)
+        volumetric_density: Density of volumetric scattering
+        caustic_scale: Scale of caustic pattern
+        caustic_strength: Intensity of caustic light
+    """
+    # Caustics (optional)
     if enable_caustics:
-        # Subtle caustics that complement natural sky lighting
         create_caustics_light(scale=caustic_scale, energy=caustic_strength)
         
     if enable_volumetric:
@@ -233,21 +222,3 @@ def setup_lighting_and_camera(camera_radius, camera_height, resolution_x, resolu
                  bpy.context.scene.eevee.use_raytracing = True
         except:
             pass
-
-def setup_camera_tracking(target_object, track_axis='TRACK_NEGATIVE_Z', up_axis='UP_Y'):
-    """
-    Make the scene camera track a target object.
-    Hides low-level constraint setup.
-    
-    Args:
-        target_object: Object for camera to track
-        track_axis: Which camera axis points at target
-        up_axis: Which camera axis points up
-    """
-    cam = bpy.context.scene.camera
-    if cam:
-        constraint = cam.constraints.new(type='TRACK_TO')
-        constraint.target = target_object
-        constraint.track_axis = track_axis
-        constraint.up_axis = up_axis
-    return cam

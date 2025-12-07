@@ -8,6 +8,7 @@ References: /Users/shamangary/codeDemo/Open_Duck_Blender/open-duck-mini.blend
 """
 
 import os
+from tqdm import tqdm
 from . import robot
 from . import trajectory
 
@@ -117,7 +118,7 @@ def animate_duck_walking(armature, path_curve, ground_object,
     if override_proportions:
         proportions.update(override_proportions)
     
-    print("  - animating duck walk cycle...")
+    print("  - Animating duck walk cycle...")
     scene = bpy.context.scene
     
     scale_mult = armature.scale[0]
@@ -152,7 +153,7 @@ def animate_duck_walking(armature, path_curve, ground_object,
     # Cycle timing
     frames_per_cycle = int(20 / speed)
     
-    for frame in range(start_frame, end_frame + 1):
+    for frame in tqdm(range(start_frame, end_frame + 1), desc="    Animating", unit="frame"):
         scene.frame_set(frame)
         
         # Calculate path position
@@ -241,12 +242,9 @@ def animate_duck_walking(armature, path_curve, ground_object,
             # Stance phase - keep foot aligned
             bone_r.rotation_euler = Euler((0, 0, base_rot), 'XYZ')
         bone_r.keyframe_insert(data_path="rotation_euler", frame=frame)
-        
-        if frame <= start_frame + 5:
-            print(f"F{frame}: phase={cycle_phase:.2f} L=({left_forward:.2f},{left_height:.2f}) R=({right_forward:.2f},{right_height:.2f})")
     
     bpy.ops.object.mode_set(mode='OBJECT')
-    print(f"  - Duck animation complete! Frames {start_frame}-{end_frame}")
+    print(f"  - Duck animation complete! {end_frame - start_frame + 1} frames ({start_frame}-{end_frame})")
 
 
 def setup_duck_collision(robot_parts, kinematic=True):

@@ -23,6 +23,7 @@ sys.path.insert(0, os.path.join(_root, 'src'))
 
 from vibephysics.foundation import scene, physics, ground, water, open_duck, objects, materials, lighting, trajectory
 from vibephysics.annotation import AnnotationManager, viewport
+from vibephysics.camera import CameraManager
 
 
 def parse_args():
@@ -41,7 +42,7 @@ def parse_args():
                           help='Number of falling debris spheres')
     sim_group.add_argument('--start-frame', type=int, default=1,
                           help='Animation start frame')
-    sim_group.add_argument('--end-frame', type=int, default=400,
+    sim_group.add_argument('--end-frame', type=int, default=250,
                           help='Animation end frame')
     sim_group.add_argument('--walk-speed', type=float, default=0.8,
                           help='Walking speed multiplier')
@@ -55,9 +56,22 @@ def parse_args():
     
     camera_group = parser.add_argument_group('Camera Settings')
     camera_group.add_argument('--camera-radius', type=float, default=25.0,
-                             help='Camera distance from center')
+                             help='Camera distance from center (for center rig)')
     camera_group.add_argument('--camera-height', type=float, default=12.0,
                              help='Camera height')
+    camera_group.add_argument('--active-camera', type=str, default='center',
+                             choices=['center', 'following', 'mounted'],
+                             help='Which camera rig to activate by default')
+    camera_group.add_argument('--center-cameras', type=int, default=4,
+                             help='Number of center-pointing cameras')
+    camera_group.add_argument('--mounted-cameras', type=int, default=4,
+                             help='Number of mounted cameras')
+    camera_group.add_argument('--mounted-distance', type=float, default=0.15,
+                             help='Distance of mounted cameras from robot head')
+    camera_group.add_argument('--mounted-mesh', type=str, default='head',
+                             help='Name (or partial name) of mesh to mount cameras on')
+    camera_group.add_argument('--mounted-rotation', type=float, default=0.0,
+                             help='Additional rotation offset in degrees for mounted cameras')
     
     visual_group = parser.add_argument_group('Visual Settings')
     visual_group.add_argument('--resolution-x', type=int, default=1920,
@@ -110,7 +124,7 @@ def run_simulation_setup(args):
     scene.init_simulation(
         start_frame=args.start_frame,
         end_frame=args.end_frame,
-        physics_config={'substeps': 20, 'solver_iters': 20, 'cache_buffer': 50}
+        physics_config={'substeps': 20, 'solver_iters': 20, 'cache_buffer': 0}
     )
     
     # 2. Terrain (Uneven Ground)
@@ -237,10 +251,8 @@ def run_simulation_setup(args):
         mgr.finalize(setup_viewport=False)
         viewport.create_viewport_restore_script("AnnotationViz")
     
-    # 11. Lighting and Camera
-    lighting.setup_lighting_and_camera(
-        camera_radius=args.camera_radius,
-        camera_height=args.camera_height,
+    # 11. Lighting
+    lighting.setup_lighting(
         resolution_x=args.resolution_x,
         resolution_y=args.resolution_y,
         start_frame=args.start_frame,
@@ -250,14 +262,94 @@ def run_simulation_setup(args):
         z_bottom=z_ground,
         enable_volumetric=False,
         volumetric_density=0.0,
-        caustic_scale=10.0,
-        water_obj_name="Water_Puddles"  # Match the actual water object name
+        caustic_scale=10.0
     )
     
-    # Camera tracks robot (always enabled)
-    lighting.setup_camera_tracking(armature)
+    # 12. Camera Setup - All three camera types pointing at robot
+    print("\n📷 Setting up Camera Rigs...")
     
-    # 12. Bake physics
+    cam_manager = CameraManager()
+    
+    # 12a. Center pointing cameras - arranged in a circle, pointing at scene center (fixed)
+    center_rig = cam_manager.add_center_pointing(
+        'center', 
+        num_cameras=args.center_cameras, 
+        radius=args.camera_radius, 
+        height=args.camera_height
+    )
+    center_rig.create(target_location=(0, 0, 0))  # Fixed at origin, not following robot
+    print(f"  - Center rig: {args.center_cameras} cameras at radius={args.camera_radius}, height={args.camera_height} (fixed at origin)")
+    
+    # 12b. Following camera - follows robot from above, pointing at robot center
+    follow_rig = cam_manager.add_following(
+        'following',
+        height=args.camera_height,
+        look_angle=60
+    )
+    follow_rig.create(target=armature)
+    print(f"  - Following camera: height={args.camera_height}, look_angle=60°")
+    
+    # 12c. Mounted cameras - attached to robot head, looking outward (POV cameras)
+    # Find the specified mesh by name (default: 'head' matches 'head.001', etc.)
+    # Priority: 1) exact match, 2) starts with name, 3) contains name
+    mount_target = None
+    search_name = args.mounted_mesh.lower()
+    
+    # First pass: look for exact match (e.g., "head.001" or "head")
+    for part in robot_parts:
+        if part and part.type == 'MESH':
+            part_base = part.name.lower().split('.')[0]  # "head.001" -> "head"
+            if part_base == search_name or part.name.lower() == search_name:
+                mount_target = part
+                break
+    
+    # Second pass: look for name that starts with search term
+    if mount_target is None:
+        for part in robot_parts:
+            if part and part.type == 'MESH':
+                if part.name.lower().startswith(search_name):
+                    mount_target = part
+                    break
+    
+    # Fallback: if no match, try first mesh
+    if mount_target is None:
+        for part in robot_parts:
+            if part and part.type == 'MESH':
+                mount_target = part
+                print(f"  - Warning: '{args.mounted_mesh}' not found, using '{part.name}'")
+                break
+    
+    if mount_target:
+        # Open Duck uses -Y as forward direction
+        mounted_rig = cam_manager.add_object_mounted(
+            'mounted',
+            num_cameras=args.mounted_cameras,
+            distance=args.mounted_distance,
+            height_offset=0.05,  # Small offset for duck's head
+            forward_axis='-Y',  # Open Duck faces -Y direction
+            rotation_offset=args.mounted_rotation  # User-adjustable rotation
+        )
+        mounted_rig.create(parent_object=mount_target, lens=10)  # Wide angle for POV
+        print(f"  - Mounted rig: {args.mounted_cameras} cameras on '{mount_target.name}' (lens=10, forward=-Y, rot_offset={args.mounted_rotation}°)")
+    else:
+        print("  - Mounted rig: Skipped (no suitable mesh part found)")
+    
+    # Activate the requested camera rig
+    if args.active_camera == 'center':
+        # Camera at 270° - viewing from -Y direction
+        cam_manager.activate_rig('center', camera_index=args.center_cameras - 1)
+        print(f"  - Active camera: Center rig (270° angle)")
+    elif args.active_camera == 'following':
+        cam_manager.activate_rig('following', camera_index=0)
+        print(f"  - Active camera: Following camera")
+    elif args.active_camera == 'mounted' and mount_target:
+        cam_manager.activate_rig('mounted', camera_index=0)
+        print(f"  - Active camera: Mounted rig (front view)")
+    else:
+        cam_manager.activate_rig('center', camera_index=args.center_cameras - 1)
+        print(f"  - Active camera: Center rig (default)")
+    
+    # 13. Bake physics
     print("\n  - Baking physics...")
     physics.bake_all()
     

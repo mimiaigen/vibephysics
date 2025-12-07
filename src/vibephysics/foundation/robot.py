@@ -55,10 +55,29 @@ def setup_collision_meshes(part_objects, kinematic=True, friction=0.8, restituti
     """
     Sets up collision for robot parts/meshes.
     If kinematic=True, they follow animation but collide with other active objects.
+    
+    To avoid Blender dependency cycles, we only add rigid bodies to parts that
+    are NOT parented to other mesh parts in the same list. Parts parented to
+    armature/bones are fine.
     """
-    print("  - setting up robot collision physics...")
+    print("  - Setting up robot collision physics...")
     count = 0
+    skipped = 0
+    
+    # Create a set of mesh part names for quick lookup
+    part_names = {p.name for p in part_objects if p and p.type == 'MESH'}
+    
     for part in part_objects:
+        if not part or part.type != 'MESH':
+            continue
+        
+        # Check if this part is parented to another mesh in our list
+        # If so, skip it to avoid dependency cycles
+        parent = part.parent
+        if parent and parent.type == 'MESH' and parent.name in part_names:
+            skipped += 1
+            continue
+            
         # Add rigid body
         bpy.ops.object.select_all(action='DESELECT')
         part.select_set(True)
@@ -74,10 +93,14 @@ def setup_collision_meshes(part_objects, kinematic=True, friction=0.8, restituti
             rb.friction = friction
             rb.restitution = restitution
             rb.collision_margin = 0.001
+            
             count += 1
         except Exception as e:
-            print(f"Warning: Could not add rigid body to {part.name}: {e}")
+            print(f"    Warning: Could not add rigid body to {part.name}: {e}")
             
+    if skipped > 0:
+        print(f"    Added collision to {count} mesh parts (skipped {skipped} children to avoid cycles)")
+    else:
     print(f"    Added collision to {count} mesh parts")
     return count
 
@@ -244,8 +267,11 @@ def load_rigged_robot(filepath, transform=None):
     
     for obj in data_to.objects:
         if obj:
+            # Skip unwanted objects from the blend file
             if "Background" in obj.name:
                 continue
+            if obj.type in ('CAMERA', 'LIGHT', 'FONT'):
+                continue  # Don't import cameras, lights, or text from robot blend file
 
             if obj.name not in bpy.context.scene.objects:
                 bpy.context.scene.collection.objects.link(obj)

@@ -1,3 +1,10 @@
+"""
+Demo: Motion Trail with Camera Systems
+
+Demonstrates motion trail annotation combined with different camera views.
+Shows how object-mounted cameras can provide dynamic POV perspectives.
+"""
+
 import sys
 import os
 import bpy
@@ -8,6 +15,7 @@ _root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
 sys.path.insert(0, os.path.join(_root, 'src'))
 
 from vibephysics.annotation import motion_trail
+from vibephysics.camera import CameraManager
 
 def setup_demo_scene():
     # Clear existing objects
@@ -30,21 +38,80 @@ def setup_demo_scene():
         
         obj.location = (x, 0, z)
         obj.keyframe_insert(data_path="location", frame=frame)
-        
-    # Setup Camera
-    bpy.ops.object.camera_add(location=(0, -10, 5))
-    cam = bpy.context.active_object
-    cam.rotation_euler = (math.radians(75), 0, 0)
-    bpy.context.scene.camera = cam
     
     return obj
 
+
+def setup_camera_systems(obj):
+    """
+    Setup camera systems to view the bouncing ball from different perspectives.
+    
+    Camera Types demonstrated:
+    1. Center-pointing: Fixed cameras looking at scene center
+    2. Following: Camera that tracks the ball from above
+    3. Object-mounted: Cameras attached to the ball (POV view)
+    """
+    print("\n📷 Setting up Camera Systems...")
+    
+    cam_manager = CameraManager()
+    
+    # ==========================================================================
+    # Type 1: Center-pointing cameras (4 cameras, smaller scene)
+    # ==========================================================================
+    print("  📷 Type 1: Center-pointing cameras (4 cameras)")
+    center_rig = cam_manager.add_center_pointing(
+        name='center',
+        num_cameras=4,
+        radius=10.0,
+        height=5.0
+    )
+    center_rig.create(target_location=(0, 0, 1.5))
+    
+    # ==========================================================================
+    # Type 2: Following camera (bird's eye tracking the ball)
+    # ==========================================================================
+    print("  📷 Type 2: Following camera (tracks ball)")
+    follow_rig = cam_manager.add_following(
+        name='follow',
+        height=8.0,
+        look_angle=60
+    )
+    follow_rig.create(target=obj)
+    
+    # ==========================================================================
+    # Type 3: Object-mounted cameras (4 cameras on the ball, looking outward)
+    # ==========================================================================
+    print("  📷 Type 3: Object-mounted POV cameras (4 on ball)")
+    mounted_rig = cam_manager.add_object_mounted(
+        name='mounted',
+        num_cameras=4,
+        distance=2.0,
+        height_offset=0.0,
+        directions=['front', 'right', 'back', 'left']
+    )
+    mounted_rig.create(parent_object=obj)
+    
+    # Set default to center camera at 270° for this demo
+    cam_manager.activate_rig('center', camera_index=3)  # Camera_3_Angle_270
+    
+    print(f"\n  Total cameras: {len(cam_manager.get_all_cameras())}")
+    
+    return cam_manager
+
 def run():
-    print("Running Motion Trail Annotation Demo...")
+    print("=" * 60)
+    print("Running Motion Trail + Camera Systems Demo")
+    print("=" * 60)
+    
     obj = setup_demo_scene()
     
+    # Setup camera systems
+    cam_manager = setup_camera_systems(obj)
+    
     # Add Motion Trail
-    motion_trail.create_motion_trail(obj, start_frame=1, end_frame=100, step=1)
+    print("\n🌀 Adding Motion Trail...")
+    motion_trail.create_motion_trail(obj, start_frame=1, end_frame=100, step=1,
+                                     color=(0.0, 1.0, 0.8, 1.0))  # Cyan trail
     
     # Create viewport restore script (runs when file is opened in UI mode)
     from vibephysics.annotation import viewport
@@ -56,7 +123,19 @@ def run():
         os.makedirs(output_dir)
     output_file = os.path.join(output_dir, "demo_motion_trail.blend")
     bpy.ops.wm.save_as_mainfile(filepath=output_file)
-    print(f"✅ Saved to {output_file}")
+    
+    print("\n" + "=" * 60)
+    print("✅ Demo Complete!")
+    print(f"   Saved to: {output_file}")
+    print("=" * 60)
+    print("\nCamera Summary:")
+    print(f"   - {len(cam_manager.get_all_cameras())} total cameras")
+    print("   - 4 center-pointing cameras (fixed positions)")
+    print("   - 1 following camera (tracks ball from above)")
+    print("   - 4 object-mounted POV cameras (move with ball)")
+    print("\nTry switching cameras to see different views!")
+    print("   - Following camera shows the ball with motion trail")
+    print("   - Object-mounted cameras show dynamic POV as ball bounces")
 
 if __name__ == "__main__":
     run()

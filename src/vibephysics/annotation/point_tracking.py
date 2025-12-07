@@ -474,51 +474,6 @@ def register_frame_handler(point_cloud_obj):
     print(f"✅ Registered frame handler for point cloud updates")
 
 
-def create_point_tracking_camera(point_cloud_obj, distance=40.0, angle=45.0, 
-                                  collection_name=None):
-    """
-    Create a dedicated camera for the point tracking view.
-    
-    Args:
-        point_cloud_obj: The point cloud object to track
-        distance: Camera distance from center
-        angle: Camera elevation angle in degrees
-        collection_name: Collection to put camera in
-    """
-    collection = base.ensure_collection(collection_name)
-    
-    # Create camera
-    angle_rad = math.radians(angle)
-    cam_x = distance * math.cos(angle_rad) * 0.7
-    cam_y = -distance * math.cos(angle_rad) * 0.7
-    cam_z = distance * math.sin(angle_rad)
-    
-    bpy.ops.object.camera_add(location=(cam_x, cam_y, cam_z))
-    tracking_cam = bpy.context.active_object
-    tracking_cam.name = "PointTrackingCamera"
-    
-    # Move to tracking collection
-    for coll in tracking_cam.users_collection:
-        coll.objects.unlink(tracking_cam)
-    collection.objects.link(tracking_cam)
-    
-    # Point at origin
-    tracking_cam.rotation_euler = (math.radians(90 - angle), 0, math.radians(-45))
-    
-    # Add track-to constraint
-    if point_cloud_obj:
-        constraint = tracking_cam.constraints.new(type='TRACK_TO')
-        constraint.target = point_cloud_obj
-        constraint.track_axis = 'TRACK_NEGATIVE_Z'
-        constraint.up_axis = 'UP_Y'
-    
-    # Camera settings
-    tracking_cam.data.type = 'ORTHO'
-    tracking_cam.data.ortho_scale = 30.0
-    
-    print(f"  - Created PointTrackingCamera at {tracking_cam.location}")
-
-
 def setup_point_tracking_visualization(tracked_objects, points_per_object=30, 
                                         setup_viewport=True, collection_name=None):
     """
@@ -575,13 +530,9 @@ def setup_point_tracking_visualization(tracked_objects, points_per_object=30,
             print("  - Point cloud hidden from renders")
         viewport.create_viewport_restore_script(coll_name)
     
-    # Add point cloud camera for dedicated view
-    create_point_tracking_camera(point_cloud_obj, collection_name=coll_name)
-    
     print("✅ Point Tracking Visualization Ready!")
     print(f"   - Total tracked points: {len(tracking_data) if tracking_data else 0}")
     print(f"   - View the '{coll_name}' collection for point cloud")
-    print("   - Use 'PointTrackingCamera' for dedicated tracking view")
     
     return point_cloud_obj
 

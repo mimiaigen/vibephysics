@@ -5,19 +5,22 @@ Point tracking, bounding boxes, motion trails, and visualization tools
 for annotating Blender simulations.
 
 Unified API:
-    from annotation import manager
-    mgr = manager.AnnotationManager()
+    from vibephysics.annotation import AnnotationManager
+    mgr = AnnotationManager()
     mgr.add_bbox(cube)
     mgr.add_motion_trail(cube)
     mgr.add_point_tracking([cube, sphere])
     mgr.finalize()
 
 Or use the quick API:
-    from annotation import manager
-    manager.quick_annotate([cube, sphere], bbox=True, trail=True)
+    from vibephysics.annotation import quick_annotate
+    quick_annotate([cube, sphere], bbox=True, trail=True)
 
 Individual modules:
-    from annotation import bbox, motion_trail, point_tracking, viewport
+    from vibephysics.annotation import bbox, motion_trail, point_tracking, viewport
+
+Camera systems (import from vibephysics.camera):
+    from vibephysics.camera import CameraManager, CenterPointingCameraRig
 """
 
 # Base utilities (for extension)

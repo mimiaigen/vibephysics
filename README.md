@@ -53,6 +53,7 @@ conda activate vibephysics
 
 # Install bpy (Blender as Python module)
 pip install bpy
+pip install tqdm
 
 # Install vibephysics
 pip install vibephysics

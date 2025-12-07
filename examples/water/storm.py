@@ -11,6 +11,7 @@ sys.path.insert(0, os.path.join(_root, 'src'))
 
 from vibephysics.foundation import scene, physics, water, ground, objects, materials, lighting
 from vibephysics.annotation import point_tracking
+from vibephysics.camera import CenterPointingCameraRig
 
 def parse_args():
     """Parse command-line arguments for storm simulation configuration.
@@ -179,9 +180,7 @@ def run_simulation_setup(args):
     )
     
     # 5. Rendering - Dramatic lighting for storm
-    lighting.setup_lighting_and_camera(
-        camera_radius=args.camera_radius,
-        camera_height=args.camera_height,
+    lighting.setup_lighting(
         resolution_x=args.resolution_x,
         resolution_y=args.resolution_y,
         start_frame=args.start_frame,
@@ -194,6 +193,14 @@ def run_simulation_setup(args):
         caustic_scale=20.0,
         caustic_strength=args.caustic_strength
     )
+    
+    # Camera setup - 4 cameras pointing at center, default at 270°
+    cam_rig = CenterPointingCameraRig(
+        num_cameras=4,
+        radius=args.camera_radius,
+        height=args.camera_height
+    )
+    cam_rig.create(target_object=water_visual)
     
     # Adjust world background for storm (darker, more ominous)
     world = bpy.context.scene.world

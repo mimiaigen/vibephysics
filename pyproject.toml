@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "vibephysics"
-version = "0.1.0"
+version = "0.1.1"
 description = "Physics simulation and annotation tools for Blender"
 readme = "README.md"
 license = {text = "AGPL-3.0"}

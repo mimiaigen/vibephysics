@@ -37,7 +37,7 @@ def sample_mesh_surface_points(obj, num_points=50, seed=None):
     depsgraph = base.get_depsgraph()
     if not depsgraph:
         depsgraph = bpy.context.evaluated_depsgraph_get()
-    
+        
     obj_eval = obj.evaluated_get(depsgraph)
     
     # FIXED: Use preserve_all_data_layers=True and depsgraph parameter
@@ -46,7 +46,7 @@ def sample_mesh_surface_points(obj, num_points=50, seed=None):
     
     if not mesh or not mesh.polygons:
         if mesh:
-            obj_eval.to_mesh_clear()
+        obj_eval.to_mesh_clear()
         return []
     
     # Build list of triangles with their areas
@@ -78,7 +78,7 @@ def sample_mesh_surface_points(obj, num_points=50, seed=None):
             
             if area > 0:
                 triangles.append((v0.copy(), v1.copy(), v2.copy(), area))
-                total_area += area
+        total_area += area
     
     if total_area == 0 or not triangles:
         obj_eval.to_mesh_clear()
@@ -110,7 +110,7 @@ def sample_mesh_surface_points(obj, num_points=50, seed=None):
         
         v0, v1, v2, _ = triangles[tri_idx]
             
-        # Random point in triangle using barycentric coordinates
+            # Random point in triangle using barycentric coordinates
         # Using sqrt for uniform distribution in triangle
         r1 = random.random()
         r2 = random.random()

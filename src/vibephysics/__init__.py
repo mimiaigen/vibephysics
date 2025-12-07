@@ -13,11 +13,9 @@ Usage:
     from vibephysics.annotation import AnnotationManager
 
 Note: This package requires Blender 5.0's Python environment (bpy).
-Run scripts through Blender:
-    blender -b -P your_script.py
 """
 
-__version__ = "0.1.0"
+__version__ = "0.1.3"
 __author__ = "Your Name"
 
 # Check if running inside Blender
@@ -29,40 +27,8 @@ def _check_blender_environment():
     except ImportError:
         import sys
         
-        error_message = """
-╔══════════════════════════════════════════════════════════════════════════════╗
-║                     VibePhysics - Blender 5.0 Required                       ║
-╠══════════════════════════════════════════════════════════════════════════════╣
-║  This package requires Blender 5.0's Python environment (bpy module).        ║
-║                                                                              ║
-║  ⚠️  You are running Python outside of Blender!                              ║
-║                                                                              ║
-║  To use vibephysics, run your scripts through Blender:                       ║
-║                                                                              ║
-║    # Run in background mode:                                                 ║
-║    blender -b -P your_script.py                                              ║
-║                                                                              ║
-║    # Run with GUI:                                                           ║
-║    blender -P your_script.py                                                 ║
-║                                                                              ║
-║    # Pass arguments to your script:                                          ║
-║    blender -b -P your_script.py -- --your-arg value                          ║
-║                                                                              ║
-╠══════════════════════════════════════════════════════════════════════════════╣
-║  REQUIREMENTS:                                                               ║
-║    • Blender 5.0                                                             ║
-║    • Download: https://www.blender.org/download/                             ║
-║    • Install guide: https://docs.blender.org/manual/en/latest/               ║
-║                     getting_started/installing/                              ║
-║                                                                              ║
-║  Verify Blender is installed:                                                ║
-║    blender --version                                                         ║
-╚══════════════════════════════════════════════════════════════════════════════╝
-"""
-        print(error_message, file=sys.stderr)
         raise ImportError(
-            "vibephysics requires Blender 5.0's Python environment. "
-            "Run your script with: blender -b -P your_script.py"
+            "vibephysics requires python=3.11 and Blender 5.0's Python environment. "
         )
 
 # Check environment before importing submodules

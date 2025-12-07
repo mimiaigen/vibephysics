@@ -16,6 +16,12 @@
 
 *Comprehensive annotation system featuring bounding boxes, motion trails, and point cloud tracking for computer vision datasets.*
 
+## 💧 Water Simulation Demo
+
+![Water Float Demo](water_float_demo.gif)
+
+*Water physics simulation with floating objects, buoyancy forces, dynamic ripples, and point cloud tracking.*
+
 ## ✨ Highlights
 
 - **🚀 No GPU Required** – Runs efficiently on CPU-only machines (MacBook Pro, laptops, standard workstations). GPU accelerates rendering but is not mandatory.

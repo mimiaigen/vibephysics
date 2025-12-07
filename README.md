@@ -4,6 +4,18 @@
 
 **A lightweight Blender physics simulation framework for creating realistic robot animations, rigid body physics, water dynamics, and comprehensive annotation tools — all running efficiently on CPU.**
 
+## 🎬 Example Results
+
+![Result Demo](result_demo.gif)
+
+*Robot walking simulation with water physics, react to the uneven ground with puddles, and real-time annotation overlay.*
+
+## 📊 Annotation Tools Demo
+
+![Annotation Demo](annotation_demo.gif)
+
+*Comprehensive annotation system featuring bounding boxes, motion trails, and point cloud tracking for computer vision datasets.*
+
 ## ✨ Highlights
 
 - **🚀 No GPU Required** – Runs efficiently on CPU-only machines (MacBook Pro, laptops, standard workstations). GPU accelerates rendering but is not mandatory.
@@ -14,6 +26,7 @@
 - **🔧 Developer Friendly** – Pure Python, works with Blender as a module (bpy), no GUI needed
 
 Perfect for researchers, animators, and robotics engineers who need physics simulations without expensive GPU hardware.
+
 
 ## Requirements
 

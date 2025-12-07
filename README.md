@@ -6,9 +6,13 @@
 
 ## 🎬 Example Results
 
-![Result Demo](result_demo.gif)
+![Result Demo Part 1](result_demo_part1.gif)
 
-*Robot walking simulation with rigid body physics colliding with balls on the ground, and interact with uneven ground with puddles, and real-time annotation overlay.*
+*Robot walking simulation with rigid body physics colliding with balls on the ground.*
+
+![Result Demo Part 2](result_demo_part2.gif)
+
+*Robot interacting with uneven ground with puddles, and real-time annotation overlay.*
 
 ## 📊 Annotation Tools Demo
 

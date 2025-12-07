@@ -147,6 +147,7 @@ This software is **free to use** for:
 
 ### Commercial Use
 For business or enterprise use, please contact: **tsunyi@mimiaigen.com**
+We have seperate license for business/enterprise users.
 
 
 ### Dependency

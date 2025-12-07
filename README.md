@@ -1,6 +1,19 @@
 # VibePhysics
 
-A Blender physics simulation framework for creating realistic robot animations, rigid body physics, water dynamics, and comprehensive annotation (point cloud track, bounding box, motion trails, ...) tools.
+![VibePhysics Teaser](vibephysics_teaser.png)
+
+**A lightweight Blender physics simulation framework for creating realistic robot animations, rigid body physics, water dynamics, and comprehensive annotation tools — all running efficiently on CPU.**
+
+## ✨ Highlights
+
+- **🚀 No GPU Required** – Runs smoothly on CPU-only machines (MacBook Pro, laptops, standard workstations)
+- **🤖 Robot Simulation** – Realistic IK-based walking animations with the Open Duck robot
+- **💧 Water Physics** – Dynamic water surfaces, puddles, ripples, and buoyancy simulation
+- **📊 Annotation Tools** – Bounding boxes, motion trails, and point cloud tracking for vision datasets
+- **🎯 Production Ready** – Clean API, modular architecture, and extensive examples
+- **🔧 Developer Friendly** – Pure Python, works with Blender as a module (bpy), no GUI needed
+
+Perfect for researchers, animators, and robotics engineers who need physics simulations without expensive GPU hardware.
 
 ## Requirements
 

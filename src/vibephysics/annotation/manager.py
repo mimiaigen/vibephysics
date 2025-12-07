@@ -416,10 +416,10 @@ class AnnotationManager:
             
             if all_mesh_objects:
                 print(f"  - Adding point tracking for {len(all_mesh_objects)} objects...")
-                pts_per = max(5, points_per_object // len(all_mesh_objects))
+                print(f"    ({points_per_object} points per object)")
                 results['point_cloud'] = self.add_point_tracking(
                     all_mesh_objects,
-                    points_per_object=pts_per
+                    points_per_object=points_per_object
                 )
         
         return results

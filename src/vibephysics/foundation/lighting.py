@@ -144,11 +144,23 @@ def setup_lighting_and_camera(camera_radius, camera_height, resolution_x, resolu
         cam.name = f"Camera_{i}_Angle_{int(angle_deg)}"
         cameras.append(cam)
         
-        # Point tracking at center (0,0,0) / Water_Visual
+        # Point camera at center or water object
         constraint = cam.constraints.new(type='TRACK_TO')
         target_obj = bpy.data.objects.get(water_obj_name)
+        
         if target_obj:
+            # Track the water object if it exists
             constraint.target = target_obj
+        else:
+            # Fallback: Create an empty at (0,0,0) to track the center
+            if not bpy.data.objects.get("Camera_Target_Center"):
+                bpy.ops.object.empty_add(type='PLAIN_AXES', location=(0, 0, 0))
+                center_empty = bpy.context.active_object
+                center_empty.name = "Camera_Target_Center"
+                center_empty.empty_display_size = 0.5
+                center_empty.hide_render = True
+            constraint.target = bpy.data.objects.get("Camera_Target_Center")
+        
         constraint.track_axis = 'TRACK_NEGATIVE_Z'
         constraint.up_axis = 'UP_Y'
         

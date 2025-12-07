@@ -37,3 +37,6 @@ Thumbs.db
 # Project specific
 output/
 *.blend
+
+# Video
+*.mov

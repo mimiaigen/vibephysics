@@ -17,20 +17,34 @@ from . import trajectory
 def raycast_ground(scene, xy_point, start_height=10.0, ground_objects=None):
     """
     Find ground height at xy_point.
+    Continues raycasting through non-ground objects until it finds the ground.
     """
     origin = Vector((xy_point[0], xy_point[1], start_height))
     direction = Vector((0, 0, -1))
     
-    # Raycast scene
     depsgraph = bpy.context.evaluated_depsgraph_get()
     
-    success, location, normal, index, object, matrix = scene.ray_cast(depsgraph, origin, direction)
+    # Keep raycasting until we hit the ground or nothing
+    max_iterations = 20  # Prevent infinite loop
+    current_origin = origin.copy()
     
-    if success:
-        if ground_objects is None or object in ground_objects:
+    for _ in range(max_iterations):
+        success, location, normal, index, hit_object, matrix = scene.ray_cast(
+            depsgraph, current_origin, direction
+        )
+    
+        if not success:
+            # No more hits - return default floor
+            return 0.0
+        
+        # Check if we hit the ground
+        if ground_objects is None or hit_object in ground_objects:
             return location.z
     
-    return 0.0 # Default floor
+        # Hit something else (debris, water, etc.) - continue from just below
+        current_origin = location + direction * 0.01
+    
+    return 0.0  # Default floor if we exhaust iterations
 
 
 # Trajectory functions moved to foundation/trajectory.py
@@ -70,18 +84,37 @@ def setup_collision_meshes(part_objects, kinematic=True, friction=0.8, restituti
 def animate_walking(armature, path_curve, ground_object, 
                    start_frame=1, end_frame=250, speed=1.0,
                    scale_mult=None,
+                   base_height_offset=0.0,
                    hips_height_ratio=0.33, 
                    stride_ratio=1.6,
                    step_height_ratio=0.8,
                    foot_spacing_ratio=0.6,
-                   foot_ik_names=('leg_ik.l', 'leg_ik.r')):
+                   foot_ik_names=('leg_ik.l', 'leg_ik.r'),
+                   forward_axis='Y',
+                   foot_rotation_offset=0.0):
     """
-    Animates a rigged robot (using IK) walking along a path on uneven ground.
+    Generic rigged robot walking animation along a path.
     
-    scale_mult: General scaling factor (auto-computed from armature.scale if None)
-    ratios: Parameters relative to scale_mult.
+    This is a simple reference implementation. For model-specific control
+    (like Open Duck), see the model-specific modules (e.g., foundation.open_duck).
+    
+    Args:
+        armature: Robot armature object
+        path_curve: Curve path to follow
+        ground_object: Ground object for raycasting
+        start_frame: Animation start frame
+        end_frame: Animation end frame
+        speed: Movement speed multiplier
+        scale_mult: Scale multiplier (auto-computed if None)
+        base_height_offset: Vertical offset for armature origin
+        stride_ratio: Step length
+        step_height_ratio: Step lift height
+        foot_spacing_ratio: Lateral foot spacing (not used in simple version)
+        foot_ik_names: Tuple of (left_ik, right_ik) bone names
+        forward_axis: Forward direction ('Y', '-Y', 'X', '-X')
+        foot_rotation_offset: Additional foot rotation in radians
     """
-    print("  - animating walk cycle...")
+    print("  - animating generic walk cycle...")
     scene = bpy.context.scene
     
     # Auto-compute scale multiplier if not provided
@@ -93,7 +126,7 @@ def animate_walking(armature, path_curve, ground_object,
     
     bones = armature.pose.bones
     
-    # Try to set IK mode if controller exists (common in some rigs)
+    # Try to set IK mode if controller exists
     fk_ik_ctrl = bones.get('fk_ik_controller')
     if fk_ik_ctrl and 'fk_ik' in fk_ik_ctrl:
         fk_ik_ctrl['fk_ik'] = 1.0
@@ -102,26 +135,20 @@ def animate_walking(armature, path_curve, ground_object,
     foot_ik_l = foot_ik_names[0]
     foot_ik_r = foot_ik_names[1]
     
-    # Clear any existing constraints on IK bones
-    for b_name in [foot_ik_l, foot_ik_r]:
-        if b_name in bones:
-            for c in list(bones[b_name].constraints):
-                bones[b_name].constraints.remove(c)
+    bone_l = bones.get(foot_ik_l)
+    bone_r = bones.get(foot_ik_r)
+    
+    if not bone_l or not bone_r:
+        print(f"ERROR: IK foot bones not found! Looking for {foot_ik_l}, {foot_ik_r}")
+        bpy.ops.object.mode_set(mode='OBJECT')
+        return
     
     # Walking parameters
-    hips_height = hips_height_ratio * scale_mult
-    stride_length = stride_ratio * scale_mult
-    step_height = step_height_ratio * scale_mult
-    foot_spacing = foot_spacing_ratio * scale_mult
-    
-    foot_height_offset = 0.0
+    step_length = stride_ratio
+    step_height = step_height_ratio
     
     # Cycle timing - frames per full step cycle
     frames_per_cycle = int(20 / speed)
-    
-    # Track foot plant positions
-    foot_plants_l = {}
-    foot_plants_r = {}
     
     for frame in range(start_frame, end_frame + 1):
         scene.frame_set(frame)
@@ -136,86 +163,62 @@ def animate_walking(armature, path_curve, ground_object,
         ground_z = raycast_ground(scene, path_pos_world, start_height=20.0, 
                                   ground_objects=[ground_object])
         
-        # Place armature on ground
-        armature_loc = Vector((path_pos_world.x, path_pos_world.y, ground_z))
+        # Place armature at ground level + height offset
+        armature_loc = Vector((path_pos_world.x, path_pos_world.y, ground_z + base_height_offset))
         armature.location = armature_loc
         armature.keyframe_insert(data_path="location", frame=frame)
         
-        # Rotation
-        rot_quat = tangent_world.to_track_quat('-Y', 'Z')
+        # Rotation - face along path tangent
+        rot_quat = tangent_world.to_track_quat(forward_axis, 'Z')
         armature.rotation_euler = rot_quat.to_euler()
         armature.keyframe_insert(data_path="rotation_euler", frame=frame)
         
-        # Build transform matrix
-        current_matrix = Matrix.LocRotScale(armature_loc, rot_quat, armature.scale)
-        arm_mat_inv = current_matrix.inverted()
-        
-        # Direction vectors
-        forward_vec = tangent_world.normalized()
-        right_vec = forward_vec.cross(Vector((0, 0, 1))).normalized()
-        
         # Calculate cycle phase
         cycle_phase = ((frame - start_frame) % frames_per_cycle) / frames_per_cycle
-        current_cycle = (frame - start_frame) // frames_per_cycle
         
         # Root bone bounce
         if 'root' in bones:
-            bounce = math.sin(cycle_phase * 4 * math.pi) * 0.008 * (scale_mult / 0.3) # Approximate scaling
-            bones['root'].location.z = hips_height + bounce
+            bounce = math.sin(cycle_phase * 4 * math.pi) * 0.1
+            bones['root'].location.z = bounce
             bones['root'].keyframe_insert(data_path="location", frame=frame)
         
-        def get_foot_position(is_left, phase_offset):
+        # Calculate foot offsets from REST POSITION
+        def calc_foot_offset(phase_offset):
             foot_phase = (cycle_phase + phase_offset) % 1.0
-            side_sign = 1 if is_left else -1
-            side_offset = right_vec * side_sign * foot_spacing
             
-            is_stance = foot_phase < 0.5
-            foot_plants = foot_plants_l if is_left else foot_plants_r
-            
-            if is_stance:
-                plant_key = (current_cycle, is_left, 'stance')
-                if plant_key not in foot_plants:
-                    plant_pos = armature_loc + side_offset + forward_vec * (stride_length * 0.5)
-                    plant_z = raycast_ground(scene, plant_pos, start_height=20.0, 
-                                            ground_objects=[ground_object])
-                    foot_plants[plant_key] = Vector((plant_pos.x, plant_pos.y, plant_z + foot_height_offset))
-                return foot_plants[plant_key]
+            if foot_phase < 0.5:
+                # Stance phase
+                t_stance = foot_phase / 0.5
+                forward = step_length * (0.5 - t_stance)
+                height = 0.0
             else:
-                swing_progress = (foot_phase - 0.5) / 0.5
-                
-                prev_plant_key = (current_cycle, is_left, 'stance')
-                if prev_plant_key in foot_plants:
-                    start_pos = foot_plants[prev_plant_key]
-                else:
-                    start_pos = armature_loc + side_offset - forward_vec * (stride_length * 0.5)
-                    start_z = raycast_ground(scene, start_pos, start_height=20.0, ground_objects=[ground_object])
-                    start_pos = Vector((start_pos.x, start_pos.y, start_z + foot_height_offset))
-                
-                end_pos = armature_loc + side_offset + forward_vec * (stride_length * 0.5)
-                end_z = raycast_ground(scene, end_pos, start_height=20.0, ground_objects=[ground_object])
-                end_pos = Vector((end_pos.x, end_pos.y, end_z + foot_height_offset))
-                
-                current_pos = start_pos.lerp(end_pos, swing_progress)
-                lift = math.sin(swing_progress * math.pi) * step_height
-                current_pos.z = current_pos.z + lift
-                
-                return current_pos
+                # Swing phase
+                t_swing = (foot_phase - 0.5) / 0.5
+                forward = step_length * (-0.5 + t_swing)
+                height = math.sin(t_swing * math.pi) * step_height
+            
+            return forward, height
         
-        def update_foot_bone(bone_name, world_pos):
-            if bone_name not in bones:
-                return
-            bone = bones[bone_name]
-            local_pos = arm_mat_inv @ world_pos
-            bone.location = local_pos
-            bone.keyframe_insert(data_path="location", frame=frame)
+        left_forward, left_height = calc_foot_offset(0.0)
+        right_forward, right_height = calc_foot_offset(0.5)
         
-        left_pos = get_foot_position(True, 0.0)
-        right_pos = get_foot_position(False, 0.5)
+        # Set IK target positions
+        bone_l.location = Vector((0, left_forward, left_height))
+        bone_l.keyframe_insert(data_path="location", frame=frame)
         
-        update_foot_bone(foot_ik_l, left_pos)
-        update_foot_bone(foot_ik_r, right_pos)
+        bone_r.location = Vector((0, right_forward, right_height))
+        bone_r.keyframe_insert(data_path="location", frame=frame)
+        
+        # Optional foot rotation
+        if foot_rotation_offset != 0.0:
+            bone_l.rotation_euler = Euler((0, 0, foot_rotation_offset), 'XYZ')
+            bone_l.keyframe_insert(data_path="rotation_euler", frame=frame)
+            
+            bone_r.rotation_euler = Euler((0, 0, foot_rotation_offset), 'XYZ')
+            bone_r.keyframe_insert(data_path="rotation_euler", frame=frame)
     
     bpy.ops.object.mode_set(mode='OBJECT')
+    print(f"  - Animation complete! Frames {start_frame}-{end_frame}")
 
 def load_rigged_robot(filepath, transform=None):
     """

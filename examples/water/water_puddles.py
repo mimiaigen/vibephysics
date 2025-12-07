@@ -110,7 +110,9 @@ def run_simulation_setup(args):
     materials.create_mud_material(terrain)
     
     # 3. Water Surface (Puddles with Boolean cutting)
-    z_water_level = args.z_ground - (strength * 0.15)
+    # Adjust water level multiplier: lower = more water coverage
+    # 0.15 = sparse puddles, 0.05 = moderate coverage, 0.0 = maximum water
+    z_water_level = args.z_ground - (strength * 0.1)
     water_size = args.terrain_size * 0.95 
     
     # Create cutter and water (cutter is auto-cleaned by create_puddle_water)
@@ -159,7 +161,8 @@ def run_simulation_setup(args):
         z_surface=z_water_level,
         z_bottom=args.z_ground,
         volumetric_density=0.0,
-        caustic_scale=10.0
+        caustic_scale=10.0,
+        water_obj_name="Water_Puddles"  # Match the actual water object name
     )
     
     # 7. Point Tracking Visualization

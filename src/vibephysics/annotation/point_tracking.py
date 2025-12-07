@@ -18,6 +18,10 @@ def sample_mesh_surface_points(obj, num_points=50, seed=None):
     """
     Evenly sample points on the surface of a mesh object.
     
+    Uses proper triangulation for uniform distribution across all polygon types
+    (triangles, quads, n-gons). Points are distributed proportionally to 
+    triangle areas for true uniform surface sampling.
+    
     Args:
         obj: Blender mesh object to sample from
         num_points: Number of points to sample
@@ -41,53 +45,79 @@ def sample_mesh_surface_points(obj, num_points=50, seed=None):
         obj_eval.to_mesh_clear()
         return []
     
-    # Calculate face areas for weighted sampling
-    face_areas = []
+    # Build list of triangles with their areas
+    # For n-gons, use fan triangulation from first vertex
+    # This ensures all parts of quads/n-gons are covered uniformly
+    triangles = []  # List of (v0, v1, v2, area) tuples
     total_area = 0.0
     
     for poly in mesh.polygons:
-        area = poly.area
-        face_areas.append(area)
+        verts = [mesh.vertices[vi].co.copy() for vi in poly.vertices]
+        
+        if len(verts) < 3:
+            continue
+        
+        # Fan triangulation: split polygon into triangles from first vertex
+        # For a quad with vertices [A, B, C, D], this creates triangles:
+        #   - (A, B, C)
+        #   - (A, C, D)
+        # This covers the entire polygon uniformly
+        v0 = verts[0]
+        for i in range(1, len(verts) - 1):
+            v1 = verts[i]
+            v2 = verts[i + 1]
+            
+            # Calculate triangle area using cross product
+            edge1 = v1 - v0
+            edge2 = v2 - v0
+            area = edge1.cross(edge2).length * 0.5
+            
+            if area > 0:
+                triangles.append((v0.copy(), v1.copy(), v2.copy(), area))
         total_area += area
     
-    if total_area == 0:
+    if total_area == 0 or not triangles:
         obj_eval.to_mesh_clear()
         return []
     
-    # Normalize areas to create probability distribution
-    face_weights = [a / total_area for a in face_areas]
+    # Build cumulative distribution for weighted sampling
+    cumulative_weights = []
+    cumulative = 0.0
+    for tri in triangles:
+        cumulative += tri[3] / total_area
+        cumulative_weights.append(cumulative)
     
     # Sample points
     points = []
     
     for _ in range(num_points):
-        # Weighted random face selection
+        # Weighted random triangle selection using binary search
         r = random.random()
-        cumulative = 0.0
-        face_idx = 0
         
-        for i, weight in enumerate(face_weights):
-            cumulative += weight
-            if r <= cumulative:
-                face_idx = i
-                break
+        # Binary search for the triangle
+        lo, hi = 0, len(cumulative_weights) - 1
+        while lo < hi:
+            mid = (lo + hi) // 2
+            if cumulative_weights[mid] < r:
+                lo = mid + 1
+            else:
+                hi = mid
+        tri_idx = lo
         
-        poly = mesh.polygons[face_idx]
-        
-        # Get face vertices
-        verts = [mesh.vertices[vi].co.copy() for vi in poly.vertices]
-        
-        if len(verts) >= 3:
-            # Random barycentric coordinates for triangles
-            v0, v1, v2 = verts[0], verts[1], verts[2]
+        v0, v1, v2, _ = triangles[tri_idx]
             
             # Random point in triangle using barycentric coordinates
-            r1, r2 = random.random(), random.random()
-            if r1 + r2 > 1:
-                r1, r2 = 1 - r1, 1 - r2
-            
-            point = v0 + r1 * (v1 - v0) + r2 * (v2 - v0)
-            points.append(point)
+        # Using sqrt for uniform distribution in triangle
+        r1 = random.random()
+        r2 = random.random()
+        sqrt_r1 = math.sqrt(r1)
+        
+        # Barycentric coordinates that give uniform distribution
+        u = 1 - sqrt_r1
+        v = r2 * sqrt_r1
+        
+        point = u * v0 + v * v1 + (1 - u - v) * v2
+        points.append(point)
     
     obj_eval.to_mesh_clear()
     return points
@@ -409,7 +439,7 @@ def register():
             handlers.remove(h)
     handlers.append(pointcloud_frame_handler)
     print("✅ Point Cloud Tracking Handler Registered")
-    
+
     # Force initial update for current frame
     pointcloud_update_positions(bpy.context.scene)
 

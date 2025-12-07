@@ -151,3 +151,15 @@ For business or enterprise use, please contact: **tsunyi@mimiaigen.com**
 
 ### Dependency
 We use the [Open Duck blender model](https://github.com/pollen-robotics/Open_Duck_Blender) as demo purpose. We do not own the model. Please refer to the original github repo.
+
+
+### Citation
+```
+@misc{VibePhysics,
+  author = {Tsun-Yi Yang},
+  title = {VibePhysics: No GPU Robotics Simulation with Blender},
+  month = {December},
+  year = {2025},
+  url = {https://github.com/mimiaigen/vibephysics}
+}
+```

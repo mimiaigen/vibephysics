@@ -35,6 +35,10 @@ def parse_args():
     sim_group = parser.add_argument_group('Simulation Settings')
     sim_group.add_argument('--terrain-size', type=float, default=30.0,
                           help='Size of the ground area')
+    sim_group.add_argument('--puddle-depth', type=float, default=0.5,
+                          help='Depth of displacement for puddles')
+    sim_group.add_argument('--num-spheres', type=int, default=50,
+                          help='Number of falling debris spheres')
     sim_group.add_argument('--start-frame', type=int, default=1,
                           help='Animation start frame')
     sim_group.add_argument('--end-frame', type=int, default=400,
@@ -54,16 +58,16 @@ def parse_args():
                              help='Camera distance from center')
     camera_group.add_argument('--camera-height', type=float, default=12.0,
                              help='Camera height')
-    camera_group.add_argument('--follow-duck', action='store_true',
-                             help='Camera follows the duck')
     
     visual_group = parser.add_argument_group('Visual Settings')
     visual_group.add_argument('--resolution-x', type=int, default=1920,
                              help='Render width')
     visual_group.add_argument('--resolution-y', type=int, default=1080,
                              help='Render height')
-    visual_group.add_argument('--water-color', type=float, nargs=3, default=[0.1, 0.3, 0.5],
-                             help='Water color RGB')
+    visual_group.add_argument('--water-color', type=float, nargs=4, 
+                             default=[0.4, 0.5, 0.4, 0.9],
+                             metavar=('R', 'G', 'B', 'A'),
+                             help='Water color RGBA (murky puddle water)')
     visual_group.add_argument('--show-waypoints', action='store_true',
                              help='Show waypoint markers in scene')
     
@@ -75,8 +79,6 @@ def parse_args():
                                  help='Disable bounding box annotations')
     annotation_group.add_argument('--no-trail', action='store_true',
                                  help='Disable motion trail annotations')
-    annotation_group.add_argument('--trail-parts', action='store_true',
-                                 help='Add trails to robot parts (feet) in addition to center')
     annotation_group.add_argument('--no-point-tracking', action='store_true',
                                  help='Disable point tracking visualization')
     annotation_group.add_argument('--points-per-object', type=int, default=30,
@@ -111,26 +113,49 @@ def run_simulation_setup(args):
         physics_config={'substeps': 20, 'solver_iters': 20, 'cache_buffer': 50}
     )
     
-    # 2. Terrain (Slightly uneven ground)
+    # 2. Terrain (Uneven Ground)
     z_ground = -1.0
+    strength = args.puddle_depth * 2.0
+    
     terrain = ground.create_uneven_ground(
         z_base=z_ground,
         size=args.terrain_size,
-        noise_scale=3.0,
-        strength=0.4  # Gentle terrain
+        noise_scale=2.0,
+        strength=strength
     )
     ground.apply_thickness(terrain, thickness=0.5, offset=-1.0)
     materials.create_mud_material(terrain)
-    physics.setup_ground_physics(terrain)
     
-    # 3. Optional water puddle (shallow)
-    z_water_level = z_ground + 0.05
-    water_visual = water.create_flat_surface(
-        size=args.terrain_size * 0.7,
+    # 3. Water Surface (Puddles with Boolean cutting)
+    # Adjust water level multiplier: lower = more water coverage
+    # 0.15 = sparse puddles, 0.05 = moderate coverage, 0.0 = maximum water
+    z_water_level = z_ground - (strength * 0.1)
+    water_size = args.terrain_size * 0.95
+    
+    # Create cutter and water (cutter is auto-cleaned by create_puddle_water)
+    ground_cutter = ground.create_ground_cutter(terrain, thickness=10.0, offset=-1.0)
+    water_visual = water.create_puddle_water(
         z_level=z_water_level,
-        subdivisions=150
+        size=water_size,
+        ground_cutter_obj=ground_cutter
     )
     materials.create_water_material(water_visual, color=tuple(args.water_color))
+    
+    # 3a. Add falling debris spheres
+    z_spawn = z_water_level + 3.0
+    positions = objects.generate_scattered_positions(
+        num_points=args.num_spheres,
+        spawn_radius=args.terrain_size / 3.0,
+        min_dist=0.8,
+        z_pos=z_spawn
+    )
+    debris_objects = objects.create_falling_spheres(
+        positions=positions,
+        radius_range=(0.15, 0.3),
+        physics={'mass': 0.3, 'friction': 0.7, 'restitution': 0.3},
+        num_total=args.num_spheres
+    )
+    print(f"  - Created {len(debris_objects)} falling spheres")
     
     # 4. Create waypoint pattern (from foundation.trajectory)
     waypoints = trajectory.create_waypoint_pattern(args.waypoint_pattern, args.waypoint_scale)
@@ -172,18 +197,17 @@ def run_simulation_setup(args):
     # 8. Setup collision
     open_duck.setup_duck_collision(robot_parts, kinematic=True)
     
-    # 9. Water ripples from duck
-    water.setup_robot_water_interaction(
+    # 9. Water Interactions (dynamic paint ripples)
+    water.setup_dynamic_paint_interaction(
         water_visual,
-        robot_parts,
-        [],  # No debris
-        ripple_strength=12.0
+        debris_objects,
+        ripple_strength=2.0
     )
     
     # 10. Full Annotation Setup using AnnotationManager
     # Uses the annotate_robot() method for unified control
     
-    if not args.no_annotations and robot_parts:
+    if not args.no_annotations and (robot_parts or debris_objects):
         print("\n📊 Setting up Annotations...")
         
         mgr = AnnotationManager(collection_name="AnnotationViz")
@@ -191,19 +215,17 @@ def run_simulation_setup(args):
         # Determine what to track based on args
         bbox_robot = not args.no_bbox
         trail_center = not args.no_trail
-        trail_parts = args.trail_parts  # Disabled by default, enable with --trail-parts
         point_tracking = not args.no_point_tracking
         
         # Use the unified annotate_robot method
-        # Duck has no debris, so we just pass robot parts
         mgr.annotate_robot(
             robot_parts=robot_parts,
             center_object=armature,
-            debris_objects=None,
+            debris_objects=debris_objects,
             bbox_robot=bbox_robot,
-            bbox_debris=False,
+            bbox_debris=True,  # Include debris bboxes
             trail_center=trail_center,
-            trail_debris=trail_parts,  # Reuse trail_debris for robot parts trails
+            trail_debris=False,  # No trails on debris
             point_tracking=point_tracking,
             start_frame=args.start_frame,
             end_frame=args.end_frame,
@@ -224,16 +246,16 @@ def run_simulation_setup(args):
         start_frame=args.start_frame,
         end_frame=args.end_frame,
         enable_caustics=True,
-        enable_volumetric=False,
         z_surface=z_water_level,
-        z_bottom=z_ground - 3.0,
+        z_bottom=z_ground,
+        enable_volumetric=False,
         volumetric_density=0.0,
-        caustic_scale=8.0
+        caustic_scale=10.0,
+        water_obj_name="Water_Puddles"  # Match the actual water object name
     )
     
-    # Optional: Camera follows duck
-    if args.follow_duck:
-        lighting.setup_camera_tracking(armature, track_axis='TRACK_NEGATIVE_Z', up_axis='UP_Y')
+    # Camera tracks robot (always enabled)
+    lighting.setup_camera_tracking(armature)
     
     # 12. Bake physics
     print("\n  - Baking physics...")

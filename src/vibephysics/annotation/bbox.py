@@ -110,7 +110,7 @@ def register():
             handlers.remove(h)
     handlers.append(bbox_frame_handler)
     print("✅ BBox Annotation Handler Registered")
-    
+
     # Force initial update for current frame
     bbox_update_all(bpy.context.scene)
 

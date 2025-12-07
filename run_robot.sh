@@ -10,16 +10,17 @@ fi
 
 mkdir -p output
 
-echo "Running Robot Walking Water Puddle..."
-python examples/robot/duck_walking_water_puddle.py --output output/robot_walk.blend
+# echo "Running Duck Waypoint Walk (Figure Eight)..."
+# python examples/robot/robot_waypoint_walk.py --waypoint-pattern figure_eight --output output/robot_figure_eight.blend
 
 echo "Running Duck Waypoint Walk (Exploration)..."
-python examples/robot/duck_waypoint_walk.py --waypoint-pattern exploration --output output/duck_exploration.blend
+python examples/robot/robot_waypoint_walk.py --waypoint-pattern exploration --output output/robot_exploration.blend
 
-echo "Running Duck Waypoint Walk (Figure Eight)..."
-python examples/robot/duck_waypoint_walk.py --waypoint-pattern figure_eight --output output/duck_figure_eight.blend
+# echo "Running Duck Waypoint Walk (Spiral)..."
+# python examples/robot/robot_waypoint_walk.py --waypoint-pattern spiral --output output/robot_spiral.blend
 
-echo "Running Duck Waypoint Walk (Spiral)..."
-python examples/robot/duck_waypoint_walk.py --waypoint-pattern spiral --output output/duck_spiral.blend
+# echo "Running Robot Walking Water Puddle..."
+# python examples/robot/robot_walking_water_puddle.py --output output/robot_walk.blend
+
 
 echo "Done! Files in output/"

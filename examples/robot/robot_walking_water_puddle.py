@@ -74,7 +74,7 @@ def parse_args():
                                  help='Add trails to debris objects (disabled by default)')
     annotation_group.add_argument('--no-point-tracking', action='store_true',
                                  help='Disable point cloud tracking visualization')
-    annotation_group.add_argument('--points-per-object', type=int, default=50,
+    annotation_group.add_argument('--points-per-object', type=int, default=30,
                                  help='Number of surface sample points per object')
     annotation_group.add_argument('--trail-step', type=int, default=3,
                                  help='Frame step for motion trail sampling')

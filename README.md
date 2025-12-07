@@ -157,7 +157,7 @@ We use the [Open Duck blender model](https://github.com/pollen-robotics/Open_Duc
 ```
 @misc{VibePhysics,
   author = {Tsun-Yi Yang},
-  title = {VibePhysics: No GPU Robotics Simulation with Blender},
+  title = {VibePhysics: No GPU Physics, Robotics, and Natural Environment Simulation with Blender},
   month = {December},
   year = {2025},
   url = {https://github.com/mimiaigen/vibephysics}

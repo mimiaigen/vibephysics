@@ -11,6 +11,7 @@ sys.path.insert(0, os.path.join(_root, 'src'))
 
 from vibephysics.foundation import scene, physics, water, ground, objects, materials, lighting
 from vibephysics.annotation import point_tracking
+from vibephysics.camera import create_center_cameras
 
 def parse_args():
     """Parse command-line arguments for water puddles simulation."""
@@ -149,9 +150,7 @@ def run_simulation_setup(args):
     )
     
     # 6. Lighting
-    lighting.setup_lighting_and_camera(
-        camera_radius=args.terrain_size * 0.8,
-        camera_height=8.0,
+    lighting.setup_lighting(
         resolution_x=args.resolution_x,
         resolution_y=args.resolution_y,
         start_frame=args.start_frame,
@@ -161,8 +160,14 @@ def run_simulation_setup(args):
         z_surface=z_water_level,
         z_bottom=args.z_ground,
         volumetric_density=0.0,
-        caustic_scale=10.0,
-        water_obj_name="Water_Puddles"  # Match the actual water object name
+        caustic_scale=10.0
+    )
+    
+    # Setup camera
+    create_center_cameras(
+        num_cameras=1,
+        radius=args.terrain_size * 0.8,
+        height=8.0
     )
     
     # 7. Point Tracking Visualization

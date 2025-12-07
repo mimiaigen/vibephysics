@@ -10,6 +10,7 @@ sys.path.insert(0, os.path.join(_root, 'src'))
 
 from vibephysics.foundation import scene, physics, water, ground, objects, materials, lighting
 from vibephysics.annotation import point_tracking
+from vibephysics.camera import create_center_cameras
 
 def parse_args():
     """Parse command-line arguments for water bucket simulation configuration.
@@ -190,9 +191,7 @@ def run_simulation_setup(args):
     )
     
     # 5. Rendering
-    lighting.setup_lighting_and_camera(
-        camera_radius=args.camera_radius,
-        camera_height=args.camera_height,
+    lighting.setup_lighting(
         resolution_x=args.resolution_x,
         resolution_y=args.resolution_y,
         start_frame=args.start_frame,
@@ -204,6 +203,13 @@ def run_simulation_setup(args):
         volumetric_density=0.01,
         caustic_scale=10.0,
         caustic_strength=args.caustic_strength
+    )
+    
+    # Setup camera
+    create_center_cameras(
+        num_cameras=1,
+        radius=args.camera_radius,
+        height=args.camera_height
     )
     
     # 6. Point Tracking Visualization

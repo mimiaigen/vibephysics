@@ -6,7 +6,7 @@
 
 ## ✨ Highlights
 
-- **🚀 No GPU Required** – Runs smoothly on CPU-only machines (MacBook Pro, laptops, standard workstations)
+- **🚀 No GPU Required** – Runs efficiently on CPU-only machines (MacBook Pro, laptops, standard workstations). GPU accelerates rendering but is not mandatory.
 - **🤖 Robot Simulation** – Realistic IK-based walking animations with the Open Duck robot
 - **💧 Water Physics** – Dynamic water surfaces, puddles, ripples, and buoyancy simulation
 - **📊 Annotation Tools** – Bounding boxes, motion trails, and point cloud tracking for vision datasets
@@ -17,8 +17,19 @@ Perfect for researchers, animators, and robotics engineers who need physics simu
 
 ## Requirements
 
-- **Python 3.11** (required for bpy compatibility)
+### For Running Simulations
+- **Python 3.11** (required for bpy compatibility - **Python 3.12+ is not supported**)
 - **bpy** (Blender as a Python module)
+
+### For Viewing Results (Optional)
+- **Blender 5.0** - Free download from [blender.org](https://www.blender.org/download/)
+- Only needed to view/render the generated `.blend` files
+- Not required to run simulations
+
+> ⚠️ **Important**: This package requires Python 3.11. Python 3.12 and later versions are not compatible with the current version of bpy.
+
+### Dependency
+We use the [Open Duck blender model](https://github.com/pollen-robotics/Open_Duck_Blender) as demo purpose. We do not own the model. Please refer to the original github repo.
 
 ## Installation
 
@@ -40,15 +51,39 @@ pip install -e .
 ## Quick Start
 
 ```bash
-# Run water simulation
-python examples/water/water_float.py --output output/water_float.blend
+# Run annotation demo
+sh ./run_annotation.sh
 
 # Run robot simulation
-./run_robot.sh
+sh ./run_robot.sh
 
-# Run all simulations
-./run_water.sh
+# Run water simulations
+sh ./run_water.sh
 ```
+
+## Visualizing Results
+
+All simulations generate `.blend` files in the `output/` directory. To view and interact with these results:
+
+**Download Blender 5.0** (Free & Open Source)
+- 🔗 **[Download Blender](https://www.blender.org/download/)**
+- Compatible with Windows, macOS (Intel/Apple Silicon), and Linux
+- No installation required for VibePhysics to run – Blender is only needed to view results
+- GPU accelerates viewport and rendering performance, but CPU-only works fine
+
+**Opening Results:**
+```bash
+# macOS
+open output/robot_waypoint.blend
+
+# Linux
+blender output/robot_waypoint.blend
+
+# Windows
+start output/robot_waypoint.blend
+```
+
+Once in Blender, press **Spacebar** to play the animation and view your physics simulation!
 
 ## Project Structure
 
@@ -62,10 +97,12 @@ vibephysics/
 │   │   ├── objects.py      # Floating objects
 │   │   ├── materials.py    # Shaders (water, mud, etc.)
 │   │   ├── lighting.py     # Lighting and camera
+│   │   ├── robot.py        # Generic robot control
 │   │   ├── open_duck.py    # Open Duck robot integration
 │   │   ├── trajectory.py   # Waypoint paths
 │   │   └── scene.py        # Scene initialization
 │   └── annotation/         # Visualization tools
+│       ├── base.py         # Base annotation classes
 │       ├── bbox.py         # Bounding box annotations
 │       ├── motion_trail.py # Motion path visualization
 │       ├── point_tracking.py # Point cloud tracking
@@ -80,74 +117,6 @@ vibephysics/
 └── run_annotation.sh       # Run annotation demos
 ```
 
-## Examples
-
-### Annotation Demos
-
-```bash
-# Bounding boxes
-python examples/basics/demo_bbox.py
-
-# Motion trails
-python examples/basics/demo_motion_trail.py
-
-# Point tracking
-python examples/basics/demo_point_tracking.py
-
-# All annotations combined
-python examples/basics/demo_all_annotations.py
-```
-
-### Robot Simulations
-
-```bash
-# Robot walking through puddles
-python examples/robot/robot_walking_water_puddle.py --output output/duck_walk.blend
-
-# Duck following waypoints
-python examples/robot/duck_waypoint_walk.py --waypoint-pattern exploration --output output/duck.blend
-```
-
-### Water Simulations
-
-```bash
-# Floating objects
-python examples/water/water_float.py --output output/water_float.blend
-
-# Rising water
-python examples/water/water_rise.py --output output/water_rise.blend
-
-# Storm with debris
-python examples/water/storm.py --output output/storm.blend
-
-# Water puddles
-python examples/water/water_puddles.py --output output/water_puddles.blend
-```
-
-## Shell Scripts
-
-```bash
-# Run all water simulations
-./run_water.sh
-
-# Run robot simulations (auto-downloads Open Duck model)
-./run_robot.sh
-
-# Run annotation demos
-./run_annotation.sh
-```
-
-## Common Arguments
-
-| Argument | Description |
-|----------|-------------|
-| `--output` | Output .blend file path |
-| `--start-frame` | Animation start frame |
-| `--end-frame` | Animation end frame |
-| `--num-spheres` | Number of floating objects |
-| `--wave-scale` | Wave intensity |
-| `--no-annotations` | Disable annotations |
-
 ## License
 
 **© 2025 MIMI AI LTD, UK. All rights reserved.**
@@ -160,11 +129,7 @@ This software is **free to use** for:
 
 ### Commercial Use
 For business or enterprise use, please contact: **tsunyi@mimiaigen.com**
-We have seperate license for business/enterprise users.
-
-
-### Dependency
-We use the [Open Duck blender model](https://github.com/pollen-robotics/Open_Duck_Blender) as demo purpose. We do not own the model. Please refer to the original github repo.
+We have separate license for business/enterprise users.
 
 
 ### Citation

@@ -111,8 +111,8 @@ VibePhysics includes a flexible multi-camera system with three camera rig types:
 | Camera Type | Description | Best For |
 |-------------|-------------|----------|
 | **Center** | Multiple cameras arranged in a circle, pointing at scene center | Overview shots, multi-angle captures |
-| **Following** | Single camera that follows and tracks a target object | Third-person view, tracking shots |
 | **Mounted** | Cameras attached directly to an object (e.g., robot head) | First-person POV, onboard views |
+| **Following** | Single camera that follows and tracks a target object | Third-person view, tracking shots |
 
 ### Usage Example
 
@@ -125,13 +125,13 @@ cam_manager = CameraManager()
 center_rig = cam_manager.add_center_pointing('center', num_cameras=4, radius=25, height=12)
 center_rig.create(target_location=(0, 0, 0))
 
-# Following camera (tracks a moving object)
-follow_rig = cam_manager.add_following('following', height=12, look_angle=60)
-follow_rig.create(target=robot_armature)
-
 # Mounted cameras (attached to robot head for POV shots)
 mounted_rig = cam_manager.add_object_mounted('mounted', num_cameras=4, distance=0.15)
 mounted_rig.create(parent_object=robot_head, lens=10)
+
+# Following camera (tracks a moving object)
+follow_rig = cam_manager.add_following('following', height=12, look_angle=60)
+follow_rig.create(target=robot_armature)
 
 # Activate a specific camera
 cam_manager.activate_rig('mounted', camera_index=0)  # Front camera
@@ -165,10 +165,7 @@ python examples/robot/robot_waypoint_walk.py --active-camera following
    - **Keyboard**: Select a camera → Press `Ctrl + Numpad 0` to make it active
    - **View Menu**: View → Cameras → Set Active Object as Camera
 
-> 💻 **Mac Users**: MacBooks don't have a numpad. Enable **Emulate Numpad** in Blender:
-> - Go to **Edit → Preferences → Input**
-> - Check **Emulate Numpad**
-> - Now use regular number keys: `0` for camera view, `Ctrl + 0` to set active camera
+> 💻 **Mac Users**: Simply click the **green camera icon** 🎥 in the Outliner (see above) to switch active cameras.
 
 This means you can generate a single `.blend` file and render from any camera angle without re-running the simulation.
 

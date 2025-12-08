@@ -468,8 +468,147 @@ def _get_vertex_color_name(obj: bpy.types.Object) -> str:
     return "Col"
 
 
+# =============================================================================
+# Gaussian Splatting Constants and Utilities
+# =============================================================================
+
 # Spherical Harmonics constant for 0th order (used in 3DGS)
 SH_C0 = 0.28209479177387814
+
+
+def sigmoid(x):
+    """Sigmoid function for opacity conversion."""
+    import numpy as np
+    return 1.0 / (1.0 + np.exp(-np.clip(x, -500, 500)))
+
+
+def get_gsplat_info(obj: bpy.types.Object) -> dict:
+    """
+    Get detailed information about a Gaussian Splat mesh object.
+    
+    Returns:
+        Dictionary with PLY attribute info:
+        {
+            'num_points': int,
+            'has_sh': bool,  # f_dc_* attributes
+            'has_scale': bool,  # scale_* attributes
+            'has_rotation': bool,  # rot_* attributes
+            'has_opacity': bool,
+            'has_4d': bool,  # t_scale, motion_* attributes
+            'attributes': {name: {'dtype': str, 'min': float, 'max': float, 'mean': float}},
+            'is_gaussian_splat': bool,
+        }
+    """
+    import numpy as np
+    
+    info = {
+        'num_points': 0,
+        'has_sh': False,
+        'has_scale': False,
+        'has_rotation': False,
+        'has_opacity': False,
+        'has_4d': False,
+        'attributes': {},
+        'is_gaussian_splat': False,
+    }
+    
+    mesh = obj.data
+    if not mesh:
+        return info
+    
+    info['num_points'] = len(mesh.vertices)
+    
+    # Analyze attributes
+    attr_names = set()
+    for attr in mesh.attributes:
+        attr_names.add(attr.name)
+        
+        # Get statistics for float attributes
+        try:
+            if attr.data_type in ('FLOAT', 'FLOAT_COLOR', 'FLOAT_VECTOR'):
+                num_elements = len(attr.data)
+                if num_elements > 0:
+                    if attr.data_type == 'FLOAT':
+                        values = np.zeros(num_elements, dtype=np.float32)
+                        attr.data.foreach_get('value', values)
+                    elif attr.data_type == 'FLOAT_COLOR':
+                        values = np.zeros(num_elements * 4, dtype=np.float32)
+                        attr.data.foreach_get('color', values)
+                        values = values[::4]  # Just R channel for stats
+                    else:
+                        values = np.zeros(num_elements * 3, dtype=np.float32)
+                        attr.data.foreach_get('vector', values)
+                        values = values[::3]  # Just X for stats
+                    
+                    info['attributes'][attr.name] = {
+                        'dtype': attr.data_type,
+                        'domain': attr.domain,
+                        'min': float(np.nanmin(values)),
+                        'max': float(np.nanmax(values)),
+                        'mean': float(np.nanmean(values)),
+                    }
+        except Exception:
+            pass
+    
+    # Check for Gaussian Splat attributes
+    info['has_sh'] = all(f"f_dc_{i}" in attr_names for i in range(3))
+    info['has_scale'] = all(f"scale_{i}" in attr_names for i in range(3))
+    info['has_rotation'] = all(f"rot_{i}" in attr_names for i in range(4))
+    info['has_opacity'] = 'opacity' in attr_names
+    info['has_4d'] = any(a in attr_names for a in ['t_scale', 'motion_0', 'motion_1', 'motion_2'])
+    
+    info['is_gaussian_splat'] = (
+        info['has_sh'] and 
+        info['has_scale'] and 
+        info['has_rotation']
+    )
+    
+    return info
+
+
+def print_gsplat_info(obj: bpy.types.Object) -> dict:
+    """
+    Print detailed Gaussian Splat info and return the info dict.
+    """
+    info = get_gsplat_info(obj)
+    
+    print(f"\n📊 Gaussian Splat Analysis:")
+    print(f"   Points: {info['num_points']:,}")
+    
+    if info['is_gaussian_splat']:
+        gs_type = "4D Gaussian Splat" if info['has_4d'] else "3D Gaussian Splat"
+        print(f"   Type: {gs_type}")
+    else:
+        print(f"   Type: Not a standard Gaussian Splat")
+    
+    print(f"   - Spherical Harmonics (f_dc_*): {'✅' if info['has_sh'] else '❌'}")
+    print(f"   - Scale (scale_*): {'✅' if info['has_scale'] else '❌'}")
+    print(f"   - Rotation (rot_*): {'✅' if info['has_rotation'] else '❌'}")
+    print(f"   - Opacity: {'✅' if info['has_opacity'] else '❌'}")
+    
+    # Show SH color info
+    if info['has_sh']:
+        f_dc_0 = info['attributes'].get('f_dc_0', {})
+        f_dc_1 = info['attributes'].get('f_dc_1', {})
+        f_dc_2 = info['attributes'].get('f_dc_2', {})
+        
+        if f_dc_0 and f_dc_1 and f_dc_2:
+            # Convert mean SH to RGB
+            r = SH_C0 * f_dc_0.get('mean', 0) + 0.5
+            g = SH_C0 * f_dc_1.get('mean', 0) + 0.5
+            b = SH_C0 * f_dc_2.get('mean', 0) + 0.5
+            r, g, b = max(0, min(1, r)), max(0, min(1, g)), max(0, min(1, b))
+            print(f"   - Mean Color (RGB): ({r:.3f}, {g:.3f}, {b:.3f})")
+    
+    # Show opacity info
+    if info['has_opacity']:
+        opacity_attr = info['attributes'].get('opacity', {})
+        if opacity_attr:
+            mean_logit = opacity_attr.get('mean', 0)
+            mean_opacity = sigmoid(mean_logit)
+            print(f"   - Mean Opacity: {mean_opacity:.3f} (logit: {mean_logit:.2f})")
+    
+    return info
 
 
 def convert_sh_to_rgb(obj: bpy.types.Object) -> bool:

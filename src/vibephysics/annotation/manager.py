@@ -452,7 +452,7 @@ class AnnotationManager:
             tracking_module.create_embedded_tracking_script()
             
         # Create viewport restore script
-        viewport_module.create_viewport_restore_script(self.collection_name)
+        # viewport_module.create_viewport_restore_script(self.collection_name)
         
     def setup_viewport(self, dual_viewport=True):
         """

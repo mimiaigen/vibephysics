@@ -26,9 +26,12 @@ from vibephysics.setup import (
     save_blend,
     clear_scene,
     load_gsplat,
-    setup_dual_viewport,
     setup_gsplat_display,
+    setup_dual_viewport,
+    ensure_collection,
 )
+from vibephysics.setup.gsplat import print_gsplat_info, get_gsplat_info
+from vibephysics.setup.viewport import create_viewport_restore_script
 
 
 def parse_args():
@@ -218,41 +221,6 @@ def setup_point_display(obj, point_size=0.005):
     return modifier
 
 
-def configure_viewport_for_gsplat(left_area, right_area):
-    """
-    Configure dual viewport specifically for Gaussian splat viewing.
-    
-    Note: Point clouds don't render with materials in Material Preview mode.
-    Both viewports use Solid mode with vertex colors for best display.
-    
-    Left: Solid mode with STUDIO lighting (shows vertex colors with depth)
-    Right: Solid mode with FLAT lighting (pure unlit vertex colors)
-    """
-    # Configure left viewport - Solid with studio lighting
-    if left_area:
-        for space in left_area.spaces:
-            if space.type == 'VIEW_3D':
-                space.shading.type = 'SOLID'
-                space.shading.light = 'STUDIO'  # Studio lighting for depth
-                space.shading.color_type = 'VERTEX'  # Show vertex colors
-                space.shading.show_backface_culling = False
-                space.overlay.show_overlays = True
-                space.overlay.show_floor = True
-                space.overlay.show_axis_x = True
-                space.overlay.show_axis_y = True
-    
-    # Configure right viewport - Solid with flat lighting (pure colors)
-    if right_area:
-        for space in right_area.spaces:
-            if space.type == 'VIEW_3D':
-                space.shading.type = 'SOLID'
-                space.shading.light = 'FLAT'  # No lighting for pure colors
-                space.shading.color_type = 'VERTEX'  # Show vertex colors
-                space.shading.show_backface_culling = False
-                space.overlay.show_overlays = True
-                space.overlay.show_floor = True
-
-
 def add_basic_lighting():
     """Add simple lighting for material preview."""
     # Sun light
@@ -273,6 +241,73 @@ def add_basic_lighting():
     if bg_node:
         bg_node.inputs['Color'].default_value = (0.05, 0.05, 0.08, 1.0)
         bg_node.inputs['Strength'].default_value = 1.0
+
+
+def create_point_cloud_duplicate(obj, collection_name="PointCloudViz"):
+    """
+    Create a point cloud duplicate of the Gaussian splat object.
+    
+    This creates a separate object without geometry nodes that shows
+    just the raw vertices with vertex colors - used for the right viewport.
+    
+    Args:
+        obj: Source Gaussian splat object
+        collection_name: Collection name for the point cloud
+        
+    Returns:
+        The point cloud object
+    """
+    # Create collection for point cloud
+    pc_collection = ensure_collection(collection_name)
+    
+    # Duplicate the mesh data (not linked)
+    new_mesh = obj.data.copy()
+    pc_obj = bpy.data.objects.new(f"{obj.name}_PointCloud", new_mesh)
+    
+    # Link to collection
+    pc_collection.objects.link(pc_obj)
+    
+    # Copy transform
+    pc_obj.location = obj.location.copy()
+    pc_obj.rotation_euler = obj.rotation_euler.copy()
+    pc_obj.scale = obj.scale.copy()
+    
+    # Create a simple vertex color material for the point cloud
+    mat = bpy.data.materials.new(name="PointCloudMaterial")
+    mat.use_nodes = True
+    nodes = mat.node_tree.nodes
+    links = mat.node_tree.links
+    nodes.clear()
+    
+    # Output
+    output = nodes.new('ShaderNodeOutputMaterial')
+    output.location = (300, 0)
+    
+    # Emission shader for bright vertex colors
+    emission = nodes.new('ShaderNodeEmission')
+    emission.location = (100, 0)
+    emission.inputs['Strength'].default_value = 1.0
+    
+    # Vertex color
+    color_attr = nodes.new('ShaderNodeVertexColor')
+    color_attr.location = (-100, 0)
+    # Try to use the GSplatColor attribute if it exists
+    if new_mesh.color_attributes:
+        for ca in new_mesh.color_attributes:
+            if ca.name == 'GSplatColor':
+                color_attr.layer_name = 'GSplatColor'
+                break
+        else:
+            color_attr.layer_name = new_mesh.color_attributes[0].name
+    
+    links.new(color_attr.outputs['Color'], emission.inputs['Color'])
+    links.new(emission.outputs['Emission'], output.inputs['Surface'])
+    
+    # Assign material
+    pc_obj.data.materials.append(mat)
+    
+    print(f"   ✅ Created point cloud duplicate: {pc_obj.name}")
+    return pc_obj
 
 
 def add_camera_for_gsplat(obj):
@@ -299,88 +334,6 @@ def add_camera_for_gsplat(obj):
     bpy.context.scene.camera = camera
     
     return camera
-
-
-def register_gsplat_viewport_handler():
-    """
-    Register a load_post handler that automatically sets up the dual viewport
-    when the .blend file is opened in Blender GUI.
-    
-    This is the preferred approach - viewport auto-configures on file load.
-    """
-    handler_name = "restore_gsplat_viewport"
-    
-    # Remove existing handler if present
-    for handler in list(bpy.app.handlers.load_post):
-        if hasattr(handler, '__name__') and handler.__name__ == handler_name:
-            bpy.app.handlers.load_post.remove(handler)
-    
-    def restore_gsplat_viewport(dummy):
-        """Auto-restore viewport when file is loaded."""
-        if bpy.app.background:
-            return
-        
-        # Ensure GSplatColor attribute is active on mesh objects
-        for obj in bpy.data.objects:
-            if obj.type == 'MESH' and obj.data and obj.data.color_attributes:
-                for ca in obj.data.color_attributes:
-                    if ca.name == 'GSplatColor':
-                        obj.data.color_attributes.active_color = ca
-                        break
-        
-        # Find or split viewport
-        screen = bpy.context.screen
-        if not screen:
-            return
-            
-        view3d_areas = sorted([a for a in screen.areas if a.type == 'VIEW_3D'], key=lambda a: a.x)
-        
-        if not view3d_areas:
-            return
-        
-        if len(view3d_areas) < 2:
-            # Split viewport
-            area = view3d_areas[0]
-            with bpy.context.temp_override(area=area, region=area.regions[0]):
-                try:
-                    bpy.ops.screen.area_split(direction='VERTICAL', factor=0.5)
-                except:
-                    return
-            view3d_areas = sorted([a for a in screen.areas if a.type == 'VIEW_3D'], key=lambda a: a.x)
-        
-        if len(view3d_areas) < 2:
-            return
-        
-        left_area = view3d_areas[0]
-        right_area = view3d_areas[-1]
-        
-        # Configure left viewport - Solid with studio lighting
-        for space in left_area.spaces:
-            if space.type == 'VIEW_3D':
-                space.shading.type = 'SOLID'
-                space.shading.light = 'STUDIO'
-                space.shading.color_type = 'VERTEX'
-                space.shading.show_backface_culling = False
-                space.overlay.show_overlays = True
-                space.overlay.show_floor = True
-        
-        # Configure right viewport - Solid with flat lighting
-        for space in right_area.spaces:
-            if space.type == 'VIEW_3D':
-                space.shading.type = 'SOLID'
-                space.shading.light = 'FLAT'
-                space.shading.color_type = 'VERTEX'
-                space.shading.show_backface_culling = False
-                space.overlay.show_overlays = True
-                space.overlay.show_floor = True
-        
-        print("✅ Gaussian Splat dual viewport auto-configured!")
-    
-    restore_gsplat_viewport.__name__ = handler_name
-    bpy.app.handlers.load_post.append(restore_gsplat_viewport)
-    
-    print(f"📝 Registered load_post handler: {handler_name}")
-    print(f"   Viewport will auto-configure when .blend file is opened")
 
 
 def run():
@@ -418,38 +371,14 @@ def run():
     point_count = len(obj.data.vertices) if obj.data else 0
     print(f"   Points: {point_count:,}")
     
-    # Check for vertex colors and Gaussian Splat SH attributes
-    has_vertex_colors = False
-    color_attr_names = []
+    # Print detailed Gaussian Splat info using the new utility
+    gsplat_info = print_gsplat_info(obj)
+    
+    # Check for vertex colors (before SH conversion)
     if obj.data and obj.data.color_attributes:
-        has_vertex_colors = True
-        color_attr_names = [vc.name for vc in obj.data.color_attributes]
-        print(f"   Vertex colors: {color_attr_names}")
+        print(f"\n   Existing vertex colors:")
         for vc in obj.data.color_attributes:
             print(f"      - {vc.name}: type={vc.data_type}, domain={vc.domain}")
-    else:
-        print(f"   ⚠️ No vertex colors found (yet)")
-    
-    # Check for Gaussian Splat specific attributes (f_dc_*, scale_*, rot_*)
-    if obj.data and hasattr(obj.data, 'attributes'):
-        all_attrs = [a.name for a in obj.data.attributes]
-        
-        # Check for spherical harmonics (f_dc_*)
-        sh_attrs = [a for a in all_attrs if a.startswith('f_dc_')]
-        if sh_attrs:
-            print(f"   Spherical harmonics (SH): {sh_attrs}")
-        
-        # Check for other 3DGS attributes  
-        scale_attrs = [a for a in all_attrs if a.startswith('scale_')]
-        rot_attrs = [a for a in all_attrs if a.startswith('rot_')]
-        if scale_attrs:
-            print(f"   Scale attributes: {scale_attrs}")
-        if rot_attrs:
-            print(f"   Rotation attributes: {rot_attrs}")
-        
-        # Opacity
-        if 'opacity' in all_attrs:
-            print(f"   Opacity: found")
     
     # Setup Gaussian splat display with geometry nodes and material
     # Geometry nodes are REQUIRED for proper vertex color display on point clouds
@@ -457,35 +386,27 @@ def run():
     setup_gsplat_display(obj, point_size=args.point_size, use_emission=True, use_geometry_nodes=True)
     print(f"   ✅ Geometry nodes and material applied")
     
+    # Create point cloud duplicate for the right viewport
+    pc_obj = None
+    if not args.no_dual_viewport:
+        print(f"\n📍 Creating point cloud visualization...")
+        pc_obj = create_point_cloud_duplicate(obj, collection_name="PointCloudViz")
+    
     # Add camera
     add_camera_for_gsplat(obj)
     
-    # Setup dual viewport using load_post handler
-    # The handler auto-configures viewport when .blend is opened in Blender GUI
-    if not args.no_dual_viewport:
+    # Setup dual viewport using local view (like demo_all_annotations.py)
+    # Left: Material Preview (main Gaussian splat with geometry nodes)
+    # Right: Point cloud only (raw vertices with vertex colors)
+    if not args.no_dual_viewport and pc_obj:
         print("\n🖼️ Setting up dual viewport...")
         
-        # Register load_post handler for auto-configuration on file open
-        register_gsplat_viewport_handler()
-        
-        # Try immediate setup if running in Blender GUI (not background)
-        if not bpy.app.background:
-            viewport_result = setup_dual_viewport({
-                'split_factor': 0.5,
-                'left_shading': 'SOLID',
-                'right_shading': 'SOLID',
-                'sync_views': True
-            })
-            
-            if viewport_result:
-                configure_viewport_for_gsplat(
-                    viewport_result.get('left_area'),
-                    viewport_result.get('right_area')
-                )
-        
-        print("   ✅ Viewport will auto-configure on file open")
-        print("   Left viewport: Studio lighting (vertex colors)")
-        print("   Right viewport: Flat lighting (vertex colors)")
+        # Create embedded restore script for the dual local view
+        # This is the same approach as demo_all_annotations.py
+        create_viewport_restore_script("PointCloudViz")
+        print("   ✅ Viewport restore script embedded")
+        print("   Left viewport: Material Preview (Gaussian splat)")
+        print("   Right viewport: Point cloud (vertex colors)")
     
     # Frame the object in view
     bpy.ops.object.select_all(action='DESELECT')
@@ -516,13 +437,16 @@ def run():
     print(f"   Input: {args.input}")
     print(f"   Points: {point_count:,}")
     print(f"   Output: {output_path}")
-    print(f"\n💡 To view:")
-    print(f"   1. Open the .blend file in Blender")
-    print(f"   2. Dual viewport auto-configures on file load!")
-    print(f"\n   Left viewport: Studio lighting (vertex colors with depth)")
-    print(f"   Right viewport: Flat lighting (pure vertex colors)")
-    print(f"\n   - Use mouse scroll to zoom")
-    print(f"   - Middle-click drag to rotate view")
+    print(f"\n💡 To view with dual viewport:")
+    print(f"   1. Open the .blend file in Blender: {output_path}")
+    print(f"   2. Run script: Text Editor → 'restore_point_tracking_viewport.py' → Run (Alt+P)")
+    print(f"\n   Left viewport: Material Preview (Gaussian splat with geometry nodes)")
+    print(f"   Right viewport: Point cloud only (vertex colors)")
+    print(f"\n   Note: Colors are converted from SH coefficients (f_dc_*) to RGB")
+    print(f"   Formula: RGB = SH_C0 × f_dc + 0.5, where SH_C0 = 0.282...")
+    print(f"\n   - Mouse scroll: zoom")
+    print(f"   - Middle-click drag: rotate view")
+    print(f"   - Shift + middle-click: pan view")
 
 
 if __name__ == "__main__":

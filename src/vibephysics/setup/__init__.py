@@ -51,7 +51,6 @@ from .scene import (
     set_current_frame,
     get_current_frame,
     # Viewport
-    setup_dual_viewport,
     reset_viewport,
     # Render settings
     set_render_resolution,
@@ -81,14 +80,16 @@ from .gsplat import (
     setup_gsplat_color,
     convert_sh_to_rgb,
     SH_C0,
+    # Info utilities
+    get_gsplat_info,
+    print_gsplat_info,
+    sigmoid,
 )
 
 # =============================================================================
 # Viewport Functions
 # =============================================================================
 from .viewport import (
-    # Simple dual viewport (scene-level)
-    setup_dual_viewport_simple,
     reset_viewport_single,
     # Viewport utilities
     split_viewport_horizontal,
@@ -99,7 +100,7 @@ from .viewport import (
     lock_viewport_to_camera,
     sync_viewport_views,
     # Local view dual viewport (for annotations)
-    setup_dual_viewport as setup_dual_viewport_local,
+    setup_dual_viewport,
     enter_local_view,
     register_view_sync_handler,
     register_viewport_restore_handler,
@@ -123,7 +124,6 @@ __all__ = [
     'get_frame_range',
     'set_current_frame',
     'get_current_frame',
-    'setup_dual_viewport',
     'reset_viewport',
     'set_render_resolution',
     'set_render_engine',
@@ -151,9 +151,11 @@ __all__ = [
     'setup_gsplat_color',
     'convert_sh_to_rgb',
     'SH_C0',
+    'get_gsplat_info',
+    'print_gsplat_info',
+    'sigmoid',
     
     # Viewport functions
-    'setup_dual_viewport_simple',
     'reset_viewport_single',
     'split_viewport_horizontal',
     'get_view3d_areas',
@@ -162,7 +164,7 @@ __all__ = [
     'configure_viewport_overlays',
     'lock_viewport_to_camera',
     'sync_viewport_views',
-    'setup_dual_viewport_local',
+    'setup_dual_viewport',
     'enter_local_view',
     'register_view_sync_handler',
     'register_viewport_restore_handler',

@@ -187,7 +187,7 @@ def run():
     mgr.finalize(setup_viewport=False)
     
     # Create viewport restore script for when file is re-opened
-    viewport.create_viewport_restore_script("AnnotationViz")
+    # viewport.create_viewport_restore_script("AnnotationViz")
     
     # ==========================================================================
     # Alternative: Quick API (one-liner)

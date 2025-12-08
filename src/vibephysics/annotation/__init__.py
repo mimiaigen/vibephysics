@@ -91,7 +91,6 @@ from .manager import (
 # =============================================================================
 from ..setup import viewport
 from ..setup.viewport import (
-    setup_dual_viewport_simple,
     reset_viewport_single,
     setup_dual_viewport,
     create_viewport_restore_script,
@@ -148,7 +147,6 @@ __all__ = [
     
     # Viewport (from setup module)
     'viewport',
-    'setup_dual_viewport_simple',
     'reset_viewport_single',
     'setup_dual_viewport',
     'create_viewport_restore_script',

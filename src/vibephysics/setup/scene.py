@@ -19,8 +19,7 @@ from .gsplat import load_gsplat, load_3dgs, load_4dgs_sequence
 # Scene Initialization
 # =============================================================================
 
-def init_simulation(start_frame=1, end_frame=250, physics_config=None, clear=True,
-                    dual_viewport=False, viewport_config=None):
+def init_simulation(start_frame=1, end_frame=250, physics_config=None, clear=True):
     """
     Universal scene initialization for all examples.
     
@@ -29,15 +28,6 @@ def init_simulation(start_frame=1, end_frame=250, physics_config=None, clear=Tru
         end_frame: Last frame of animation
         physics_config: Dict with physics settings (substeps, solver_iters, cache_buffer)
         clear: Whether to clear existing scene objects
-        dual_viewport: Whether to setup dual viewport (left: material, right: solid/vertex)
-        viewport_config: Optional dict for viewport settings:
-            - split_factor: Viewport split ratio (default: 0.5)
-            - left_shading: Left viewport shading type (default: 'MATERIAL')
-            - right_shading: Right viewport shading type (default: 'SOLID')
-            - sync_views: Whether to sync view rotation (default: True)
-    
-    Returns:
-        dict with 'left_area', 'right_area' if dual_viewport=True, else None
     
     Example:
         # Basic initialization
@@ -47,9 +37,6 @@ def init_simulation(start_frame=1, end_frame=250, physics_config=None, clear=Tru
         init_simulation(
             physics_config={'substeps': 20, 'solver_iters': 20}
         )
-        
-        # With dual viewport
-        init_simulation(dual_viewport=True)
     """
     if clear:
         clear_scene()
@@ -67,14 +54,6 @@ def init_simulation(start_frame=1, end_frame=250, physics_config=None, clear=Tru
     # Configure physics cache if requested
     if physics_config:
         configure_physics_cache(start_frame, end_frame, **physics_config)
-    
-    # Setup dual viewport if requested
-    result = None
-    if dual_viewport and not bpy.app.background:
-        from . import viewport as vp
-        result = vp.setup_dual_viewport_simple(viewport_config)
-    
-    return result
 
 
 def init_gsplat_scene(
@@ -205,36 +184,6 @@ def set_current_frame(frame):
 def get_current_frame():
     """Get the current frame."""
     return bpy.context.scene.frame_current
-
-
-# =============================================================================
-# Viewport Setup
-# =============================================================================
-
-def setup_dual_viewport(config=None):
-    """
-    Setup dual viewport without requiring annotations.
-    
-    This can be called independently after scene init, or use
-    dual_viewport=True in init_simulation() for automatic setup.
-    
-    Args:
-        config: Optional dict with viewport settings:
-            - split_factor: Viewport split ratio (default: 0.5)
-            - left_shading: Left viewport shading ('MATERIAL', 'SOLID', 'RENDERED')
-            - right_shading: Right viewport shading ('MATERIAL', 'SOLID', 'RENDERED')
-            - right_color_type: Color type for right viewport ('VERTEX', 'MATERIAL', etc.)
-            - sync_views: Whether to sync view rotation (default: True)
-    
-    Returns:
-        dict with 'left_area', 'right_area' keys, or None if failed
-    """
-    if bpy.app.background:
-        print("⚠️ Dual viewport not available in background mode")
-        return None
-    
-    from . import viewport as vp
-    return vp.setup_dual_viewport_simple(config)
 
 
 def reset_viewport():

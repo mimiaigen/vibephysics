@@ -6,7 +6,7 @@ This module provides the building blocks for creating physics-based
 simulations with water, ground, objects, and materials.
 
 Modules:
-- scene: Scene initialization and cleanup utilities
+- scene: Scene initialization and cleanup utilities (from setup module)
 - physics: Rigid body physics and force fields
 - water: Water surface creation and dynamics
 - ground: Terrain and seabed generation
@@ -19,7 +19,8 @@ Modules:
 """
 
 # Import all submodules for convenient access
-from . import scene
+# Scene is now in the setup module but re-exported here for backward compatibility
+from ..setup import scene
 from . import physics
 from . import water
 from . import ground

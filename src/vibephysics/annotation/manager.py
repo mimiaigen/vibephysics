@@ -10,7 +10,9 @@ from . import base
 from . import bbox as bbox_module
 from . import motion_trail as trail_module
 from . import point_tracking as tracking_module
-from . import viewport as viewport_module
+from ..setup import viewport as viewport_module
+from ..setup.importer import ensure_collection
+from ..setup.viewport import find_layer_collection
 
 
 class AnnotationManager:
@@ -39,7 +41,7 @@ class AnnotationManager:
             collection_name: Name of collection for all annotations
         """
         self.collection_name = collection_name or base.DEFAULT_COLLECTION_NAME
-        self.collection = base.ensure_collection(self.collection_name)
+        self.collection = ensure_collection(self.collection_name)
         
         # Track created annotations
         self.bboxes = []
@@ -560,7 +562,7 @@ class AnnotationManager:
         """
         if self.collection:
             # Find layer collection
-            layer_coll = base.find_layer_collection(
+            layer_coll = find_layer_collection(
                 bpy.context.view_layer.layer_collection,
                 self.collection_name
             )

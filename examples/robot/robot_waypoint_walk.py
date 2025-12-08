@@ -24,6 +24,7 @@ sys.path.insert(0, os.path.join(_root, 'src'))
 from vibephysics.foundation import scene, physics, ground, water, open_duck, objects, materials, lighting, trajectory
 from vibephysics.annotation import AnnotationManager, viewport
 from vibephysics.camera import CameraManager
+from vibephysics.setup import save_blend
 
 
 def parse_args():
@@ -366,9 +367,7 @@ def main():
     run_simulation_setup(args)
     
     # Save blend file
-    output_path = os.path.abspath(args.output)
-    bpy.ops.wm.save_as_mainfile(filepath=output_path)
-    print(f"💾 Saved to: {output_path}")
+    save_blend(args.output)
 
 
 if __name__ == "__main__":

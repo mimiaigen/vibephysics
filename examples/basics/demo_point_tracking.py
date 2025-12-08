@@ -8,6 +8,7 @@ _root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
 sys.path.insert(0, os.path.join(_root, 'src'))
 
 from vibephysics.annotation import point_tracking
+from vibephysics.setup import save_blend
 
 def setup_demo_scene():
     # Clear existing objects
@@ -43,11 +44,7 @@ def run():
     
     # Save
     output_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', 'output'))
-    if not os.path.exists(output_dir):
-        os.makedirs(output_dir)
-    output_file = os.path.join(output_dir, "demo_point_tracking.blend")
-    bpy.ops.wm.save_as_mainfile(filepath=output_file)
-    print(f"✅ Saved to {output_file}")
+    save_blend(os.path.join(output_dir, "demo_point_tracking.blend"))
 
 if __name__ == "__main__":
     run()

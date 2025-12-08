@@ -9,6 +9,7 @@ import bpy
 from mathutils import Vector
 
 from . import base
+from ..setup.importer import ensure_collection
 
 
 def create_motion_trail(target_obj, start_frame=None, end_frame=None, step=1, 
@@ -44,7 +45,7 @@ def create_motion_trail(target_obj, start_frame=None, end_frame=None, step=1,
         end_frame = scene.frame_end
         
     # Ensure collection exists
-    collection = base.ensure_collection(collection_name)
+    collection = ensure_collection(collection_name or base.DEFAULT_COLLECTION_NAME)
         
     # Create curve data
     curve_name = f"{target_obj.name}_{name_suffix}"

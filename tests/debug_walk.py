@@ -11,6 +11,7 @@ from mathutils import Vector
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../src')))
 
 from vibephysics.foundation import open_duck, trajectory
+from vibephysics.setup import save_blend
 
 def setup_scene():
     """Setup test scene."""
@@ -77,9 +78,7 @@ def main():
     bpy.context.scene.frame_end = 150
     bpy.context.scene.frame_set(1)
     
-    output_path = os.path.abspath("debug_walk.blend")
-    bpy.ops.wm.save_as_mainfile(filepath=output_path)
-    print(f"\nSaved to: {output_path}")
+    save_blend("debug_walk.blend")
 
 if __name__ == "__main__":
     main()

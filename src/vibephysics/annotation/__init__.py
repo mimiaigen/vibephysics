@@ -17,16 +17,21 @@ Or use the quick API:
     quick_annotate([cube, sphere], bbox=True, trail=True)
 
 Individual modules:
-    from vibephysics.annotation import bbox, motion_trail, point_tracking, viewport
+    from vibephysics.annotation import bbox, motion_trail, point_tracking
 
-Camera systems (import from vibephysics.camera):
+Viewport utilities (now in setup module):
+    from vibephysics.setup import viewport
+    from vibephysics.annotation import viewport  # backward compatible alias
+
+Camera systems:
     from vibephysics.camera import CameraManager, CenterPointingCameraRig
 """
 
-# Base utilities (for extension)
+# =============================================================================
+# Base utilities
+# =============================================================================
 from .base import (
     DEFAULT_COLLECTION_NAME,
-    ensure_collection,
     create_emission_material,
     create_vertex_color_material,
     register_frame_handler,
@@ -38,21 +43,17 @@ from .base import (
     BaseAnnotation,
     AnnotationType,
     create_annotation,
-    # Tracking configuration
     TrackingTarget,
     TrackingConfig,
 )
 
-# Individual annotation modules
-from .point_tracking import (
-    setup_point_tracking_visualization,
-    create_point_cloud_tracker,
-    register_frame_handler as register_point_tracking_handler,
-    create_embedded_tracking_script,
-    sample_mesh_surface_points,
-    generate_distinct_colors,
-)
+# Collection utilities (from setup module)
+from ..setup.importer import ensure_collection
+from ..setup.viewport import find_layer_collection
 
+# =============================================================================
+# Annotation modules
+# =============================================================================
 from .bbox import (
     create_bbox_annotation,
     update_bbox,
@@ -66,17 +67,18 @@ from .motion_trail import (
     create_motion_trails,
 )
 
-from .viewport import (
-    setup_dual_viewport,
-    split_viewport_horizontal,
-    configure_viewport_shading,
-    configure_viewport_overlays,
-    enter_local_view,
-    register_viewport_restore_handler,
-    create_viewport_restore_script,
+from .point_tracking import (
+    setup_point_tracking_visualization,
+    create_point_cloud_tracker,
+    register_frame_handler as register_point_tracking_handler,
+    create_embedded_tracking_script,
+    sample_mesh_surface_points,
+    generate_distinct_colors,
 )
 
+# =============================================================================
 # Manager (unified API)
+# =============================================================================
 from .manager import (
     AnnotationManager,
     get_manager,
@@ -84,12 +86,27 @@ from .manager import (
     quick_annotate,
 )
 
+# =============================================================================
+# Viewport (re-exported from setup for backward compatibility)
+# =============================================================================
+from ..setup import viewport
+from ..setup.viewport import (
+    setup_dual_viewport_simple,
+    reset_viewport_single,
+    setup_dual_viewport,
+    create_viewport_restore_script,
+    register_viewport_restore_handler,
+)
+
 __all__ = [
     # Constants
     'DEFAULT_COLLECTION_NAME',
     
-    # Base utilities
+    # Collection utilities (from setup)
     'ensure_collection',
+    'find_layer_collection',
+    
+    # Base utilities
     'create_emission_material',
     'create_vertex_color_material',
     'register_frame_handler',
@@ -101,8 +118,6 @@ __all__ = [
     'BaseAnnotation',
     'AnnotationType',
     'create_annotation',
-    
-    # Tracking configuration
     'TrackingTarget',
     'TrackingConfig',
     
@@ -125,18 +140,17 @@ __all__ = [
     'sample_mesh_surface_points',
     'generate_distinct_colors',
     
-    # Viewport
-    'setup_dual_viewport',
-    'split_viewport_horizontal',
-    'configure_viewport_shading',
-    'configure_viewport_overlays',
-    'enter_local_view',
-    'register_viewport_restore_handler',
-    'create_viewport_restore_script',
-    
     # Manager (unified API)
     'AnnotationManager',
     'get_manager',
     'reset_manager',
     'quick_annotate',
+    
+    # Viewport (from setup module)
+    'viewport',
+    'setup_dual_viewport_simple',
+    'reset_viewport_single',
+    'setup_dual_viewport',
+    'create_viewport_restore_script',
+    'register_viewport_restore_handler',
 ]

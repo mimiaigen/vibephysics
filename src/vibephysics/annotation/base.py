@@ -3,6 +3,10 @@ Base Annotation Module
 
 Provides common utilities and base classes for all annotation types.
 This enables easy extension and unified control of annotations.
+
+Note: Collection and viewport utilities are in the setup module:
+- setup.importer.ensure_collection() for collection management
+- setup.viewport.find_layer_collection() for layer collection lookup
 """
 
 import bpy
@@ -14,44 +18,6 @@ from abc import ABC, abstractmethod
 # =============================================================================
 
 DEFAULT_COLLECTION_NAME = "AnnotationViz"
-
-
-# =============================================================================
-# Collection Utilities
-# =============================================================================
-
-def ensure_collection(name=None):
-    """
-    Get or create an annotation collection.
-    
-    Args:
-        name: Collection name (defaults to DEFAULT_COLLECTION_NAME)
-        
-    Returns:
-        bpy.types.Collection
-    """
-    collection_name = name or DEFAULT_COLLECTION_NAME
-    
-    if collection_name not in bpy.data.collections:
-        collection = bpy.data.collections.new(collection_name)
-        bpy.context.scene.collection.children.link(collection)
-    else:
-        collection = bpy.data.collections[collection_name]
-        
-    return collection
-
-
-def find_layer_collection(layer_collection, collection_name):
-    """Recursively find a layer collection by name."""
-    if layer_collection.name == collection_name:
-        return layer_collection
-    
-    for child in layer_collection.children:
-        result = find_layer_collection(child, collection_name)
-        if result:
-            return result
-    
-    return None
 
 
 # =============================================================================

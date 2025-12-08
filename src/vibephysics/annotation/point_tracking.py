@@ -11,7 +11,8 @@ import random
 from mathutils import Vector, Color
 
 from . import base
-from . import viewport
+from ..setup import viewport
+from ..setup.importer import ensure_collection
 
 
 def sample_mesh_surface_points(obj, num_points=50, seed=None):
@@ -173,7 +174,7 @@ def create_point_cloud_tracker(tracked_objects, points_per_object=50, point_size
         return None, None
     
     # Ensure collection exists
-    collection = base.ensure_collection(collection_name)
+    collection = ensure_collection(collection_name or base.DEFAULT_COLLECTION_NAME)
     
     # Sample points from each object and store tracking data
     tracking_data = []

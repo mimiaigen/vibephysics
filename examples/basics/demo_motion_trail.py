@@ -16,6 +16,7 @@ sys.path.insert(0, os.path.join(_root, 'src'))
 
 from vibephysics.annotation import motion_trail
 from vibephysics.camera import CameraManager
+from vibephysics.setup import save_blend
 
 def setup_demo_scene():
     # Clear existing objects
@@ -119,14 +120,11 @@ def run():
     
     # Save
     output_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', 'output'))
-    if not os.path.exists(output_dir):
-        os.makedirs(output_dir)
     output_file = os.path.join(output_dir, "demo_motion_trail.blend")
-    bpy.ops.wm.save_as_mainfile(filepath=output_file)
+    save_blend(output_file)
     
     print("\n" + "=" * 60)
     print("✅ Demo Complete!")
-    print(f"   Saved to: {output_file}")
     print("=" * 60)
     print("\nCamera Summary:")
     print(f"   - {len(cam_manager.get_all_cameras())} total cameras")

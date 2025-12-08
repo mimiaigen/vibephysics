@@ -9,6 +9,7 @@ import bpy
 import mathutils
 
 from . import base
+from ..setup.importer import ensure_collection
 
 
 def get_object_bounds(obj, depsgraph=None):
@@ -138,7 +139,7 @@ def create_bbox_annotation(target_obj, color=(1.0, 0.6, 0.0, 1.0), thickness=2.0
         return None
         
     # Ensure collection exists
-    collection = base.ensure_collection(collection_name)
+    collection = ensure_collection(collection_name or base.DEFAULT_COLLECTION_NAME)
         
     # Create visualization object
     mesh = create_bbox_mesh_data(f"BBox_{target_obj.name}")

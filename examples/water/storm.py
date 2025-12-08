@@ -12,6 +12,7 @@ sys.path.insert(0, os.path.join(_root, 'src'))
 from vibephysics.foundation import scene, physics, water, ground, objects, materials, lighting
 from vibephysics.annotation import point_tracking
 from vibephysics.camera import CenterPointingCameraRig
+from vibephysics.setup import save_blend
 
 def parse_args():
     """Parse command-line arguments for storm simulation configuration.
@@ -246,6 +247,4 @@ if __name__ == "__main__":
     run_simulation_setup(args)
     
     # Save to output file
-    blend_path = os.path.abspath(args.output)
-    bpy.ops.wm.save_as_mainfile(filepath=blend_path)
-    print(f"✅ Saved to {args.output}")
+    save_blend(args.output)

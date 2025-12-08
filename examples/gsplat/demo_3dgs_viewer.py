@@ -32,6 +32,7 @@ from vibephysics.setup import (
 )
 from vibephysics.setup.gsplat import print_gsplat_info, get_gsplat_info
 from vibephysics.setup.viewport import create_viewport_restore_script
+from vibephysics.camera import CameraManager
 
 
 def parse_args():
@@ -310,30 +311,51 @@ def create_point_cloud_duplicate(obj, collection_name="PointCloudViz"):
     return pc_obj
 
 
-def add_camera_for_gsplat(obj):
-    """Add a camera positioned to view the Gaussian splat."""
-    # Get object bounds
-    bbox = [obj.matrix_world @ mathutils.Vector(corner) for corner in obj.bound_box]
-    center = sum(bbox, mathutils.Vector()) / 8
+def setup_camera_system(obj):
+    """
+    Setup camera system similar to demo_all_annotations.py.
+    
+    Creates center-pointing cameras around the origin.
+    
+    Args:
+        obj: The Gaussian splat object (used to determine camera radius)
+        
+    Returns:
+        CameraManager instance
+    """
+    print("\n📷 Setting up Camera System...")
     
     # Calculate distance based on object size
     dims = obj.dimensions
-    max_dim = max(dims)
-    distance = max_dim * 2.5
+    max_dim = max(dims) if max(dims) > 0 else 1.0
+    radius = max_dim * 0.05
     
-    # Create camera
-    bpy.ops.object.camera_add(location=(center.x + distance, center.y - distance, center.z + distance * 0.5))
-    camera = bpy.context.active_object
-    camera.name = "GSplat_Camera"
+    # Create camera manager
+    cam_manager = CameraManager()
     
-    # Point at center
-    direction = center - camera.location
-    camera.rotation_euler = direction.to_track_quat('-Z', 'Y').to_euler()
+    # ==========================================================================
+    # Center-Pointing Cameras (4 cameras around origin, height=0)
+    # ==========================================================================
+    print("  📷 Creating center-pointing cameras (4 cameras)")
+    center_rig = cam_manager.add_center_pointing(
+        name='center', 
+        num_cameras=4, 
+        radius=radius, 
+        height=0.0  # Cameras at same height as origin
+    )
+    center_rig.create(target_location=(0, 0, 0))  # Point at origin
     
-    # Set as active camera
-    bpy.context.scene.camera = camera
+    # ==========================================================================
+    # Set default active camera (camera at 270°)
+    # ==========================================================================
+    cam_manager.activate_rig('center', camera_index=3)  # Camera_3_Angle_270
     
-    return camera
+    print(f"\n  Total cameras created: {len(cam_manager.get_all_cameras())}")
+    print("    - 4 center-pointing cameras (fixed positions, track origin)")
+    print(f"    - Radius: {radius:.1f}, Height: 0.0")
+    print(f"    - Target: (0, 0, 0)")
+    
+    return cam_manager
 
 
 def run():
@@ -392,8 +414,8 @@ def run():
         print(f"\n📍 Creating point cloud visualization...")
         pc_obj = create_point_cloud_duplicate(obj, collection_name="PointCloudViz")
     
-    # Add camera
-    add_camera_for_gsplat(obj)
+    # Setup camera system (similar to demo_all_annotations.py)
+    cam_manager = setup_camera_system(obj)
     
     # Setup dual viewport using local view (like demo_all_annotations.py)
     # Left: Material Preview (main Gaussian splat with geometry nodes)
@@ -436,12 +458,16 @@ def run():
     print(f"\n📊 Summary:")
     print(f"   Input: {args.input}")
     print(f"   Points: {point_count:,}")
+    print(f"   Cameras: {len(cam_manager.get_all_cameras())}")
     print(f"   Output: {output_path}")
     print(f"\n💡 To view with dual viewport:")
     print(f"   1. Open the .blend file in Blender: {output_path}")
     print(f"   2. Run script: Text Editor → 'restore_point_tracking_viewport.py' → Run (Alt+P)")
     print(f"\n   Left viewport: Material Preview (Gaussian splat with geometry nodes)")
     print(f"   Right viewport: Point cloud only (vertex colors)")
+    print(f"\n📷 Camera Controls:")
+    print(f"   - Numpad 0: View through active camera")
+    print(f"   - Switch cameras: Properties → Scene → Camera")
     print(f"\n   Note: Colors are converted from SH coefficients (f_dc_*) to RGB")
     print(f"   Formula: RGB = SH_C0 × f_dc + 0.5, where SH_C0 = 0.282...")
     print(f"\n   - Mouse scroll: zoom")

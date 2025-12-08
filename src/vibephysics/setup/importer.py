@@ -2,7 +2,7 @@
 Asset Import Module
 
 Load 3D assets into Blender scenes.
-Supports: GLB, GLTF, FBX, PLY, OBJ, BLEND files.
+Supports: GLB, GLTF, FBX, PLY, OBJ, BLEND files, and Gaussian Splats.
 """
 import bpy
 import os
@@ -307,3 +307,72 @@ def ensure_collection(name):
     else:
         collection = bpy.data.collections[name]
     return collection
+
+
+# =============================================================================
+# Gaussian Splatting Support
+# =============================================================================
+
+def load_gsplat(path, collection_name="GaussianSplat", frame_start=1, setup_animation=True):
+    """
+    Load Gaussian Splatting data (3DGS or 4DGS).
+    
+    - If path is a .ply file -> loads as 3DGS (single frame)
+    - If path is a folder -> loads as 4DGS sequence (animated)
+    
+    Args:
+        path: Path to PLY file or folder with PLY sequence
+        collection_name: Collection name for the splat(s)
+        frame_start: Starting frame for 4DGS animation
+        setup_animation: Auto-setup visibility animation for sequences
+    
+    Returns:
+        Object (3DGS) or Collection (4DGS sequence)
+    
+    Example:
+        # Single Gaussian splat
+        obj = load_gsplat('scene.ply')
+        
+        # Animated sequence
+        collection = load_gsplat('frames/')
+    """
+    from . import gsplat
+    return gsplat.load_gsplat(path, collection_name, frame_start, setup_animation)
+
+
+def load_3dgs(filepath, name=None, collection_name=None, transform=None):
+    """
+    Load a 3D Gaussian Splatting PLY file.
+    
+    Args:
+        filepath: Path to .ply file
+        name: Optional object name
+        collection_name: Optional collection
+        transform: Optional transform dict
+    
+    Returns:
+        Imported object
+    """
+    from . import gsplat
+    return gsplat.load_3dgs(filepath, name, collection_name, transform)
+
+
+def load_4dgs_sequence(folder_path, prefix="", suffix=".ply", collection_name="4DGS_Sequence",
+                       frame_start=1, setup_animation=True):
+    """
+    Load a 4D Gaussian Splatting sequence from a folder.
+    
+    Args:
+        folder_path: Folder containing PLY files
+        prefix: File name prefix (e.g., "frame_")
+        suffix: File extension (default ".ply")
+        collection_name: Collection name
+        frame_start: Animation start frame
+        setup_animation: Auto-setup visibility animation
+    
+    Returns:
+        Collection containing all frames
+    """
+    from . import gsplat
+    return gsplat.load_4dgs_sequence(folder_path, prefix, suffix, collection_name,
+                                      frame_start, setup_animation)

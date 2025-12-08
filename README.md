@@ -184,7 +184,8 @@ vibephysics/
 │   │   ├── scene.py        # Scene initialization, frame range
 │   │   ├── importer.py     # Asset loading (GLB, FBX, PLY, etc.)
 │   │   ├── exporter.py     # Save/export (blend, FBX, OBJ, etc.)
-│   │   └── viewport.py     # Viewport splitting, dual-view
+│   │   ├── viewport.py     # Viewport splitting, dual-view
+│   │   └── gsplat.py       # Gaussian Splatting (3DGS/4DGS)
 │   ├── foundation/         # Core simulation modules
 │   │   ├── physics.py      # Rigid body world, force fields
 │   │   ├── ground.py       # Terrain generation
@@ -253,6 +254,45 @@ exporter.export_fbx('output.fbx', selected_only=True)
 | DAE (Collada) | STL |
 | USD/USDA/USDC | USD |
 | Blend (append) | |
+
+## Gaussian Splatting (3DGS/4DGS)
+
+VibePhysics supports loading 3D and 4D Gaussian Splatting data:
+
+```python
+from vibephysics import setup
+
+# Load single 3D Gaussian Splat
+obj = setup.load_gsplat('scene.ply')
+
+# Load 4D Gaussian Splat sequence (animated)
+# Expects folder with: frame_0000.ply, frame_0001.ply, ...
+collection = setup.load_gsplat('frames/')
+
+# Or use the dedicated scene initializer
+collection = setup.init_gsplat_scene('frames/')
+# Frame range automatically adjusted to match sequence length
+```
+
+### 4DGS Sequence Loading
+
+```python
+from vibephysics.setup import gsplat
+
+# Load sequence with custom prefix
+collection = gsplat.load_4dgs_sequence(
+    'output/frames/',
+    prefix='frame_',      # Files: frame_0000.ply, frame_0001.ply, ...
+    frame_start=1,        # Blender frame to start animation
+    setup_animation=True  # Auto-setup visibility keyframes
+)
+
+# Get sequence info
+info = gsplat.get_sequence_info(collection)
+print(f"Loaded {info['frame_count']} frames, {info['avg_points_per_frame']} avg points/frame")
+```
+
+The 4DGS loader automatically sets up frame-by-frame visibility animation, so each PLY object is visible only on its corresponding frame. Press **Spacebar** in Blender to play the animation.
 
 ## License
 

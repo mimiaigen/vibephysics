@@ -12,6 +12,7 @@ import bpy
 # Re-export only the smart functions (auto-detect format by extension)
 from .importer import load_asset, move_to_collection, ensure_collection
 from .exporter import save_blend, export_selected
+from .gsplat import load_gsplat, load_3dgs, load_4dgs_sequence
 
 
 # =============================================================================
@@ -72,6 +73,62 @@ def init_simulation(start_frame=1, end_frame=250, physics_config=None, clear=Tru
     if dual_viewport and not bpy.app.background:
         from . import viewport as vp
         result = vp.setup_dual_viewport_simple(viewport_config)
+    
+    return result
+
+
+def init_gsplat_scene(
+    gsplat_path,
+    start_frame=1,
+    collection_name="GaussianSplat",
+    clear=True
+):
+    """
+    Initialize a scene for Gaussian Splatting playback.
+    
+    Automatically detects 3DGS (single file) vs 4DGS (folder sequence).
+    Sets up frame range based on sequence length for 4DGS.
+    
+    Args:
+        gsplat_path: Path to .ply file (3DGS) or folder with PLY sequence (4DGS)
+        start_frame: Starting frame number
+        collection_name: Collection name for the splat(s)
+        clear: Whether to clear existing scene
+    
+    Returns:
+        Object (3DGS) or Collection (4DGS), or None if failed
+    
+    Example:
+        # Load single Gaussian splat
+        obj = init_gsplat_scene('scene.ply')
+        
+        # Load animated 4DGS sequence
+        collection = init_gsplat_scene('frames/')
+        # Frame range automatically set to match sequence length
+    """
+    import os
+    
+    if clear:
+        clear_scene()
+    
+    scene = bpy.context.scene
+    scene.frame_start = start_frame
+    scene.frame_set(start_frame)
+    
+    # Load Gaussian splat(s)
+    from . import gsplat
+    result = gsplat.load_gsplat(
+        gsplat_path,
+        collection_name=collection_name,
+        frame_start=start_frame,
+        setup_animation=True
+    )
+    
+    # For 4DGS sequences, adjust frame range based on loaded frames
+    if result and isinstance(result, bpy.types.Collection):
+        num_frames = len(result.objects)
+        scene.frame_end = start_frame + num_frames - 1
+        print(f"📊 Frame range set: {start_frame} to {scene.frame_end} ({num_frames} frames)")
     
     return result
 

@@ -9,6 +9,7 @@ Modules:
 - importer: Load 3D assets (auto-detects format from extension)
 - exporter: Save/export scenes and objects (auto-detects format)
 - viewport: Viewport splitting and dual-view management
+- gsplat: Gaussian Splatting (3DGS/4DGS) support
 
 Usage:
     from vibephysics import setup
@@ -18,16 +19,22 @@ Usage:
     setup.load_asset('mesh.ply')       # Loads PLY
     setup.save_blend('output.blend')   # Saves blend file
     
+    # Gaussian Splatting
+    setup.load_gsplat('scene.ply')     # Single 3DGS
+    setup.load_gsplat('frames/')       # 4DGS sequence (animated)
+    
     # For format-specific control, use submodules directly:
-    from vibephysics.setup import importer, exporter
+    from vibephysics.setup import importer, exporter, gsplat
     importer.load_glb('model.glb', transform={'scale': 0.5})
     exporter.export_fbx('output.fbx', selected_only=True)
+    gsplat.load_4dgs_sequence('frames/', prefix='frame_')
 """
 
 from . import scene
 from . import importer
 from . import exporter
 from . import viewport
+from . import gsplat
 
 # =============================================================================
 # Scene Functions
@@ -35,6 +42,7 @@ from . import viewport
 from .scene import (
     # Initialization
     init_simulation,
+    init_gsplat_scene,
     clear_scene,
     configure_physics_cache,
     # Frame range
@@ -56,6 +64,24 @@ from .scene import (
 # =============================================================================
 from .importer import load_asset, move_to_collection, ensure_collection
 from .exporter import save_blend, export_selected, ensure_output_dir, get_output_path
+
+# =============================================================================
+# Gaussian Splatting (3DGS/4DGS)
+# =============================================================================
+from .gsplat import (
+    load_gsplat,
+    load_3dgs,
+    load_4dgs_sequence,
+    load_4dgs_from_files,
+    setup_sequence_animation,
+    clear_sequence_animation,
+    apply_geometry_nodes_from_blend,
+    get_sequence_info,
+    setup_gsplat_display,
+    setup_gsplat_color,
+    convert_sh_to_rgb,
+    SH_C0,
+)
 
 # =============================================================================
 # Viewport Functions
@@ -86,9 +112,11 @@ __all__ = [
     'importer',
     'exporter',
     'viewport',
+    'gsplat',
     
     # Scene functions
     'init_simulation',
+    'init_gsplat_scene',
     'clear_scene',
     'configure_physics_cache',
     'set_frame_range',
@@ -109,6 +137,20 @@ __all__ = [
     'export_selected',
     'ensure_output_dir',
     'get_output_path',
+    
+    # Gaussian Splatting (3DGS/4DGS)
+    'load_gsplat',
+    'load_3dgs',
+    'load_4dgs_sequence',
+    'load_4dgs_from_files',
+    'setup_sequence_animation',
+    'clear_sequence_animation',
+    'apply_geometry_nodes_from_blend',
+    'get_sequence_info',
+    'setup_gsplat_display',
+    'setup_gsplat_color',
+    'convert_sh_to_rgb',
+    'SH_C0',
     
     # Viewport functions
     'setup_dual_viewport_simple',

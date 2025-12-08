@@ -16,7 +16,7 @@ Usage:
 Note: This package requires Blender 5.0's Python environment (bpy).
 """
 
-__version__ = "0.1.3"
+__version__ = "0.1.4"
 __author__ = "Your Name"
 
 # Check if running inside Blender

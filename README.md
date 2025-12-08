@@ -180,6 +180,11 @@ This means you can generate a single `.blend` file and render from any camera an
 ```
 vibephysics/
 ├── src/vibephysics/
+│   ├── setup/              # Scene & asset management
+│   │   ├── scene.py        # Scene initialization, frame range
+│   │   ├── importer.py     # Asset loading (GLB, FBX, PLY, etc.)
+│   │   ├── exporter.py     # Save/export (blend, FBX, OBJ, etc.)
+│   │   └── viewport.py     # Viewport splitting, dual-view
 │   ├── foundation/         # Core simulation modules
 │   │   ├── physics.py      # Rigid body world, force fields
 │   │   ├── ground.py       # Terrain generation
@@ -189,14 +194,12 @@ vibephysics/
 │   │   ├── lighting.py     # Lighting and camera
 │   │   ├── robot.py        # Generic robot control
 │   │   ├── open_duck.py    # Open Duck robot integration
-│   │   ├── trajectory.py   # Waypoint paths
-│   │   └── scene.py        # Scene initialization
+│   │   └── trajectory.py   # Waypoint paths
 │   ├── annotation/         # Visualization tools
 │   │   ├── base.py         # Base annotation classes
 │   │   ├── bbox.py         # Bounding box annotations
 │   │   ├── motion_trail.py # Motion path visualization
 │   │   ├── point_tracking.py # Point cloud tracking
-│   │   ├── viewport.py     # Dual viewport setup
 │   │   └── manager.py      # Unified annotation API
 │   └── camera/             # Camera system
 │       ├── base.py         # Base camera classes
@@ -212,6 +215,44 @@ vibephysics/
 ├── run_robot.sh            # Run robot examples
 └── run_annotation.sh       # Run annotation demos
 ```
+
+## Setup Module
+
+The `setup` module provides scene initialization, asset import/export, and viewport management:
+
+```python
+from vibephysics import setup
+
+# Initialize a simulation scene
+setup.init_simulation(start_frame=1, end_frame=250)
+
+# Load assets (auto-detects format from file extension)
+setup.load_asset('robot.glb')           # GLB/GLTF
+setup.load_asset('mesh.fbx')            # FBX
+setup.load_asset('points.ply')          # PLY
+
+# Save/export (auto-detects format)
+setup.save_blend('output/scene.blend')  # Creates directories automatically
+
+# For format-specific options, use submodules directly:
+from vibephysics.setup import importer, exporter
+
+objects = importer.load_glb('model.glb', transform={'scale': 0.5})
+exporter.export_fbx('output.fbx', selected_only=True)
+```
+
+### Supported Formats
+
+| Import | Export |
+|--------|--------|
+| GLB/GLTF | Blend |
+| FBX | GLB/GLTF |
+| PLY | FBX |
+| OBJ | OBJ |
+| STL | PLY |
+| DAE (Collada) | STL |
+| USD/USDA/USDC | USD |
+| Blend (append) | |
 
 ## License
 

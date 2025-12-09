@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "vibephysics"
-version = "0.1.5"
+version = "0.1.8"
 description = "Physics simulation and annotation tools for Blender"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -31,8 +31,12 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Visualization",
 ]
 
-# Note: bpy is not on PyPI, users must have Blender installed
-dependencies = []
+# Core dependencies
+dependencies = [
+    "bpy>=5.0",
+    "tqdm>=4.0",
+    "numpy<2.0",
+]
 
 [project.optional-dependencies]
 dev = [
@@ -40,6 +44,9 @@ dev = [
     "black",
     "ruff",
 ]
+
+[project.scripts]
+vibephysics-mcp = "vibephysics.mcp_server:main"
 
 [project.urls]
 Homepage = "https://github.com/yourusername/vibephysics"

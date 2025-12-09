@@ -13,27 +13,11 @@ Usage:
     from vibephysics.setup import scene, viewport  # scene also available here
     from vibephysics.annotation import AnnotationManager
 
-Note: This package requires Blender 5.0's Python environment (bpy).
+Note: This package requires Blender 5.0's Python environment (bpy) for simulation.
 """
 
-__version__ = "0.1.5"
-__author__ = "Your Name"
-
-# Check if running inside Blender
-def _check_blender_environment():
-    """Check if bpy is available and provide helpful error if not."""
-    try:
-        import bpy
-        return True
-    except ImportError:
-        import sys
-        
-        raise ImportError(
-            "vibephysics requires python=3.11 and Blender 5.0's Python environment. "
-        )
-
-# Check environment before importing submodules
-_check_blender_environment()
+__version__ = "0.1.8"
+__author__ = "Tsun-Yi Yang"
 
 # Import subpackages for convenient access
 from . import setup

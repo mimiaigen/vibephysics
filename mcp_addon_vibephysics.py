@@ -1,11 +1,9 @@
-# VibePhysics MCP Addon - Exposes all vibephysics functions via MCP
-# Based on mcp_addon_simple.py structure
+# VibePhysics MCP Addon - Connect Blender to Claude via MCP
 #
 # INSTALLATION:
-#   1. Install vibephysics in Blender's Python:
-#      /path/to/blender/python -m pip install vibephysics
-#      or for development: pip install -e /path/to/vibephysics
-#   2. Install this addon in Blender
+#   1. Install this addon in Blender (Edit > Preferences > Add-ons > Install)
+#   2. In the VibePhysicsMCP panel, set the path to your vibephysics folder
+#   3. Click "Set Path & Reload" to load vibephysics
 
 import bpy
 import mathutils
@@ -16,7 +14,7 @@ import time
 import traceback
 import io
 import sys
-from bpy.props import IntProperty
+from bpy.props import IntProperty, StringProperty, BoolProperty
 from contextlib import redirect_stdout
 
 bl_info = {
@@ -36,29 +34,35 @@ import os
 
 _vibephysics_imported = False
 _vibephysics_error = None
+_vibephysics_path = ""
 
-def setup_vibephysics_path():
-    """Add vibephysics source path to Python path."""
-    # Direct path to vibephysics source (editable install location)
-    vibephysics_src = "./src"
+def setup_vibephysics_path(user_path):
+    """Add vibephysics source path to Python path.
     
-    if os.path.exists(vibephysics_src) and vibephysics_src not in sys.path:
-        sys.path.insert(0, vibephysics_src)
-        print(f"Added vibephysics path: {vibephysics_src}")
+    Args:
+        user_path: Path to vibephysics folder (containing 'src' subfolder)
+    """
+    global _vibephysics_path
+    
+    if not user_path or not os.path.exists(user_path):
+        return False
+    
+    # Check if it's the vibephysics folder (has src/vibephysics)
+    src_path = os.path.join(user_path, "src")
+    if os.path.exists(src_path) and src_path not in sys.path:
+        sys.path.insert(0, src_path)
+        _vibephysics_path = src_path
+        print(f"Added vibephysics path: {src_path}")
         return True
     
-    # Fallback: try to find it relative to this addon file
-    addon_dir = os.path.dirname(os.path.abspath(__file__))
-    local_src = os.path.join(addon_dir, "src")
-    if os.path.exists(local_src) and local_src not in sys.path:
-        sys.path.insert(0, local_src)
-        print(f"Added vibephysics path: {local_src}")
+    # Maybe user selected the src folder directly
+    if os.path.exists(os.path.join(user_path, "vibephysics")) and user_path not in sys.path:
+        sys.path.insert(0, user_path)
+        _vibephysics_path = user_path
+        print(f"Added vibephysics path: {user_path}")
         return True
     
     return False
-
-# Setup paths before importing
-setup_vibephysics_path()
 
 def ensure_vibephysics():
     """Ensure vibephysics is imported. Returns True if successful."""
@@ -1135,16 +1139,18 @@ class VIBEPHYSICSMCP_PT_Panel(bpy.types.Panel):
             layout.operator("vibephysicsmcp.stop_server", text="Disconnect from MCP server")
             layout.label(text=f"Running on port {scene.vibephysicsmcp_port}")
         
-        # Status info
+        # VibePhysics Path
         layout.separator()
+        box = layout.box()
+        box.label(text="VibePhysics Path:", icon='FILE_FOLDER')
+        box.prop(scene, "vibephysicsmcp_path", text="")
+        box.operator("vibephysicsmcp.set_path", text="Set Path & Reload", icon='FILE_REFRESH')
+        
+        # Status
         if _vibephysics_imported:
-            layout.label(text="✓ VibePhysics loaded", icon='CHECKMARK')
+            box.label(text="✓ Loaded", icon='CHECKMARK')
         else:
-            layout.label(text="✗ VibePhysics not found", icon='ERROR')
-            if _vibephysics_error:
-                err = _vibephysics_error[:40] + "..." if len(_vibephysics_error) > 40 else _vibephysics_error
-                layout.label(text=err)
-            layout.label(text="Run: pip install vibephysics")
+            box.label(text="✗ Not loaded", icon='ERROR')
 
 
 class VIBEPHYSICSMCP_OT_StartServer(bpy.types.Operator):
@@ -1181,6 +1187,45 @@ class VIBEPHYSICSMCP_OT_StopServer(bpy.types.Operator):
         return {'FINISHED'}
 
 
+class VIBEPHYSICSMCP_OT_SetPath(bpy.types.Operator):
+    bl_idname = "vibephysicsmcp.set_path"
+    bl_label = "Set VibePhysics Path"
+    bl_description = "Set vibephysics path and reload"
+
+    def execute(self, context):
+        global _vibephysics_imported, _vibephysics_error
+        
+        scene = context.scene
+        user_path = scene.vibephysicsmcp_path
+        
+        if not user_path:
+            self.report({'ERROR'}, "Please select the vibephysics folder")
+            return {'CANCELLED'}
+        
+        if not os.path.exists(user_path):
+            self.report({'ERROR'}, f"Path not found: {user_path}")
+            return {'CANCELLED'}
+        
+        # Setup the path
+        if setup_vibephysics_path(user_path):
+            # Remove old modules if any
+            if 'vibephysics' in sys.modules:
+                modules_to_remove = [key for key in sys.modules.keys() if key.startswith('vibephysics')]
+                for mod in modules_to_remove:
+                    del sys.modules[mod]
+            
+            # Import
+            if ensure_vibephysics():
+                self.report({'INFO'}, "VibePhysics loaded successfully")
+                return {'FINISHED'}
+            else:
+                self.report({'ERROR'}, f"Import failed: {_vibephysics_error}")
+                return {'CANCELLED'}
+        else:
+            self.report({'ERROR'}, "Invalid path - select the vibephysics folder")
+            return {'CANCELLED'}
+
+
 # =============================================================================
 # Registration
 # =============================================================================
@@ -1194,20 +1239,25 @@ def register():
         max=65535
     )
 
-    bpy.types.Scene.vibephysicsmcp_server_running = bpy.props.BoolProperty(
+    bpy.types.Scene.vibephysicsmcp_server_running = BoolProperty(
         name="Server Running",
         default=False
+    )
+    
+    bpy.types.Scene.vibephysicsmcp_path = StringProperty(
+        name="VibePhysics Path",
+        description="Path to vibephysics folder",
+        default="",
+        subtype='DIR_PATH'
     )
 
     bpy.utils.register_class(VIBEPHYSICSMCP_PT_Panel)
     bpy.utils.register_class(VIBEPHYSICSMCP_OT_StartServer)
     bpy.utils.register_class(VIBEPHYSICSMCP_OT_StopServer)
+    bpy.utils.register_class(VIBEPHYSICSMCP_OT_SetPath)
 
     print("VibePhysics MCP addon registered")
-    if _vibephysics_imported:
-        print("✓ VibePhysics is available")
-    else:
-        print("✗ VibePhysics not found - install with: pip install vibephysics")
+    print("Set vibephysics path in the panel to load")
 
 
 def unregister():
@@ -1215,10 +1265,12 @@ def unregister():
         bpy.types.vibephysicsmcp_server.stop()
         del bpy.types.vibephysicsmcp_server
 
+    bpy.utils.unregister_class(VIBEPHYSICSMCP_OT_SetPath)
     bpy.utils.unregister_class(VIBEPHYSICSMCP_OT_StopServer)
     bpy.utils.unregister_class(VIBEPHYSICSMCP_OT_StartServer)
     bpy.utils.unregister_class(VIBEPHYSICSMCP_PT_Panel)
 
+    del bpy.types.Scene.vibephysicsmcp_path
     del bpy.types.Scene.vibephysicsmcp_port
     del bpy.types.Scene.vibephysicsmcp_server_running
 

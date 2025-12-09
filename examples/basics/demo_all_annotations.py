@@ -186,31 +186,6 @@ def run():
     # Finalize - registers all handlers and creates embedded scripts
     mgr.finalize(setup_viewport=False)
     
-    # Create viewport restore script for when file is re-opened
-    # viewport.create_viewport_restore_script("AnnotationViz")
-    
-    # ==========================================================================
-    # Alternative: Quick API (one-liner)
-    # ==========================================================================
-    # For even simpler usage, you can use:
-    #
-    #   from annotation import quick_annotate
-    #   quick_annotate(objects, bbox=True, trail=True, point_tracking=True)
-    #
-    # This automatically creates all annotations with auto-generated colors.
-    
-    # ==========================================================================
-    # Alternative: Individual Module Usage (Original API)
-    # ==========================================================================
-    # You can still use the individual modules directly:
-    #
-    #   bbox.create_bbox_annotation(cube, color=(1, 0, 0, 1))
-    #   bbox.register()
-    #   
-    #   motion_trail.create_motion_trail(cube, start_frame=1, end_frame=150)
-    #   
-    #   point_tracking.setup_point_tracking_visualization(objects, points_per_object=50)
-    
     # ==========================================================================
     # Save
     # ==========================================================================

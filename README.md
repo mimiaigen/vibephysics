@@ -298,9 +298,9 @@ Add the following to your Cursor MCP config file:
 ```json
 {
   "mcpServers": {
-    "vibephysics": {
+    "blender": {
       "command": "uvx",
-      "args": ["vibephysics-mcp"]
+      "args": ["blender-mcp"]
     }
   }
 }

@@ -23,6 +23,16 @@ Usage:
     setup.load_gsplat('scene.ply')     # Single 3DGS
     setup.load_gsplat('frames/')       # 4DGS sequence (animated)
     
+    # Advanced Gaussian Splatting display (UGRS-style)
+    obj = setup.load_3dgs('scene.ply')
+    setup.setup_gsplat_display_advanced(
+        obj,
+        mesh_type='DualIcoSphere',  # 'Cube', 'IcoSphere', 'DualIcoSphere'
+        shader_mode='Gaussian',      # 'Gaussian', 'Ring', 'Wireframe', 'Freestyle'
+        point_scale='Max',           # 'Fix', 'Auto', 'Max'
+        output_channel='Final color' # 'Final color', 'Normal', 'Depth', 'Alpha'
+    )
+    
     # For format-specific control, use submodules directly:
     from vibephysics.setup import importer, exporter, gsplat
     importer.load_glb('model.glb', transform={'scale': 0.5})
@@ -77,6 +87,7 @@ from .gsplat import (
     apply_geometry_nodes_from_blend,
     get_sequence_info,
     setup_gsplat_display,
+    setup_gsplat_display_advanced,  # Advanced UGRS-style display
     setup_gsplat_color,
     convert_sh_to_rgb,
     SH_C0,
@@ -84,6 +95,11 @@ from .gsplat import (
     get_gsplat_info,
     print_gsplat_info,
     sigmoid,
+    # Enums for advanced display options
+    MeshType,
+    ShaderMode,
+    PointScale,
+    OutputChannel,
 )
 
 # =============================================================================
@@ -148,12 +164,18 @@ __all__ = [
     'apply_geometry_nodes_from_blend',
     'get_sequence_info',
     'setup_gsplat_display',
+    'setup_gsplat_display_advanced',
     'setup_gsplat_color',
     'convert_sh_to_rgb',
     'SH_C0',
     'get_gsplat_info',
     'print_gsplat_info',
     'sigmoid',
+    # Enums for advanced display options
+    'MeshType',
+    'ShaderMode',
+    'PointScale',
+    'OutputChannel',
     
     # Viewport functions
     'reset_viewport_single',

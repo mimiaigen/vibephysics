@@ -30,9 +30,43 @@ from vibephysics.setup import (
     setup_dual_viewport,
     ensure_collection,
 )
-from vibephysics.setup.gsplat import print_gsplat_info, get_gsplat_info
-from vibephysics.setup.viewport import create_viewport_restore_script
+from vibephysics.setup.gsplat import (
+    print_gsplat_info,
+    get_gsplat_info,
+    setup_gsplat_display_advanced,
+    MeshType,
+    ShaderMode,
+    PointScale,
+    OutputChannel,
+)
 from vibephysics.camera import CameraManager
+
+
+def setup_simple_dual_viewport():
+    """Setup dual viewport: Left=Material+Camera, Right=Solid (no local view)."""
+    from vibephysics.setup.viewport import (
+        split_viewport_horizontal, 
+        get_space_view3d,
+        configure_viewport_shading,
+        lock_viewport_to_camera
+    )
+    
+    left_area, right_area = split_viewport_horizontal(0.5)
+    if not left_area or not right_area:
+        print("   ⚠️ Could not split viewport")
+        return False
+    
+    left_space = get_space_view3d(left_area)
+    right_space = get_space_view3d(right_area)
+    
+    # Left: Material Preview + Camera View
+    configure_viewport_shading(left_space, shading_type='MATERIAL')
+    lock_viewport_to_camera(left_space)
+    
+    # Right: Solid with vertex colors
+    configure_viewport_shading(right_space, shading_type='SOLID', light='FLAT', color_type='VERTEX')
+    
+    return True
 
 
 def parse_args():
@@ -48,9 +82,38 @@ def parse_args():
     parser.add_argument('--output', '-o', type=str, default='demo_3dgs_viewer.blend',
                         help='Output blend file name')
     parser.add_argument('--point-size', type=float, default=0.005,
-                        help='Point size for visualization')
+                        help='Point size for visualization (used in Fix mode)')
     parser.add_argument('--no-dual-viewport', action='store_true',
                         help='Disable dual viewport setup')
+    
+    # Advanced display options based on UGRS/Nunchucks
+    parser.add_argument('--mesh-type', type=str, default='Circle',
+                        choices=['Cube', 'IcoSphere', 'DualIcoSphere', 'Circle'],
+                        help='Mesh type for point instancing. '
+                             'Circle is best for Gaussian splat appearance (disk-like), '
+                             'DualIcoSphere creates hexagonal pattern')
+    parser.add_argument('--shader-mode', type=str, default='Gaussian',
+                        choices=['Gaussian', 'Ring', 'Wireframe', 'Freestyle'],
+                        help='Shader rendering mode. '
+                             'Gaussian creates transparent disk-like splats with falloff')
+    parser.add_argument('--point-scale', type=str, default='Anisotropic',
+                        choices=['Fix', 'Auto', 'Max', 'Anisotropic'],
+                        help='Point scale mode. '
+                             'Anisotropic uses (scale_0, scale_1, scale_2) as X,Y,Z for ellipsoid shapes (thin needles). '
+                             'Max uses max(scale_0, scale_1, scale_2) for uniform spheres')
+    parser.add_argument('--output-channel', type=str, default='Final color',
+                        choices=['Final color', 'Normal', 'Depth', 'Alpha', 'Albedo'],
+                        help='Output channel for visualization')
+    parser.add_argument('--geo-size', type=float, default=3.0,
+                        help='Geometry size multiplier (default 3.0). Controls how large the mesh is '
+                             'relative to the visible Gaussian. Larger = more transparent area around '
+                             'the splat center. This is key for the Gaussian appearance!')
+    parser.add_argument('--use-advanced', action='store_true', default=True,
+                        help='Use advanced display mode with UGRS-style geometry nodes (default: True)')
+    parser.add_argument('--use-simple', action='store_true',
+                        help='Use simple display mode (solid colors, no transparency)')
+    parser.add_argument('--no-rotate', action='store_true',
+                        help='Do NOT rotate object (by default, rotates -90° X to convert Z-up to Y-up)')
     
     # Support both: python script.py --arg  AND  blender -P script.py -- --arg
     if '--' in sys.argv:
@@ -325,10 +388,7 @@ def setup_camera_system(obj):
     """
     print("\n📷 Setting up Camera System...")
     
-    # Calculate distance based on object size
-    dims = obj.dimensions
-    max_dim = max(dims) if max(dims) > 0 else 1.0
-    radius = max_dim * 0.05
+    radius = 5
     
     # Create camera manager
     cam_manager = CameraManager()
@@ -389,6 +449,12 @@ def run():
         print("❌ Failed to load Gaussian splat")
         return
     
+    # Rotate object by default (Z-up to Y-up for Blender)
+    if not args.no_rotate:
+        import math
+        obj.rotation_euler[0] = -math.pi / 2  # Rotate -90° around X axis
+        print(f"   Rotated: Z-up → Y-up (X rotation: -90°)")
+    
     # Get point count
     point_count = len(obj.data.vertices) if obj.data else 0
     print(f"   Points: {point_count:,}")
@@ -405,30 +471,44 @@ def run():
     # Setup Gaussian splat display with geometry nodes and material
     # Geometry nodes are REQUIRED for proper vertex color display on point clouds
     print(f"\n🎨 Setting up Gaussian splat display...")
-    setup_gsplat_display(obj, point_size=args.point_size, use_emission=True, use_geometry_nodes=True)
-    print(f"   ✅ Geometry nodes and material applied")
     
-    # Create point cloud duplicate for the right viewport
-    pc_obj = None
-    if not args.no_dual_viewport:
-        print(f"\n📍 Creating point cloud visualization...")
-        pc_obj = create_point_cloud_duplicate(obj, collection_name="PointCloudViz")
+    if args.use_simple:
+        # Use simple display mode (faster for large point clouds, solid colors)
+        print(f"   Using simple display mode (solid colors)")
+        setup_gsplat_display(obj, point_size=args.point_size, use_emission=True, use_geometry_nodes=True)
+    else:
+        # Use advanced UGRS-style display with configurable options
+        print(f"   Using advanced display mode (Gaussian splat appearance):")
+        print(f"   - Mesh type: {args.mesh_type}")
+        print(f"   - Shader mode: {args.shader_mode}")
+        print(f"   - Point scale: {args.point_scale}")
+        print(f"   - Geo size: {args.geo_size} (mesh is {args.geo_size}x larger than visible Gaussian)")
+        print(f"   - Output channel: {args.output_channel}")
+        
+        setup_gsplat_display_advanced(
+            obj,
+            mesh_type=args.mesh_type,
+            shader_mode=args.shader_mode,
+            point_scale=args.point_scale,
+            output_channel=args.output_channel,
+            fixed_scale=args.point_size,
+            geo_size=args.geo_size,
+            use_emission=True
+        )
+    
+    print(f"   ✅ Geometry nodes and material applied")
     
     # Setup camera system (similar to demo_all_annotations.py)
     cam_manager = setup_camera_system(obj)
     
-    # Setup dual viewport using local view (like demo_all_annotations.py)
-    # Left: Material Preview (main Gaussian splat with geometry nodes)
-    # Right: Point cloud only (raw vertices with vertex colors)
-    if not args.no_dual_viewport and pc_obj:
+    # Setup dual viewport (both showing Gaussian splat)
+    # Left: Material Preview, Right: Solid view
+    if not args.no_dual_viewport:
         print("\n🖼️ Setting up dual viewport...")
-        
-        # Create embedded restore script for the dual local view
-        # This is the same approach as demo_all_annotations.py
-        create_viewport_restore_script("PointCloudViz")
-        print("   ✅ Viewport restore script embedded")
-        print("   Left viewport: Material Preview (Gaussian splat)")
-        print("   Right viewport: Point cloud (vertex colors)")
+        if setup_simple_dual_viewport():
+            print("   ✅ Dual viewport created")
+            print("   Left viewport: Material Preview (Gaussian splat)")
+            print("   Right viewport: Solid view (vertex colors)")
     
     # Frame the object in view
     bpy.ops.object.select_all(action='DESELECT')
@@ -460,11 +540,32 @@ def run():
     print(f"   Points: {point_count:,}")
     print(f"   Cameras: {len(cam_manager.get_all_cameras())}")
     print(f"   Output: {output_path}")
-    print(f"\n💡 To view with dual viewport:")
-    print(f"   1. Open the .blend file in Blender: {output_path}")
-    print(f"   2. Run script: Text Editor → 'restore_point_tracking_viewport.py' → Run (Alt+P)")
-    print(f"\n   Left viewport: Material Preview (Gaussian splat with geometry nodes)")
-    print(f"   Right viewport: Point cloud only (vertex colors)")
+    
+    if not args.use_simple:
+        print(f"\n🎛️ Advanced Display Options (UGRS-style):")
+        print(f"   - Mesh type: {args.mesh_type}")
+        print(f"     └─ Circle: Flat disk (best for Gaussian shader)")
+        print(f"     └─ IcoSphere: Round 3D appearance")
+        print(f"     └─ DualIcoSphere: Hexagonal pattern")
+        print(f"     └─ Cube: Simple cube mesh")
+        print(f"   - Shader mode: {args.shader_mode}")
+        print(f"     └─ Gaussian: Transparent disk with falloff (default)")
+        print(f"     └─ Ring: Hollow ring shape")
+        print(f"     └─ Wireframe: Wireframe rendering")
+        print(f"   - Point scale: {args.point_scale}")
+        print(f"     └─ Anisotropic: (scale_0, scale_1, scale_2) as X,Y,Z - ellipsoid (thin needles!)")
+        print(f"     └─ Max: max(scale_0, scale_1, scale_2) - uniform spheres")
+        print(f"     └─ Auto: Automatic scaling")
+        print(f"     └─ Fix: Fixed size ({args.point_size})")
+        print(f"   - Geo size: {args.geo_size}")
+        print(f"     └─ Mesh is {args.geo_size}x larger than visible Gaussian")
+        print(f"     └─ Higher = smaller visible splat relative to mesh")
+        print(f"   - Output: {args.output_channel}")
+    
+    print(f"\n💡 To view:")
+    print(f"   Open the .blend file in Blender: {output_path}")
+    print(f"   Left viewport: Material Preview (Gaussian splat)")
+    print(f"   Right viewport: Solid view (vertex colors)")
     print(f"\n📷 Camera Controls:")
     print(f"   - Numpad 0: View through active camera")
     print(f"   - Switch cameras: Properties → Scene → Camera")
@@ -473,6 +574,11 @@ def run():
     print(f"\n   - Mouse scroll: zoom")
     print(f"   - Middle-click drag: rotate view")
     print(f"   - Shift + middle-click: pan view")
+    
+    if args.use_simple:
+        print(f"\n💡 Tip: Default mode now uses Gaussian splat appearance with:")
+        print(f"   --mesh-type IcoSphere --shader-mode Gaussian --point-scale Anisotropic")
+        print(f"   Remove --use-simple to enable ellipsoid splats (thin as needles!)")
 
 
 if __name__ == "__main__":

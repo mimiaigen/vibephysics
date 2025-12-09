@@ -60,6 +60,7 @@ conda activate vibephysics
 # Install bpy (Blender as Python module)
 pip install bpy
 pip install tqdm
+pip install "numpy<2.0"
 
 # Install vibephysics
 pip install vibephysics
@@ -255,9 +256,10 @@ exporter.export_fbx('output.fbx', selected_only=True)
 | USD/USDA/USDC | USD |
 | Blend (append) | |
 
-## Gaussian Splatting (3DGS)
+## Gaussian Splatting (3DGS) (BETA)
 
-VibePhysics supports loading 3D Gaussian Splatting data:
+VibePhysics supports loading 3D Gaussian Splatting data.
+[Warning] Currently it's under development
 
 ```
 sh run_3dgs_viewer.sh

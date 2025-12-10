@@ -266,65 +266,6 @@ VibePhysics supports loading 3D Gaussian Splatting data.
 sh run_3dgs_viewer.sh
 ```
 
-## 🤖 MCP Integration (Blender + Cursor)
-
-VibePhysics includes an MCP addon that connects Blender to Cursor AI for interactive physics simulation control.
-
-### Step 1: Setup Blender Addon
-
-1. **Install the addon in Blender**
-   - Open Blender
-   - Go to `Edit > Preferences > Add-ons > Install`
-   - Select `mcp_addon_vibephysics.py`
-   - Enable the addon
-
-2. **Set the vibephysics path**
-   - Open the sidebar panel (`N` key) in the 3D Viewport
-   - Find the `VibePhysicsMCP` tab
-   - Click the folder icon and select your `vibephysics` folder
-   - Click `Set Path & Reload`
-
-3. **Start the MCP server**
-   - Click `Connect to MCP server` in the panel
-   - The server runs on port `9527` by default
-
-### Step 2: Configure Cursor MCP
-
-Add the following to your Cursor MCP config file:
-
-**macOS**: `~/.cursor/mcp.json`
-**Windows**: `%USERPROFILE%\.cursor\mcp.json`
-
-```json
-{
-  "mcpServers": {
-    "blender": {
-      "command": "uvx",
-      "args": ["blender-mcp"]
-    }
-  }
-}
-```
-
-> If you don't have `uvx`, install it with: `pip install uv`
-
-### Step 3: Use in Cursor
-
-1. Restart Cursor after editing `mcp.json`
-2. Open Cursor's AI chat (Cmd/Ctrl + L)
-3. The Blender MCP tools should now be available
-4. Try: *"Create a water simulation with floating spheres"*
-
-### Features
-
-The MCP addon exposes all vibephysics functions:
-- Scene setup and physics configuration
-- Water simulation and dynamics
-- Robot loading and walking animation
-- Annotation tools (bounding boxes, motion trails, point tracking)
-- Camera system control
-- Asset import/export
-
 ## License
 
 **© 2025 MIMI AI LTD, UK. All rights reserved.**

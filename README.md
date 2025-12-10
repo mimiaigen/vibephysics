@@ -1,6 +1,6 @@
 # VibePhysics
 
-![VibePhysics Teaser](vibephysics_teaser.png)
+![VibePhysics Teaser](assets/vibephysics_teaser.png)
 
 **A lightweight Blender physics simulation framework for creating realistic robot animations, rigid body physics, water dynamics, and comprehensive annotation tools — all running efficiently on CPU.**
 

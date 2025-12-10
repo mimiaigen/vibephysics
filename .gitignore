@@ -37,6 +37,8 @@ Thumbs.db
 # Project specific
 output/
 *.blend
+# But include assets/*.blend (tracked via Git LFS)
+!assets/*.blend
 
 # Video
 *.mov

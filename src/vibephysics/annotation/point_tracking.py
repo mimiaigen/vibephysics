@@ -15,6 +15,245 @@ from ..setup import viewport
 from ..setup.importer import ensure_collection
 
 
+# Hidden position for frustum-culled points (far below scene)
+HIDDEN_POSITION = Vector((0, 0, -10000))
+
+# Frustum culling modes
+FRUSTUM_MODE_ALL = "all"           # Show all points (no culling)
+FRUSTUM_MODE_HIGHLIGHT = "highlight"  # Show all, highlight in-frustum as red
+FRUSTUM_MODE_ONLY = "frustum_only"    # Only show points in frustum
+
+
+def is_point_in_camera_view(point_world, camera, scene, margin=0.0, far_distance=None):
+    """
+    Check if a world-space point is within the camera's view frustum.
+    
+    Args:
+        point_world: Vector - world space position of the point
+        camera: Camera object
+        scene: Current scene
+        margin: Extends frustum bounds (0.0 = exact frustum, 0.5 = 50% extra)
+        far_distance: Maximum distance from camera (None = no limit)
+        
+    Returns:
+        True if point is in camera view frustum
+    """
+    from bpy_extras.object_utils import world_to_camera_view
+    
+    # Convert to normalized device coordinates
+    # co_ndc.x, co_ndc.y are in [0,1] if in view, co_ndc.z is distance from camera
+    co_ndc = world_to_camera_view(scene, camera, point_world)
+    
+    # Check X/Y bounds (in view)
+    in_xy_bounds = (
+        -margin < co_ndc.x < (1 + margin) and
+        -margin < co_ndc.y < (1 + margin)
+    )
+    
+    # Check depth (in front of camera, within far distance)
+    in_depth = co_ndc.z > 0  # In front of camera
+    
+    if far_distance is not None and in_depth:
+        # Calculate actual distance from camera to point
+        cam_pos = camera.matrix_world.translation
+        distance = (point_world - cam_pos).length
+        in_depth = distance <= far_distance
+    
+    return in_xy_bounds and in_depth
+
+
+def is_object_in_camera_view(obj, camera, scene, margin=0.0, far_distance=None):
+    """
+    Check if an object's center is within the camera's view frustum.
+    (Wrapper for backward compatibility)
+    """
+    obj_center = obj.matrix_world.translation
+    return is_point_in_camera_view(obj_center, camera, scene, margin, far_distance)
+
+
+def create_frustum_wireframe(camera, scene, near=0.5, far=50.0, collection_name=None):
+    """
+    Create a wireframe mesh representing the camera's view frustum.
+    
+    Args:
+        camera: Camera object
+        scene: Current scene
+        near: Near clip distance
+        far: Far clip distance for visualization
+        collection_name: Collection to add frustum to
+        
+    Returns:
+        The frustum wireframe object
+    """
+    cam_data = camera.data
+    
+    # Get render aspect ratio
+    render_x = scene.render.resolution_x
+    render_y = scene.render.resolution_y
+    aspect = render_x / render_y
+    
+    if cam_data.type == 'PERSP':
+        # Get the correct FOV based on sensor_fit (matches world_to_camera_view behavior)
+        # cam_data.angle is the horizontal or vertical FOV depending on sensor_fit
+        sensor_fit = cam_data.sensor_fit
+        
+        if sensor_fit == 'AUTO':
+            # AUTO uses horizontal for landscape, vertical for portrait
+            if aspect >= 1.0:
+                sensor_fit = 'HORIZONTAL'
+            else:
+                sensor_fit = 'VERTICAL'
+        
+        if sensor_fit == 'HORIZONTAL':
+            # angle is horizontal FOV
+            fov_h = cam_data.angle
+            half_width_near = near * math.tan(fov_h / 2)
+            half_height_near = half_width_near / aspect
+            half_width_far = far * math.tan(fov_h / 2)
+            half_height_far = half_width_far / aspect
+        else:  # VERTICAL
+            # angle is vertical FOV
+            fov_v = cam_data.angle
+            half_height_near = near * math.tan(fov_v / 2)
+            half_width_near = half_height_near * aspect
+            half_height_far = far * math.tan(fov_v / 2)
+            half_width_far = half_height_far * aspect
+    else:
+        # Orthographic camera
+        half_height_near = half_height_far = cam_data.ortho_scale / 2
+        half_width_near = half_width_far = half_height_near * aspect
+    
+    # Frustum corners in camera local space (camera looks down -Z)
+    # Near plane corners
+    n_tl = Vector((-half_width_near, half_height_near, -near))
+    n_tr = Vector((half_width_near, half_height_near, -near))
+    n_bl = Vector((-half_width_near, -half_height_near, -near))
+    n_br = Vector((half_width_near, -half_height_near, -near))
+    
+    # Far plane corners
+    f_tl = Vector((-half_width_far, half_height_far, -far))
+    f_tr = Vector((half_width_far, half_height_far, -far))
+    f_bl = Vector((-half_width_far, -half_height_far, -far))
+    f_br = Vector((half_width_far, -half_height_far, -far))
+    
+    # Create mesh
+    vertices = [n_tl, n_tr, n_br, n_bl, f_tl, f_tr, f_br, f_bl]
+    
+    # Edges: near plane, far plane, connecting edges
+    edges = [
+        (0, 1), (1, 2), (2, 3), (3, 0),  # Near plane
+        (4, 5), (5, 6), (6, 7), (7, 4),  # Far plane
+        (0, 4), (1, 5), (2, 6), (3, 7),  # Connecting edges
+    ]
+    
+    mesh = bpy.data.meshes.new("FrustumWireframe")
+    mesh.from_pydata(vertices, edges, [])
+    mesh.update()
+    
+    # Create object
+    frustum_obj = bpy.data.objects.new("CameraFrustum", mesh)
+    
+    # Add to collection
+    collection = ensure_collection(collection_name or base.DEFAULT_COLLECTION_NAME)
+    collection.objects.link(frustum_obj)
+    
+    # Create wireframe material (bright cyan)
+    mat = bpy.data.materials.new(name="FrustumMaterial")
+    mat.use_nodes = True
+    nodes = mat.node_tree.nodes
+    nodes.clear()
+    emission = nodes.new('ShaderNodeEmission')
+    emission.inputs['Color'].default_value = (0.0, 1.0, 1.0, 1.0)  # Cyan
+    emission.inputs['Strength'].default_value = 5.0
+    output = nodes.new('ShaderNodeOutputMaterial')
+    mat.node_tree.links.new(emission.outputs['Emission'], output.inputs['Surface'])
+    frustum_obj.data.materials.append(mat)
+    
+    # Display settings
+    frustum_obj.display_type = 'WIRE'
+    frustum_obj.show_in_front = True
+    
+    # Store reference to camera
+    frustum_obj["tracked_camera"] = camera.name
+    frustum_obj["frustum_far"] = far
+    frustum_obj["annotation_type"] = "frustum"
+    
+    # Parent to nothing (will be updated via handler)
+    # Initial transform
+    frustum_obj.matrix_world = camera.matrix_world.copy()
+    
+    print(f"✅ Created frustum wireframe for camera '{camera.name}'")
+    
+    return frustum_obj
+
+
+def update_frustum_wireframe(frustum_obj, scene=None):
+    """
+    Update frustum wireframe to match current ACTIVE camera position/orientation.
+    Always follows scene.camera (whichever camera is currently active).
+    """
+    if not frustum_obj:
+        return
+    
+    if scene is None:
+        scene = bpy.context.scene
+    
+    # Always follow the active scene camera
+    camera = scene.camera
+    if not camera:
+        return
+    
+    # Update transform to match camera
+    frustum_obj.matrix_world = camera.matrix_world.copy()
+
+
+def setup_frustum_visualization(camera=None, far_distance=None, collection_name=None):
+    """
+    Setup frustum visualization for a camera.
+    
+    Args:
+        camera: Camera to visualize (defaults to scene camera)
+        far_distance: How far to extend the frustum visualization (None = read from PointCloudTracker)
+        collection_name: Collection for the frustum
+        
+    Returns:
+        The frustum wireframe object
+    """
+    scene = bpy.context.scene
+    
+    if camera is None:
+        camera = scene.camera
+    
+    if not camera:
+        print("⚠️ No camera found for frustum visualization")
+        return None
+    
+    # Auto-read far_distance from PointCloudTracker if not provided
+    if far_distance is None:
+        pc_obj = bpy.data.objects.get("PointCloudTracker")
+        if pc_obj:
+            far_distance = pc_obj.get("frustum_far_distance", 20.0)
+        else:
+            far_distance = 20.0
+    
+    # Create frustum wireframe
+    frustum_obj = create_frustum_wireframe(
+        camera, scene, 
+        near=0.5, 
+        far=far_distance,
+        collection_name=collection_name
+    )
+    
+    # Register frame handler to update frustum
+    def frustum_update_handler(scene):
+        if frustum_obj and frustum_obj.name in bpy.data.objects:
+            update_frustum_wireframe(bpy.data.objects[frustum_obj.name], scene)
+    
+    base.register_frame_handler(frustum_update_handler, "frustum_update_handler")
+    
+    return frustum_obj
+
+
 def sample_mesh_surface_points(obj, num_points=50, seed=None):
     """
     Evenly sample points on the surface of a mesh object.
@@ -289,15 +528,23 @@ def create_point_cloud_tracker(tracked_objects, points_per_object=50, point_size
     return point_cloud_obj, tracking_data
 
 
-def update_point_cloud_positions(point_cloud_obj, scene=None):
+def update_point_cloud_positions(point_cloud_obj, scene=None, frustum_mode=FRUSTUM_MODE_ALL):
     """
     Update point cloud positions based on tracked objects' transforms.
     Called on each frame change.
+    
+    Args:
+        point_cloud_obj: The point cloud tracker object
+        scene: Current scene (optional, defaults to context.scene)
+        frustum_mode: One of FRUSTUM_MODE_ALL, FRUSTUM_MODE_HIGHLIGHT, FRUSTUM_MODE_ONLY
     """
     import json
     
     if not point_cloud_obj or "tracking_info" not in point_cloud_obj:
         return
+    
+    if scene is None:
+        scene = bpy.context.scene
     
     tracking_info = json.loads(point_cloud_obj["tracking_info"])
     verts_per_point = point_cloud_obj["points_per_sphere"]
@@ -306,8 +553,26 @@ def update_point_cloud_positions(point_cloud_obj, scene=None):
     
     # Get evaluated depsgraph for physics
     depsgraph = base.get_depsgraph()
+    
+    # Get camera for frustum checks (for highlight and frustum_only modes)
+    camera = scene.camera if frustum_mode != FRUSTUM_MODE_ALL else None
+    
+    # Get frustum far distance from stored property or from CameraFrustum object
+    far_distance = point_cloud_obj.get("frustum_far_distance", None)
+    if far_distance is None:
+        frustum_obj = bpy.data.objects.get("CameraFrustum")
+        if frustum_obj:
+            far_distance = frustum_obj.get("frustum_far", None)
+    
+    # For highlight mode, we need to update vertex colors
+    color_layer = None
+    if frustum_mode == FRUSTUM_MODE_HIGHLIGHT and mesh.vertex_colors:
+        color_layer = mesh.vertex_colors.get("PointColors")
+    
+    # Track per-point frustum status for color updates
+    point_in_frustum = []
         
-    # Update vertex positions
+    # Update vertex positions (check each POINT individually, not per object)
     for pt_idx, info in enumerate(tracking_info):
         obj_name = info['obj_name']
         local_pos = Vector(info['local_pos'])
@@ -315,6 +580,7 @@ def update_point_cloud_positions(point_cloud_obj, scene=None):
         # Use evaluated object from depsgraph if available (during animation)
         obj = bpy.data.objects.get(obj_name)
         if not obj:
+            point_in_frustum.append(False)
             continue
             
         # Try to get evaluated object for correct physics position
@@ -324,8 +590,30 @@ def update_point_cloud_positions(point_cloud_obj, scene=None):
             obj_eval = base.get_evaluated_object(obj, depsgraph)
             world_matrix = obj_eval.matrix_world
         
-        # Get world position of the local point
+        # Calculate world position of this point
         world_pos = world_matrix @ local_pos
+        
+        # Check if THIS POINT is in frustum (not the object center)
+        if camera:
+            is_in_frustum = is_point_in_camera_view(
+                world_pos, camera, scene, 
+                margin=0.0,  # No margin - strict frustum bounds
+                far_distance=far_distance
+            )
+        else:
+            is_in_frustum = True
+        
+        point_in_frustum.append(is_in_frustum)
+        
+        # Determine if point should be visible based on mode
+        if frustum_mode == FRUSTUM_MODE_ONLY:
+            is_visible = is_in_frustum
+        else:
+            is_visible = True  # ALL and HIGHLIGHT show all points
+        
+        # Get final position (or hidden position if not visible)
+        if not is_visible:
+            world_pos = HIDDEN_POSITION
         
         # Update all vertices of this point's icosphere
         base_vert_idx = pt_idx * verts_per_point
@@ -341,6 +629,22 @@ def update_point_cloud_positions(point_cloud_obj, scene=None):
             delta = world_pos - centroid
             for i in range(verts_per_point):
                 mesh.vertices[base_vert_idx + i].co += delta
+        
+    # Update colors for highlight mode (optimized batch update)
+    if frustum_mode == FRUSTUM_MODE_HIGHLIGHT and color_layer:
+        # Use per-point frustum status (already computed above)
+        point_colors = []
+        for is_in_frustum in point_in_frustum:
+            if is_in_frustum:
+                point_colors.append((1.0, 0.0, 0.0, 1.0))  # Red - in frustum
+            else:
+                point_colors.append((0.3, 0.3, 0.3, 1.0))  # Gray - outside frustum
+        
+        # Single pass through all loops (much faster)
+        for loop in mesh.loops:
+            point_idx = loop.vertex_index // verts_per_point
+            if point_idx < len(point_colors):
+                color_layer.data[loop.index].color = point_colors[point_idx]
     
     mesh.update()
     
@@ -363,101 +667,139 @@ def create_embedded_tracking_script():
         return bpy.data.texts[script_name]
         
     script_text = '''"""
-Point Cloud Tracking Driver
-This script is automatically generated to animate the point cloud.
-It runs on file load to register the frame change handler.
+Point Cloud Tracking Driver - Supports 3 frustum modes:
+  - "all": Show all points (no culling)
+  - "highlight": Show all, in-frustum points turn red
+  - "frustum_only": Only show points in frustum
 """
 import bpy
 import json
 from mathutils import Vector
 
+HIDDEN_POSITION = Vector((0, 0, -10000))
+
+def is_point_in_frustum(point_world, camera, scene, margin=0.0, far_distance=None):
+    from bpy_extras.object_utils import world_to_camera_view
+    co_ndc = world_to_camera_view(scene, camera, point_world)
+    in_xy = (-margin < co_ndc.x < (1 + margin) and -margin < co_ndc.y < (1 + margin))
+    in_depth = co_ndc.z > 0
+    if far_distance is not None and in_depth:
+        distance = (point_world - camera.matrix_world.translation).length
+        in_depth = distance <= far_distance
+    return in_xy and in_depth
+
+def update_frustum_wireframe(scene):
+    frustum_obj = bpy.data.objects.get("CameraFrustum")
+    if frustum_obj and scene.camera:
+        frustum_obj.matrix_world = scene.camera.matrix_world.copy()
+
 def pointcloud_update_positions(scene):
-    """Update point cloud positions using evaluated dependency graph."""
-    point_cloud_obj = bpy.data.objects.get("PointCloudTracker")
-    if not point_cloud_obj or "tracking_info" not in point_cloud_obj:
+    pc = bpy.data.objects.get("PointCloudTracker")
+    if not pc or "tracking_info" not in pc:
         return
-    
-    # Only update if we can get the depsgraph (prevents crashes in some contexts)
     try:
         depsgraph = bpy.context.evaluated_depsgraph_get()
     except:
         return
 
-    tracking_info = json.loads(point_cloud_obj["tracking_info"])
-    verts_per_point = point_cloud_obj["points_per_sphere"]
-    mesh = point_cloud_obj.data
+    tracking_info = json.loads(pc["tracking_info"])
+    verts_per_point = pc["points_per_sphere"]
+    mesh = pc.data
+    frustum_mode = pc.get("frustum_mode", "all")
     
-    # Optimize: Cache object references
-    objects_map = {obj.name: obj for obj in scene.objects if obj.name in [t['obj_name'] for t in tracking_info]}
+    camera = scene.camera if frustum_mode != "all" else None
+    far_distance = pc.get("frustum_far_distance", None)
+    if far_distance is None:
+        frustum_obj = bpy.data.objects.get("CameraFrustum")
+        if frustum_obj:
+            far_distance = frustum_obj.get("frustum_far", None)
+    
+    color_layer = mesh.vertex_colors.get("PointColors") if frustum_mode == "highlight" else None
+    
+    obj_names = set(t['obj_name'] for t in tracking_info)
+    objects_map = {o.name: o for o in scene.objects if o.name in obj_names}
+    point_frustum = []  # Per-point frustum status
     
     for pt_idx, info in enumerate(tracking_info):
         obj_name = info['obj_name']
         if obj_name not in objects_map:
+            point_frustum.append(False)
             continue
-            
         obj = objects_map[obj_name]
         
-        # Get physics position from evaluated object
         try:
-            obj_eval = obj.evaluated_get(depsgraph)
-            world_matrix = obj_eval.matrix_world
+            world_matrix = obj.evaluated_get(depsgraph).matrix_world
         except:
             world_matrix = obj.matrix_world
-            
-        local_pos = Vector(info['local_pos'])
-        world_pos = world_matrix @ local_pos
         
-        # Update vertices
-        base_vert_idx = pt_idx * verts_per_point
+        # Calculate world position of THIS POINT
+        world_pos = world_matrix @ Vector(info['local_pos'])
         
-        # Move whole icosphere
-        if base_vert_idx + verts_per_point <= len(mesh.vertices):
-            # Calculate current centroid to move relative
-            centroid = Vector((0,0,0))
-            for i in range(verts_per_point):
-                centroid += mesh.vertices[base_vert_idx + i].co
-            centroid /= verts_per_point
-            
+        # Check if THIS POINT is in frustum (per-point, not per-object)
+        if camera:
+            in_frustum = is_point_in_frustum(world_pos, camera, scene, 0.0, far_distance)
+        else:
+            in_frustum = True
+        point_frustum.append(in_frustum)
+        
+        is_visible = in_frustum if frustum_mode == "frustum_only" else True
+        if not is_visible:
+            world_pos = HIDDEN_POSITION
+        
+        base_idx = pt_idx * verts_per_point
+        
+        if base_idx + verts_per_point <= len(mesh.vertices):
+            centroid = sum((mesh.vertices[base_idx + i].co for i in range(verts_per_point)), Vector()) / verts_per_point
             delta = world_pos - centroid
-            
             for i in range(verts_per_point):
-                mesh.vertices[base_vert_idx + i].co += delta
+                mesh.vertices[base_idx + i].co += delta
+        
+    # Update colors for highlight mode (per-point)
+    if frustum_mode == "highlight" and color_layer:
+        point_colors = [(1.0, 0.0, 0.0, 1.0) if in_f else (0.3, 0.3, 0.3, 1.0) for in_f in point_frustum]
+        for loop in mesh.loops:
+            pt_idx = loop.vertex_index // verts_per_point
+            if pt_idx < len(point_colors):
+                color_layer.data[loop.index].color = point_colors[pt_idx]
 
     mesh.update()
-    
-    # Tag redraw
     if not bpy.app.background:
-        for window in bpy.context.window_manager.windows:
-            for area in window.screen.areas:
-                if area.type == 'VIEW_3D':
-                    area.tag_redraw()
+        for w in bpy.context.window_manager.windows:
+            for a in w.screen.areas:
+                if a.type == 'VIEW_3D':
+                    a.tag_redraw()
 
 def pointcloud_frame_handler(scene):
+    update_frustum_wireframe(scene)
     pointcloud_update_positions(scene)
 
-# Register
 def register():
-    # Clean old handlers with this specific name
-    handlers = bpy.app.handlers.frame_change_post
-    for h in list(handlers):
+    for h in list(bpy.app.handlers.frame_change_post):
         if hasattr(h, '__name__') and h.__name__ == 'pointcloud_frame_handler':
-            handlers.remove(h)
-    handlers.append(pointcloud_frame_handler)
-    print("✅ Point Cloud Tracking Handler Registered")
-
-    # Force initial update for current frame
+            bpy.app.handlers.frame_change_post.remove(h)
+    bpy.app.handlers.frame_change_post.append(pointcloud_frame_handler)
+    pc = bpy.data.objects.get("PointCloudTracker")
+    mode = pc.get("frustum_mode", "all") if pc else "all"
+    print(f"✅ Point Cloud Handler Registered (mode: {mode})")
+    update_frustum_wireframe(bpy.context.scene)
     pointcloud_update_positions(bpy.context.scene)
 
-# Auto-register on load
 register()
 '''
     return base.create_embedded_script(script_name, script_text)
 
 
-def register_frame_handler(point_cloud_obj):
+def register_frame_handler(point_cloud_obj, frustum_mode=FRUSTUM_MODE_ALL):
     """
     Register a frame change handler to update point cloud positions.
+    
+    Args:
+        point_cloud_obj: The point cloud tracker object
+        frustum_mode: Frustum culling mode (all, highlight, frustum_only)
     """
+    # Store mode on object for embedded script to use
+    point_cloud_obj["frustum_mode"] = frustum_mode
+    
     # Create the embedded script so it works when file is re-opened
     create_embedded_tracking_script()
     
@@ -469,14 +811,17 @@ def register_frame_handler(point_cloud_obj):
         # Re-fetch object to ensure it's valid
         if point_cloud_obj and point_cloud_obj.name in bpy.data.objects:
             pc_obj = bpy.data.objects[point_cloud_obj.name]
-            update_point_cloud_positions(pc_obj, scene)
+            mode = pc_obj.get("frustum_mode", FRUSTUM_MODE_ALL)
+            update_point_cloud_positions(pc_obj, scene, frustum_mode=mode)
     
     base.register_frame_handler(pointcloud_frame_handler, "pointcloud_frame_handler")
-    print(f"✅ Registered frame handler for point cloud updates")
+    print(f"✅ Registered frame handler for point cloud updates (mode: {frustum_mode})")
 
 
 def setup_point_tracking_visualization(tracked_objects, points_per_object=30, 
-                                        setup_viewport=True, collection_name=None):
+                                        setup_viewport=True, collection_name=None,
+                                        show_frustum=False, frustum_distance=50.0,
+                                        frustum_mode=FRUSTUM_MODE_ALL):
     """
     Main entry point for setting up point tracking visualization.
     
@@ -485,6 +830,12 @@ def setup_point_tracking_visualization(tracked_objects, points_per_object=30,
         points_per_object: Number of surface sample points per object
         setup_viewport: Whether to create a dual viewport setup
         collection_name: Collection to use
+        show_frustum: Whether to show camera frustum wireframe
+        frustum_distance: How far the frustum extends
+        frustum_mode: One of:
+            - FRUSTUM_MODE_ALL ("all"): Show all points, no culling
+            - FRUSTUM_MODE_HIGHLIGHT ("highlight"): Show all, in-frustum points turn red
+            - FRUSTUM_MODE_ONLY ("frustum_only"): Only show points in frustum
         
     Returns:
         point_cloud_obj: The created point cloud object
@@ -499,6 +850,12 @@ def setup_point_tracking_visualization(tracked_objects, points_per_object=30,
         return None
     
     print(f"  - Tracking {len(mesh_objects)} objects with {points_per_object} points each")
+    mode_desc = {
+        FRUSTUM_MODE_ALL: "all points visible",
+        FRUSTUM_MODE_HIGHLIGHT: "all visible, in-frustum highlighted red",
+        FRUSTUM_MODE_ONLY: "only in-frustum visible"
+    }
+    print(f"  - Frustum mode: {frustum_mode} ({mode_desc.get(frustum_mode, '')})")
     
     # Create point cloud tracker
     point_cloud_obj, tracking_data = create_point_cloud_tracker(
@@ -511,11 +868,24 @@ def setup_point_tracking_visualization(tracked_objects, points_per_object=30,
     if not point_cloud_obj:
         return None
     
+    # Store frustum settings on object
+    point_cloud_obj["frustum_far_distance"] = frustum_distance
+    point_cloud_obj["frustum_mode"] = frustum_mode
+    
+    # Create frustum visualization if requested (for highlight and frustum_only modes)
+    coll_name = collection_name or base.DEFAULT_COLLECTION_NAME
+    if show_frustum and frustum_mode != FRUSTUM_MODE_ALL:
+        print(f"  - Creating frustum wireframe (distance: {frustum_distance}m)")
+        setup_frustum_visualization(
+            camera=None,  # Use scene camera
+            far_distance=frustum_distance,
+            collection_name=coll_name
+        )
+    
     # Register frame change handler for animation
-    register_frame_handler(point_cloud_obj)
+    register_frame_handler(point_cloud_obj, frustum_mode=frustum_mode)
     
     # Get tracking collection objects
-    coll_name = collection_name or base.DEFAULT_COLLECTION_NAME
     tracking_collection = bpy.data.collections.get(coll_name)
     tracking_objects = list(tracking_collection.objects) if tracking_collection else []
     
@@ -533,6 +903,9 @@ def setup_point_tracking_visualization(tracked_objects, points_per_object=30,
     
     print("✅ Point Tracking Visualization Ready!")
     print(f"   - Total tracked points: {len(tracking_data) if tracking_data else 0}")
+    print(f"   - Frustum culling: only visible objects show points")
+    if show_frustum:
+        print(f"   - Frustum wireframe: visible in viewport 2")
     print(f"   - View the '{coll_name}' collection for point cloud")
     
     return point_cloud_obj

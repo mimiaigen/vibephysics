@@ -84,6 +84,9 @@ sh ./run_robot.sh mounted    # First-person POV (default)
 sh ./run_robot.sh center     # Overview from multiple angles
 sh ./run_robot.sh following  # Third-person tracking shot
 
+# Run forest walk simulation (robot walking through dense forest on uneven terrain)
+sh ./run_forest.sh
+
 # Run water simulations
 sh ./run_water.sh
 ```

@@ -178,7 +178,9 @@ class AnnotationManager:
     # =========================================================================
     
     def add_point_tracking(self, tracked_objects, points_per_object=30, 
-                           point_size=0.05, setup_viewport=False):
+                           point_size=0.05, setup_viewport=False,
+                           show_frustum=False, frustum_distance=50.0,
+                           frustum_mode="all"):
         """
         Add point tracking visualization to objects.
         
@@ -187,6 +189,12 @@ class AnnotationManager:
             points_per_object: Number of surface sample points per object
             point_size: Size of each tracking point
             setup_viewport: Whether to create dual viewport setup
+            show_frustum: Whether to show camera frustum wireframe
+            frustum_distance: How far the frustum visualization extends
+            frustum_mode: One of:
+                - "all": Show all points (no culling)
+                - "highlight": Show all points, in-frustum turn red
+                - "frustum_only": Only show points in frustum
             
         Returns:
             The point cloud tracker object
@@ -195,7 +203,10 @@ class AnnotationManager:
             tracked_objects,
             points_per_object=points_per_object,
             setup_viewport=setup_viewport,
-            collection_name=self.collection_name
+            collection_name=self.collection_name,
+            show_frustum=show_frustum,
+            frustum_distance=frustum_distance,
+            frustum_mode=frustum_mode
         )
         if point_cloud:
             self.point_clouds.append(point_cloud)

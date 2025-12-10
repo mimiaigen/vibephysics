@@ -6,19 +6,25 @@
 
 ## 🎬 Example Results
 
-![Result Demo](result_demo.gif)
+![Result Demo](assets/result_demo.gif)
 
 *Robot walking simulation with rigid body physics, interacting with uneven ground, puddles, and real-time annotation overlay.*
 
 ## 📊 Annotation Tools Demo
 
-![Annotation Demo](annotation_demo.gif)
+![Annotation Demo](assets/annotation_demo.gif)
 
 *Comprehensive annotation system featuring bounding boxes, motion trails, and point cloud tracking for computer vision datasets.*
 
+## 🎯 Dynamic Frustum Culling Demo
+
+![Frustum Demo](assets/frustum_demo.gif)
+
+*Per-point frustum culling with mounted camera. Points inside the camera frustum turn red in real-time as the camera moves.*
+
 ## 💧 Water Simulation Demo
 
-![Water Float Demo](water_float_demo.gif)
+![Water Float Demo](assets/water_float_demo.gif)
 
 *Water physics simulation with floating objects, buoyancy forces, dynamic ripples, and point cloud tracking.*
 

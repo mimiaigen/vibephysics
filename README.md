@@ -4,25 +4,25 @@
 
 **A lightweight Blender physics simulation framework for creating realistic robot animations, rigid body physics, water dynamics, and comprehensive annotation tools — all running efficiently on CPU.**
 
-## 🎬 Example Results
+## 🎬 Example Results (`sh run_robot.sh`)
 
 ![Result Demo](assets/result_demo.gif)
 
 *Robot walking simulation with rigid body physics, interacting with uneven ground, puddles, and real-time annotation overlay.*
 
-## 📊 Annotation Tools Demo
+## 📊 Annotation Tools Demo (`sh run_basics.sh`)
 
 ![Annotation Demo](assets/annotation_demo.gif)
 
 *Comprehensive annotation system featuring bounding boxes, motion trails, and point cloud tracking for computer vision datasets.*
 
-## 🎯 Dynamic Frustum Culling Demo
+## 🎯 Dynamic Frustum Culling Demo (`sh run_basics.sh`)
 
 ![Frustum Demo](assets/frustum_demo.gif)
 
 *Per-point frustum culling with mounted camera. Points inside the camera frustum turn red in real-time as the camera moves.*
 
-## 💧 Water Simulation Demo
+## 💧 Water Simulation Demo (`sh run_water.sh`)
 
 ![Water Float Demo](assets/water_float_demo.gif)
 
@@ -79,8 +79,8 @@ pip install -e .
 ## Quick Start
 
 ```bash
-# Run annotation demo
-sh ./run_annotation.sh
+# Run basic annotation demos (bbox, motion trail, point tracking, frustum culling)
+sh ./run_basics.sh
 
 # Run robot simulation (with mounted POV camera by default)
 sh ./run_robot.sh
@@ -90,8 +90,13 @@ sh ./run_robot.sh mounted    # First-person POV (default)
 sh ./run_robot.sh center     # Overview from multiple angles
 sh ./run_robot.sh following  # Third-person tracking shot
 
-# Run forest walk simulation (robot walking through dense forest on uneven terrain)
+# Run forest walk simulation (robot walking through dense forest)
 sh ./run_forest.sh
+
+# Run forest with frustum culling options
+sh ./run_forest.sh --frustum-mode highlight    # In-frustum points turn red
+sh ./run_forest.sh --frustum-mode frustum_only # Only show in-frustum points
+sh ./run_forest.sh --no-physics                # Fastest playback
 
 # Run water simulations
 sh ./run_water.sh
@@ -225,7 +230,8 @@ vibephysics/
 │   └── robot/              # Robot simulations
 ├── run_water.sh            # Run water examples
 ├── run_robot.sh            # Run robot examples
-└── run_annotation.sh       # Run annotation demos
+├── run_forest.sh           # Run forest walk simulation
+└── run_basics.sh           # Run annotation demos
 ```
 
 ## Setup Module

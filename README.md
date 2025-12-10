@@ -191,49 +191,6 @@ python examples/robot/robot_waypoint_walk.py --active-camera following
 
 This means you can generate a single `.blend` file and render from any camera angle without re-running the simulation.
 
-## Project Structure
-
-```
-vibephysics/
-├── src/vibephysics/
-│   ├── setup/              # Scene & asset management
-│   │   ├── scene.py        # Scene initialization, frame range
-│   │   ├── importer.py     # Asset loading (GLB, FBX, PLY, etc.)
-│   │   ├── exporter.py     # Save/export (blend, FBX, OBJ, etc.)
-│   │   ├── viewport.py     # Viewport splitting, dual-view
-│   │   └── gsplat.py       # Gaussian Splatting (3DGS)
-│   ├── foundation/         # Core simulation modules
-│   │   ├── physics.py      # Rigid body world, force fields
-│   │   ├── ground.py       # Terrain generation
-│   │   ├── water.py        # Water surfaces, ripples
-│   │   ├── objects.py      # Floating objects
-│   │   ├── materials.py    # Shaders (water, mud, etc.)
-│   │   ├── lighting.py     # Lighting and camera
-│   │   ├── robot.py        # Generic robot control
-│   │   ├── open_duck.py    # Open Duck robot integration
-│   │   └── trajectory.py   # Waypoint paths
-│   ├── annotation/         # Visualization tools
-│   │   ├── base.py         # Base annotation classes
-│   │   ├── bbox.py         # Bounding box annotations
-│   │   ├── motion_trail.py # Motion path visualization
-│   │   ├── point_tracking.py # Point cloud tracking
-│   │   └── manager.py      # Unified annotation API
-│   └── camera/             # Camera system
-│       ├── base.py         # Base camera classes
-│       ├── center.py       # Center-pointing cameras
-│       ├── following.py    # Following camera rig
-│       ├── mounted.py      # Object-mounted cameras
-│       └── manager.py      # Camera manager API
-├── examples/
-│   ├── basics/             # Annotation demos
-│   ├── water/              # Water simulations
-│   └── robot/              # Robot simulations
-├── run_water.sh            # Run water examples
-├── run_robot.sh            # Run robot examples
-├── run_forest.sh           # Run forest walk simulation
-└── run_basics.sh           # Run annotation demos
-```
-
 ## Setup Module
 
 The `setup` module provides scene initialization, asset import/export, and viewport management:

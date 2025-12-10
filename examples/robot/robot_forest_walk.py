@@ -52,7 +52,7 @@ def parse_args():
     forest_group.add_argument('--tree-asset', type=str, 
                              default='./assets/tree_asset_grid.blend',
                              help='Path to tree asset blend file')
-    forest_group.add_argument('--num-trees', type=int, default=50,
+    forest_group.add_argument('--num-trees', type=int, default=100,
                              help='Number of trees in forest')
     forest_group.add_argument('--tree-height-min', type=float, default=5.0,
                              help='Minimum tree height in meters (default: 5.0m)')
@@ -696,7 +696,7 @@ def run_simulation_setup(args):
         
         # Add offset to mounted cameras
         for cam in mounted_cams:
-            cam.location.x -= 0.12  # back offset
+            cam.location.x -= 0.2  # back offset
             cam.location.y -= 0.1  # right offset
             cam.location.z -= 0.0  # down offset
         

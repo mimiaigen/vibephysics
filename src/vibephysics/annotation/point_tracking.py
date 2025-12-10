@@ -179,8 +179,10 @@ def create_frustum_wireframe(camera, scene, near=0.5, far=50.0, collection_name=
     frustum_obj["annotation_type"] = "frustum"
     
     # Parent to nothing (will be updated via handler)
-    # Initial transform
-    frustum_obj.matrix_world = camera.matrix_world.copy()
+    # Initial transform - use evaluated camera to get correct constraint position
+    depsgraph = bpy.context.evaluated_depsgraph_get()
+    camera_eval = camera.evaluated_get(depsgraph)
+    frustum_obj.matrix_world = camera_eval.matrix_world.copy()
     
     print(f"✅ Created frustum wireframe for camera '{camera.name}'")
     
@@ -203,8 +205,13 @@ def update_frustum_wireframe(frustum_obj, scene=None):
     if not camera:
         return
     
-    # Update transform to match camera
-    frustum_obj.matrix_world = camera.matrix_world.copy()
+    # Update transform to match camera (use evaluated for constraints)
+    try:
+        depsgraph = bpy.context.evaluated_depsgraph_get()
+        camera_eval = camera.evaluated_get(depsgraph)
+        frustum_obj.matrix_world = camera_eval.matrix_world.copy()
+    except:
+        frustum_obj.matrix_world = camera.matrix_world.copy()
 
 
 def setup_frustum_visualization(camera=None, far_distance=None, collection_name=None):
@@ -691,7 +698,12 @@ def is_point_in_frustum(point_world, camera, scene, margin=0.0, far_distance=Non
 def update_frustum_wireframe(scene):
     frustum_obj = bpy.data.objects.get("CameraFrustum")
     if frustum_obj and scene.camera:
-        frustum_obj.matrix_world = scene.camera.matrix_world.copy()
+        try:
+            depsgraph = bpy.context.evaluated_depsgraph_get()
+            cam_eval = scene.camera.evaluated_get(depsgraph)
+            frustum_obj.matrix_world = cam_eval.matrix_world.copy()
+        except:
+            frustum_obj.matrix_world = scene.camera.matrix_world.copy()
 
 def pointcloud_update_positions(scene):
     pc = bpy.data.objects.get("PointCloudTracker")

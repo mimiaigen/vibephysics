@@ -82,24 +82,22 @@ def parse_args():
     parser.add_argument('--output', '-o', type=str, default='demo_3dgs_viewer.blend',
                         help='Output blend file name')
     parser.add_argument('--point-size', type=float, default=0.005,
-                        help='Point size for visualization (used in Fix mode)')
+                        help='Point size for simple visualization mode only')
     parser.add_argument('--no-dual-viewport', action='store_true',
                         help='Disable dual viewport setup')
     
     # Advanced display options based on UGRS/Nunchucks
-    parser.add_argument('--mesh-type', type=str, default='Circle',
-                        choices=['Cube', 'IcoSphere', 'DualIcoSphere', 'Circle'],
-                        help='Mesh type for point instancing. '
-                             'Circle is best for Gaussian splat appearance (disk-like), '
-                             'DualIcoSphere creates hexagonal pattern')
+    # mesh-type is deprecated but kept in parser for backward compatibility script arguments
+    parser.add_argument('--mesh-type', type=str, default='IcoSphere',
+                        choices=['Cube', 'IcoSphere'],
+                        help='(Deprecated) Mesh type for point instancing. IcoSphere creates round appearance')
     parser.add_argument('--shader-mode', type=str, default='Gaussian',
                         choices=['Gaussian', 'Ring', 'Wireframe', 'Freestyle'],
                         help='Shader rendering mode. '
                              'Gaussian creates transparent disk-like splats with falloff')
     parser.add_argument('--point-scale', type=str, default='Anisotropic',
-                        choices=['Fix', 'Auto', 'Max', 'Anisotropic'],
-                        help='Point scale mode. '
-                             'Anisotropic uses (scale_0, scale_1, scale_2) as X,Y,Z for ellipsoid shapes (thin needles). '
+                        choices=['Max', 'Anisotropic'],
+                        help='Point scale mode. Anisotropic uses (scale_0, scale_1, scale_2) as X,Y,Z. '
                              'Max uses max(scale_0, scale_1, scale_2) for uniform spheres')
     parser.add_argument('--output-channel', type=str, default='Final color',
                         choices=['Final color', 'Normal', 'Depth', 'Alpha', 'Albedo'],
@@ -108,6 +106,9 @@ def parse_args():
                         help='Geometry size multiplier (default 3.0). Controls how large the mesh is '
                              'relative to the visible Gaussian. Larger = more transparent area around '
                              'the splat center. This is key for the Gaussian appearance!')
+    parser.add_argument('--opacity-scale', type=float, default=1.0,
+                        help='Global opacity multiplier (default 1.0). Controls the overall transparency '
+                             'of the splats. < 1.0 makes everything more transparent, > 1.0 more opaque.')
     parser.add_argument('--use-advanced', action='store_true', default=True,
                         help='Use advanced display mode with UGRS-style geometry nodes (default: True)')
     parser.add_argument('--use-simple', action='store_true',
@@ -287,6 +288,24 @@ def setup_point_display(obj, point_size=0.005):
 
 def add_basic_lighting():
     """Add simple lighting for material preview."""
+    # Make viewport colors match raw data (closer to typical PLY viewers):
+    # Filmic tone mapping can make colors look "off" even when the underlying
+    # vertex colors are correct.
+    scene = bpy.context.scene
+    try:
+        scene.view_settings.view_transform = 'Standard'
+    except Exception:
+        pass
+    try:
+        scene.view_settings.look = 'None'
+    except Exception:
+        pass
+    try:
+        scene.view_settings.exposure = 0.0
+        scene.view_settings.gamma = 1.0
+    except Exception:
+        pass
+
     # Sun light
     bpy.ops.object.light_add(type='SUN', location=(5, 5, 10))
     sun = bpy.context.active_object
@@ -479,21 +498,21 @@ def run():
     else:
         # Use advanced UGRS-style display with configurable options
         print(f"   Using advanced display mode (Gaussian splat appearance):")
-        print(f"   - Mesh type: {args.mesh_type}")
+        # print(f"   - Mesh type: {args.mesh_type}") # Deprecated
         print(f"   - Shader mode: {args.shader_mode}")
         print(f"   - Point scale: {args.point_scale}")
         print(f"   - Geo size: {args.geo_size} (mesh is {args.geo_size}x larger than visible Gaussian)")
+        print(f"   - Opacity scale: {args.opacity_scale}")
         print(f"   - Output channel: {args.output_channel}")
         
         setup_gsplat_display_advanced(
             obj,
-            mesh_type=args.mesh_type,
             shader_mode=args.shader_mode,
             point_scale=args.point_scale,
             output_channel=args.output_channel,
-            fixed_scale=args.point_size,
             geo_size=args.geo_size,
-            use_emission=True
+            use_emission=True,
+            opacity_scale=args.opacity_scale
         )
     
     print(f"   ✅ Geometry nodes and material applied")
@@ -543,11 +562,9 @@ def run():
     
     if not args.use_simple:
         print(f"\n🎛️ Advanced Display Options (UGRS-style):")
-        print(f"   - Mesh type: {args.mesh_type}")
-        print(f"     └─ Circle: Flat disk (best for Gaussian shader)")
-        print(f"     └─ IcoSphere: Round 3D appearance")
-        print(f"     └─ DualIcoSphere: Hexagonal pattern")
-        print(f"     └─ Cube: Simple cube mesh")
+        # print(f"   - Mesh type: {args.mesh_type}") # Deprecated
+        # print(f"     └─ IcoSphere: Round 3D appearance")
+        # print(f"     └─ Cube: Simple cube mesh")
         print(f"   - Shader mode: {args.shader_mode}")
         print(f"     └─ Gaussian: Transparent disk with falloff (default)")
         print(f"     └─ Ring: Hollow ring shape")
@@ -555,11 +572,11 @@ def run():
         print(f"   - Point scale: {args.point_scale}")
         print(f"     └─ Anisotropic: (scale_0, scale_1, scale_2) as X,Y,Z - ellipsoid (thin needles!)")
         print(f"     └─ Max: max(scale_0, scale_1, scale_2) - uniform spheres")
-        print(f"     └─ Auto: Automatic scaling")
-        print(f"     └─ Fix: Fixed size ({args.point_size})")
         print(f"   - Geo size: {args.geo_size}")
         print(f"     └─ Mesh is {args.geo_size}x larger than visible Gaussian")
         print(f"     └─ Higher = smaller visible splat relative to mesh")
+        print(f"   - Opacity scale: {args.opacity_scale}")
+        print(f"     └─ Global opacity multiplier (1.0 = default)")
         print(f"   - Output: {args.output_channel}")
     
     print(f"\n💡 To view:")
@@ -577,7 +594,7 @@ def run():
     
     if args.use_simple:
         print(f"\n💡 Tip: Default mode now uses Gaussian splat appearance with:")
-        print(f"   --mesh-type IcoSphere --shader-mode Gaussian --point-scale Anisotropic")
+        print(f"   --shader-mode Gaussian --point-scale Anisotropic")
         print(f"   Remove --use-simple to enable ellipsoid splats (thin as needles!)")
 
 

@@ -27,7 +27,7 @@ Usage:
     obj = setup.load_3dgs('scene.ply')
     setup.setup_gsplat_display_advanced(
         obj,
-        mesh_type='DualIcoSphere',  # 'Cube', 'IcoSphere', 'DualIcoSphere'
+        mesh_type='IcoSphere',  # 'Cube', 'IcoSphere'
         shader_mode='Gaussian',      # 'Gaussian', 'Ring', 'Wireframe', 'Freestyle'
         point_scale='Max',           # 'Fix', 'Auto', 'Max'
         output_channel='Final color' # 'Final color', 'Normal', 'Depth', 'Alpha'

@@ -29,7 +29,7 @@ Usage:
     obj = load_3dgs('model.ply')
     setup_gsplat_display_advanced(
         obj,
-        mesh_type='DualIcoSphere',  # 'Cube', 'IcoSphere', 'DualIcoSphere'
+        mesh_type='IcoSphere',  # 'Cube', 'IcoSphere'
         shader_mode='Gaussian',      # 'Gaussian', 'Ring', 'Wireframe', 'Freestyle'
         point_scale='Max',           # 'Fix', 'Auto', 'Max'
         output_channel='Final color' # 'Final color', 'Normal', 'Depth', 'Alpha'
@@ -54,13 +54,9 @@ class MeshType(Enum):
     Based on UGRS geometry nodes mesh switch:
     - Cube: Simple cube mesh for each point
     - IcoSphere: Icosphere mesh (default, round appearance)
-    - DualIcoSphere: Dual mesh of icosphere (hexagonal pattern, better for Gaussians)
-    - Circle: Flat circle/disk mesh (best for Gaussian shader with transparency)
     """
     CUBE = 'Cube'
     ICOSPHERE = 'IcoSphere'
-    DUAL_ICOSPHERE = 'DualIcoSphere'
-    CIRCLE = 'Circle'
 
 
 class ShaderMode(Enum):
@@ -84,13 +80,9 @@ class PointScale(Enum):
     Point scale calculation mode for Gaussian splats.
     
     Based on UGRS point scale switch:
-    - FIX: Fixed point size (multiplied by fixed_scale parameter)
-    - AUTO: Automatic scaling based on average scale values
     - MAX: Use maximum of scale_0, scale_1, scale_2 (uniform scaling)
     - ANISOTROPIC: Use individual scale_0, scale_1, scale_2 for X, Y, Z (ellipsoid shapes)
     """
-    FIX = 'Fix'
-    AUTO = 'Auto'
     MAX = 'Max'
     ANISOTROPIC = 'Anisotropic'
 
@@ -878,85 +870,11 @@ def _create_gsplat_geometry_nodes_simple(obj: bpy.types.Object, point_size: floa
     return modifier
 
 
-def _create_instance_mesh(nodes, links, mesh_type: MeshType, point_size: float):
-    """
-    Create instance mesh based on mesh type (Cube, IcoSphere, DualIcoSphere).
-    
-    Based on UGRS geometry nodes mesh switch implementation.
-    
-    Args:
-        nodes: Node tree nodes collection
-        links: Node tree links collection
-        mesh_type: MeshType enum value
-        point_size: Base size for the mesh
-    
-    Returns:
-        Output socket of the mesh geometry
-    """
-    if mesh_type == MeshType.CUBE:
-        # Simple cube mesh
-        cube = nodes.new('GeometryNodeMeshCube')
-        cube.location = (-200, -200)
-        cube.inputs['Size'].default_value = (point_size * 2, point_size * 2, point_size * 2)
-        return cube.outputs['Mesh']
-    
-    elif mesh_type == MeshType.ICOSPHERE:
-        # Standard icosphere (default)
-        ico = nodes.new('GeometryNodeMeshIcoSphere')
-        ico.location = (-200, -200)
-        ico.inputs['Radius'].default_value = point_size
-        ico.inputs['Subdivisions'].default_value = 1
-        return ico.outputs['Mesh']
-    
-    elif mesh_type == MeshType.DUAL_ICOSPHERE:
-        # DualIcoSphere: Create cube, apply dual mesh transform
-        # This creates a hexagonal pattern that's better for Gaussian representation
-        cube = nodes.new('GeometryNodeMeshCube')
-        cube.location = (-400, -200)
-        cube.inputs['Size'].default_value = (1.0, 1.0, 1.0)
-        
-        # Dual mesh node creates hexagonal faces from the cube
-        dual_mesh = nodes.new('GeometryNodeDualMesh')
-        dual_mesh.location = (-200, -200)
-        dual_mesh.inputs['Keep Boundaries'].default_value = False
-        
-        links.new(cube.outputs['Mesh'], dual_mesh.inputs['Mesh'])
-        
-        # Transform to scale properly (use GeometryNodeTransform, not GeometryNodeTransformGeometry)
-        transform = nodes.new('GeometryNodeTransform')
-        transform.location = (0, -200)
-        transform.inputs['Scale'].default_value = (point_size, point_size, point_size)
-        
-        links.new(dual_mesh.outputs['Dual Mesh'], transform.inputs['Geometry'])
-        
-        return transform.outputs['Geometry']
-    
-    elif mesh_type == MeshType.CIRCLE:
-        # Flat circle/disk mesh - best for Gaussian shader with transparency
-        # Creates a billboard-like splat appearance
-        circle = nodes.new('GeometryNodeMeshCircle')
-        circle.location = (-400, -200)
-        circle.inputs['Vertices'].default_value = 16  # Smooth enough circle
-        circle.inputs['Radius'].default_value = point_size
-        circle.fill_type = 'NGON'  # Fill the circle (creates a disk)
-        
-        return circle.outputs['Mesh']
-    
-    # Default fallback to icosphere
-    ico = nodes.new('GeometryNodeMeshIcoSphere')
-    ico.location = (-200, -200)
-    ico.inputs['Radius'].default_value = point_size
-    ico.inputs['Subdivisions'].default_value = 1
-    return ico.outputs['Mesh']
-
-
-def _calculate_point_scale(nodes, links, scale_mode: PointScale, fixed_scale: float = 0.01):
+def _calculate_point_scale(nodes, links, scale_mode: PointScale):
     """
     Calculate point scale based on scale mode.
     
     Based on UGRS point scale switch:
-    - Fix: Fixed multiplier (returns scalar)
-    - Auto: Uses average of scale values (returns scalar)
     - Max: Uses maximum(scale_0, scale_1, scale_2) (returns scalar)
     - Anisotropic: Returns vector (exp(scale_0), exp(scale_1), exp(scale_2)) for ellipsoid shapes
     
@@ -964,7 +882,6 @@ def _calculate_point_scale(nodes, links, scale_mode: PointScale, fixed_scale: fl
         nodes: Node tree nodes collection
         links: Node tree links collection
         scale_mode: PointScale enum value
-        fixed_scale: Fixed scale value for FIX mode
     
     Returns:
         tuple: (output_socket, is_vector) - output socket and whether it's a vector
@@ -985,32 +902,7 @@ def _calculate_point_scale(nodes, links, scale_mode: PointScale, fixed_scale: fl
     scale_2_attr.data_type = 'FLOAT'
     scale_2_attr.inputs['Name'].default_value = 'scale_2'
     
-    if scale_mode == PointScale.FIX:
-        # Fixed scale multiplier
-        fixed_value = nodes.new('ShaderNodeValue')
-        fixed_value.location = (-600, -400)
-        fixed_value.outputs[0].default_value = fixed_scale
-        
-        return fixed_value.outputs[0], False
-    
-    elif scale_mode == PointScale.AUTO:
-        # Auto: Multiply by fixed scale
-        exp_scale = nodes.new('ShaderNodeMath')
-        exp_scale.location = (-600, -450)
-        exp_scale.operation = 'EXPONENT'
-        
-        links.new(scale_0_attr.outputs['Attribute'], exp_scale.inputs[0])
-        
-        multiply = nodes.new('ShaderNodeMath')
-        multiply.location = (-400, -450)
-        multiply.operation = 'MULTIPLY'
-        multiply.inputs[1].default_value = fixed_scale
-        
-        links.new(exp_scale.outputs[0], multiply.inputs[0])
-        
-        return multiply.outputs[0], False
-    
-    elif scale_mode == PointScale.ANISOTROPIC:
+    if scale_mode == PointScale.ANISOTROPIC:
         # Anisotropic: exp(scale_0), exp(scale_1), exp(scale_2) as vector
         # This creates ellipsoid shapes that can be thin as needles!
         
@@ -1062,92 +954,72 @@ def _calculate_point_scale(nodes, links, scale_mode: PointScale, fixed_scale: fl
         
         return combine.outputs['Vector'], True
     
-    elif scale_mode == PointScale.MAX:
-        # Max: Use maximum of scale_0, scale_1, scale_2
-        # First exp() to convert from log scale, then max
-        exp_0 = nodes.new('ShaderNodeMath')
-        exp_0.location = (-600, -400)
-        exp_0.operation = 'EXPONENT'
-        links.new(scale_0_attr.outputs['Attribute'], exp_0.inputs[0])
-        
-        exp_1 = nodes.new('ShaderNodeMath')
-        exp_1.location = (-600, -500)
-        exp_1.operation = 'EXPONENT'
-        links.new(scale_1_attr.outputs['Attribute'], exp_1.inputs[0])
-        
-        exp_2 = nodes.new('ShaderNodeMath')
-        exp_2.location = (-600, -600)
-        exp_2.operation = 'EXPONENT'
-        links.new(scale_2_attr.outputs['Attribute'], exp_2.inputs[0])
-        
-        # max(scale_0, scale_1)
-        max_01 = nodes.new('ShaderNodeMath')
-        max_01.location = (-400, -450)
-        max_01.operation = 'MAXIMUM'
-        links.new(exp_0.outputs[0], max_01.inputs[0])
-        links.new(exp_1.outputs[0], max_01.inputs[1])
-        
-        # max(max_01, scale_2)
-        max_012 = nodes.new('ShaderNodeMath')
-        max_012.location = (-200, -450)
-        max_012.operation = 'MAXIMUM'
-        links.new(max_01.outputs[0], max_012.inputs[0])
-        links.new(exp_2.outputs[0], max_012.inputs[1])
-        
-        return max_012.outputs[0], False
+    # Default to MAX
+    # Max: Use maximum of scale_0, scale_1, scale_2
+    # First exp() to convert from log scale, then max
+    exp_0 = nodes.new('ShaderNodeMath')
+    exp_0.location = (-600, -400)
+    exp_0.operation = 'EXPONENT'
+    links.new(scale_0_attr.outputs['Attribute'], exp_0.inputs[0])
     
-    # Default
-    fixed_value = nodes.new('ShaderNodeValue')
-    fixed_value.location = (-600, -400)
-    fixed_value.outputs[0].default_value = fixed_scale
-    return fixed_value.outputs[0], False
+    exp_1 = nodes.new('ShaderNodeMath')
+    exp_1.location = (-600, -500)
+    exp_1.operation = 'EXPONENT'
+    links.new(scale_1_attr.outputs['Attribute'], exp_1.inputs[0])
+    
+    exp_2 = nodes.new('ShaderNodeMath')
+    exp_2.location = (-600, -600)
+    exp_2.operation = 'EXPONENT'
+    links.new(scale_2_attr.outputs['Attribute'], exp_2.inputs[0])
+    
+    # max(scale_0, scale_1)
+    max_01 = nodes.new('ShaderNodeMath')
+    max_01.location = (-400, -450)
+    max_01.operation = 'MAXIMUM'
+    links.new(exp_0.outputs[0], max_01.inputs[0])
+    links.new(exp_1.outputs[0], max_01.inputs[1])
+    
+    # max(max_01, scale_2)
+    max_012 = nodes.new('ShaderNodeMath')
+    max_012.location = (-200, -450)
+    max_012.operation = 'MAXIMUM'
+    links.new(max_01.outputs[0], max_012.inputs[0])
+    links.new(exp_2.outputs[0], max_012.inputs[1])
+    
+    return max_012.outputs[0], False
 
 
 def setup_gsplat_display_advanced(
     obj: bpy.types.Object,
-    mesh_type: Union[MeshType, str] = MeshType.ICOSPHERE,
     shader_mode: Union[ShaderMode, str] = ShaderMode.GAUSSIAN,
     point_scale: Union[PointScale, str] = PointScale.MAX,
     output_channel: Union[OutputChannel, str] = OutputChannel.FINAL_COLOR,
-    fixed_scale: float = 0.01,
     geo_size: float = 3.0,
-    use_emission: bool = True
+    use_emission: bool = True,
+    opacity_scale: float = 1.0,
+    instance_id_attr_name: str = "instance_id"
 ) -> bpy.types.Material:
     """
-    Advanced Gaussian splat display setup with configurable options.
+    Advanced Gaussian splat display setup.
     
-    Based on UGRS/Nunchucks geometry nodes implementation.
+    Uses Geometry Nodes Instancing (Ellipsoids) to correctly represent 
+    anisotropic Gaussian splats (needle/flat shapes).
     
     Args:
         obj: The Gaussian splat mesh object
-        mesh_type: Type of mesh for point instancing ('Cube', 'IcoSphere', 'DualIcoSphere', 'Circle')
-        shader_mode: Shader rendering mode ('Gaussian', 'Ring', 'Wireframe', 'Freestyle')
-        point_scale: Scale calculation mode:
-            - 'Fix': Fixed uniform size
-            - 'Auto': Automatic based on scale_0
-            - 'Max': Use max(scale_0, scale_1, scale_2) - uniform spheres
-            - 'Anisotropic': Use (scale_0, scale_1, scale_2) as X,Y,Z - ellipsoid shapes!
-                            This creates thin needle-like splats. Includes rotation from quaternion.
-        output_channel: Output channel ('Final color', 'Normal', 'Depth', 'Alpha')
-        fixed_scale: Fixed scale value for 'Fix' mode
-        geo_size: Geometry size multiplier (default 3.0). Controls how large the mesh is
-                  relative to the visible Gaussian. Larger = more transparent area around
-                  the visible splat center. This is key for the Gaussian appearance!
-        use_emission: Use emission shader for bright unlit colors
+        shader_mode: Shader rendering mode
+        point_scale: 'Anisotropic' (default/recommended) for correct shapes, 'Max' for spheres.
+        output_channel: Visualization channel
+        geo_size: Mesh size multiplier (relative to sigma). 
+                  Default 3.0 means mesh radius is 3*sigma.
+        use_emission: Use emission shader
+        opacity_scale: Global opacity multiplier (default 1.0)
+        instance_id_attr_name: Attribute for instance IDs
     
     Returns:
         The created material
-    
-    Example:
-        # Spherical splats (blob-like)
-        mat = setup_gsplat_display_advanced(obj, point_scale='Max')
-        
-        # Ellipsoid splats (can be thin as needles!)
-        mat = setup_gsplat_display_advanced(obj, point_scale='Anisotropic')
     """
     # Convert string arguments to enums
-    if isinstance(mesh_type, str):
-        mesh_type = MeshType(mesh_type)
     if isinstance(shader_mode, str):
         shader_mode = ShaderMode(shader_mode)
     if isinstance(point_scale, str):
@@ -1155,7 +1027,7 @@ def setup_gsplat_display_advanced(
     if isinstance(output_channel, str):
         output_channel = OutputChannel(output_channel)
     
-    # Setup color - convert SH to RGB if needed
+    # Setup color
     color_attr_name = setup_gsplat_color(obj)
     
     # Create material
@@ -1167,19 +1039,33 @@ def setup_gsplat_display_advanced(
         output_channel
     )
     
+    # Adjust material parameters
+    # For point cloud rendering, the falloff factor controls sharpness
+    # Standard Gaussian Splatting uses exp(-0.5 * d^2)
+    # The previous code used 8.0 / (geo_size ** 2) which created a dependency on mesh size
+    # and resulted in incorrect (too sharp) falloff for standard geo_size=3.0.
+    # We now enforce the standard factor of 0.5 for correct visualization.
+    falloff_factor = 0.5
+    
+    if mat.node_tree:
+        for node in mat.node_tree.nodes:
+            if node.name == "GaussianFalloffFactor":
+                node.outputs[0].default_value = falloff_factor
+            if node.name == "OpacityScale":
+                node.outputs[0].default_value = opacity_scale
+    
     if obj.data.materials:
         obj.data.materials[0] = mat
     else:
         obj.data.materials.append(mat)
     
-    # Create geometry nodes with advanced options
+    # Create geometry nodes
     modifier = _create_gsplat_geometry_nodes_advanced(
         obj,
-        mesh_type,
         point_scale,
-        fixed_scale,
         geo_size,
-        color_attr_name
+        color_attr_name,
+        instance_id_attr_name
     )
     
     # Set material in geometry nodes
@@ -1188,26 +1074,22 @@ def setup_gsplat_display_advanced(
             if node.type == 'SET_MATERIAL':
                 node.inputs['Material'].default_value = mat
     
-    print(f"   ✅ Advanced display setup: mesh={mesh_type.value}, scale={point_scale.value}")
+    print(f"   ✅ Advanced display setup: Instanced Ellipsoids, scale={point_scale.value}")
     return mat
 
 
 def _create_gsplat_geometry_nodes_advanced(
     obj: bpy.types.Object,
-    mesh_type: MeshType,
     scale_mode: PointScale,
-    fixed_scale: float,
     geo_size: float,
-    color_attr_name: str
+    color_attr_name: str,
+    instance_id_attr_name: str
 ):
     """
-    Create advanced geometry nodes for Gaussian splat display.
+    Create advanced geometry nodes for Gaussian splat display using Volume Point Cloud.
     
-    Implements mesh type selection, point scale calculation, and color transfer.
-    
-    The geo_size parameter is crucial: it scales the mesh larger than the visible
-    Gaussian, so the shader can create the characteristic falloff appearance where
-    only the center portion is visible.
+    This approach creates ellipsoidal billboards that are camera-facing with proper
+    Gaussian falloff, matching the UGRS point cloud approach.
     """
     # Remove existing modifier
     for mod in list(obj.modifiers):
@@ -1233,166 +1115,133 @@ def _create_gsplat_geometry_nodes_advanced(
     
     # === Group Input/Output ===
     input_node = nodes.new('NodeGroupInput')
-    input_node.location = (-1000, 0)
+    input_node.location = (-1200, 0)
     
     output_node = nodes.new('NodeGroupOutput')
-    output_node.location = (1500, 0)
+    output_node.location = (1400, 0)
     
-    # === Get Color Attribute ===
+    # === Scale Calculation ===
+    scale_output, is_vector_scale = _calculate_point_scale(nodes, links, scale_mode)
+    
+    # For point cloud rendering, we store the scale as attributes
+    # and use them in the shader for proper ellipsoidal rendering
+    
+    if not is_vector_scale:
+        # Scalar to Vector
+        to_vec = nodes.new('ShaderNodeCombineXYZ')
+        to_vec.location = (-350, -200)
+        links.new(scale_output, to_vec.inputs['X'])
+        links.new(scale_output, to_vec.inputs['Y'])
+        links.new(scale_output, to_vec.inputs['Z'])
+        scale_output = to_vec.outputs['Vector']
+    
+    # Store scale_vector (before geo_size multiplier) as attribute
+    store_scale = nodes.new('GeometryNodeStoreNamedAttribute')
+    store_scale.location = (-100, 0)
+    store_scale.data_type = 'FLOAT_VECTOR'
+    store_scale.domain = 'POINT'
+    store_scale.inputs['Name'].default_value = "splat_scale"
+    
+    links.new(input_node.outputs['Geometry'], store_scale.inputs['Geometry'])
+    links.new(scale_output, store_scale.inputs['Value'])
+    
+    # === Store Rotation as Quaternion Attribute ===
+    rot_0 = nodes.new('GeometryNodeInputNamedAttribute')
+    rot_0.location = (-800, -700)
+    rot_0.data_type = 'FLOAT'
+    rot_0.inputs['Name'].default_value = 'rot_0'
+    
+    rot_1 = nodes.new('GeometryNodeInputNamedAttribute')
+    rot_1.location = (-800, -800)
+    rot_1.data_type = 'FLOAT'
+    rot_1.inputs['Name'].default_value = 'rot_1'
+    
+    rot_2 = nodes.new('GeometryNodeInputNamedAttribute')
+    rot_2.location = (-800, -900)
+    rot_2.data_type = 'FLOAT'
+    rot_2.inputs['Name'].default_value = 'rot_2'
+    
+    rot_3 = nodes.new('GeometryNodeInputNamedAttribute')
+    rot_3.location = (-800, -1000)
+    rot_3.data_type = 'FLOAT'
+    rot_3.inputs['Name'].default_value = 'rot_3'
+    
+    # Store each quaternion component as a separate attribute
+    # (Simpler than trying to pack into Color, and shader can read them separately)
+    
+    store_rot0 = nodes.new('GeometryNodeStoreNamedAttribute')
+    store_rot0.location = (-400, -700)
+    store_rot0.data_type = 'FLOAT'
+    store_rot0.domain = 'POINT'
+    store_rot0.inputs['Name'].default_value = "splat_rot_0"
+    links.new(store_scale.outputs['Geometry'], store_rot0.inputs['Geometry'])
+    links.new(rot_0.outputs['Attribute'], store_rot0.inputs['Value'])
+    
+    store_rot1 = nodes.new('GeometryNodeStoreNamedAttribute')
+    store_rot1.location = (-400, -850)
+    store_rot1.data_type = 'FLOAT'
+    store_rot1.domain = 'POINT'
+    store_rot1.inputs['Name'].default_value = "splat_rot_1"
+    links.new(store_rot0.outputs['Geometry'], store_rot1.inputs['Geometry'])
+    links.new(rot_1.outputs['Attribute'], store_rot1.inputs['Value'])
+    
+    store_rot2 = nodes.new('GeometryNodeStoreNamedAttribute')
+    store_rot2.location = (-400, -1000)
+    store_rot2.data_type = 'FLOAT'
+    store_rot2.domain = 'POINT'
+    store_rot2.inputs['Name'].default_value = "splat_rot_2"
+    links.new(store_rot1.outputs['Geometry'], store_rot2.inputs['Geometry'])
+    links.new(rot_2.outputs['Attribute'], store_rot2.inputs['Value'])
+    
+    store_rot3 = nodes.new('GeometryNodeStoreNamedAttribute')
+    store_rot3.location = (-400, -1150)
+    store_rot3.data_type = 'FLOAT'
+    store_rot3.domain = 'POINT'
+    store_rot3.inputs['Name'].default_value = "splat_rot_3"
+    links.new(store_rot2.outputs['Geometry'], store_rot3.inputs['Geometry'])
+    links.new(rot_3.outputs['Attribute'], store_rot3.inputs['Value'])
+    
+    # === Store Color ===
     color_attr = nodes.new('GeometryNodeInputNamedAttribute')
-    color_attr.location = (-800, -150)
+    color_attr.location = (0, 300)
     color_attr.data_type = 'FLOAT_COLOR'
     color_attr.inputs['Name'].default_value = color_attr_name
     
-    # === Mesh to Points ===
-    mesh_to_points = nodes.new('GeometryNodeMeshToPoints')
-    mesh_to_points.location = (-400, 0)
-    mesh_to_points.mode = 'VERTICES'
-    
-    links.new(input_node.outputs['Geometry'], mesh_to_points.inputs['Mesh'])
-    
-    # === Calculate Point Scale ===
-    scale_output, is_vector_scale = _calculate_point_scale(nodes, links, scale_mode, fixed_scale)
-    
-    # For mesh_to_points radius, use max of scale components if vector
-    if is_vector_scale:
-        # Extract max component for radius
-        separate_for_radius = nodes.new('ShaderNodeSeparateXYZ')
-        separate_for_radius.location = (-300, -350)
-        links.new(scale_output, separate_for_radius.inputs['Vector'])
-        
-        max_xy = nodes.new('ShaderNodeMath')
-        max_xy.location = (-150, -350)
-        max_xy.operation = 'MAXIMUM'
-        links.new(separate_for_radius.outputs['X'], max_xy.inputs[0])
-        links.new(separate_for_radius.outputs['Y'], max_xy.inputs[1])
-        
-        max_xyz = nodes.new('ShaderNodeMath')
-        max_xyz.location = (0, -350)
-        max_xyz.operation = 'MAXIMUM'
-        links.new(max_xy.outputs[0], max_xyz.inputs[0])
-        links.new(separate_for_radius.outputs['Z'], max_xyz.inputs[1])
-        
-        links.new(max_xyz.outputs[0], mesh_to_points.inputs['Radius'])
-    else:
-        links.new(scale_output, mesh_to_points.inputs['Radius'])
-    
-    # === Create Instance Mesh ===
-    mesh_output = _create_instance_mesh(nodes, links, mesh_type, 1.0)
-    
-    # === Instance on Points ===
-    instance_on_points = nodes.new('GeometryNodeInstanceOnPoints')
-    instance_on_points.location = (200, 0)
-    
-    links.new(mesh_to_points.outputs['Points'], instance_on_points.inputs['Points'])
-    links.new(mesh_output, instance_on_points.inputs['Instance'])
-    
-    # === Handle Scale (vector or scalar) ===
-    if is_vector_scale:
-        # Anisotropic scaling - use vector directly
-        geo_size_multiply = nodes.new('ShaderNodeVectorMath')
-        geo_size_multiply.location = (100, -300)
-        geo_size_multiply.operation = 'SCALE'
-        geo_size_multiply.inputs[3].default_value = geo_size
-        
-        links.new(scale_output, geo_size_multiply.inputs[0])
-        links.new(geo_size_multiply.outputs['Vector'], instance_on_points.inputs['Scale'])
-        
-        # === Add Rotation from Quaternion ===
-        # Read quaternion attributes (rot_0, rot_1, rot_2, rot_3)
-        rot_0 = nodes.new('GeometryNodeInputNamedAttribute')
-        rot_0.location = (-800, -750)
-        rot_0.data_type = 'FLOAT'
-        rot_0.inputs['Name'].default_value = 'rot_0'
-        
-        rot_1 = nodes.new('GeometryNodeInputNamedAttribute')
-        rot_1.location = (-800, -850)
-        rot_1.data_type = 'FLOAT'
-        rot_1.inputs['Name'].default_value = 'rot_1'
-        
-        rot_2 = nodes.new('GeometryNodeInputNamedAttribute')
-        rot_2.location = (-800, -950)
-        rot_2.data_type = 'FLOAT'
-        rot_2.inputs['Name'].default_value = 'rot_2'
-        
-        rot_3 = nodes.new('GeometryNodeInputNamedAttribute')
-        rot_3.location = (-800, -1050)
-        rot_3.data_type = 'FLOAT'
-        rot_3.inputs['Name'].default_value = 'rot_3'
-        
-        # Combine quaternion components (w, x, y, z format)
-        combine_quat = nodes.new('FunctionNodeCombineColor')
-        combine_quat.location = (-600, -900)
-        combine_quat.mode = 'RGB'  # Use RGB to combine 4 values
-        # Note: Blender quaternion is (w, x, y, z), PLY is typically (rot_0=w, rot_1=x, rot_2=y, rot_3=z)
-        links.new(rot_0.outputs['Attribute'], combine_quat.inputs[0])  # R = w
-        links.new(rot_1.outputs['Attribute'], combine_quat.inputs[1])  # G = x
-        links.new(rot_2.outputs['Attribute'], combine_quat.inputs[2])  # B = y
-        
-        # Convert quaternion to rotation using Blender's built-in node
-        quat_to_rotation = nodes.new('FunctionNodeQuaternionToRotation')
-        quat_to_rotation.location = (-400, -900)
-        links.new(rot_0.outputs['Attribute'], quat_to_rotation.inputs[0])  # W
-        links.new(rot_1.outputs['Attribute'], quat_to_rotation.inputs[1])  # X
-        links.new(rot_2.outputs['Attribute'], quat_to_rotation.inputs[2])  # Y
-        links.new(rot_3.outputs['Attribute'], quat_to_rotation.inputs[3])  # Z
-        
-        # Connect rotation to instance on points
-        links.new(quat_to_rotation.outputs['Rotation'], instance_on_points.inputs['Rotation'])
-    else:
-        # Uniform scaling - create vector from scalar
-        combine_scale = nodes.new('ShaderNodeCombineXYZ')
-        combine_scale.location = (-100, -300)
-        links.new(scale_output, combine_scale.inputs['X'])
-        links.new(scale_output, combine_scale.inputs['Y'])
-        links.new(scale_output, combine_scale.inputs['Z'])
-        
-        # Apply geo_size multiplier
-        geo_size_multiply = nodes.new('ShaderNodeVectorMath')
-        geo_size_multiply.location = (100, -300)
-        geo_size_multiply.operation = 'SCALE'
-        geo_size_multiply.inputs[3].default_value = geo_size
-        
-        links.new(combine_scale.outputs['Vector'], geo_size_multiply.inputs[0])
-        links.new(geo_size_multiply.outputs['Vector'], instance_on_points.inputs['Scale'])
-    
-    # === Store Color on Instances ===
     store_color = nodes.new('GeometryNodeStoreNamedAttribute')
-    store_color.location = (400, 0)
+    store_color.location = (100, 0)
     store_color.data_type = 'FLOAT_COLOR'
-    store_color.domain = 'INSTANCE'
-    store_color.inputs['Name'].default_value = "inst_color"
+    store_color.domain = 'POINT'
+    store_color.inputs['Name'].default_value = "splat_color"
     
-    links.new(instance_on_points.outputs['Instances'], store_color.inputs['Geometry'])
+    links.new(store_rot3.outputs['Geometry'], store_color.inputs['Geometry'])
     links.new(color_attr.outputs['Attribute'], store_color.inputs['Value'])
     
-    # === Store Opacity on Instances ===
-    # Read opacity and convert with sigmoid
+    # === Store Opacity (sigmoid) ===
     opacity_attr = nodes.new('GeometryNodeInputNamedAttribute')
-    opacity_attr.location = (200, -400)
+    opacity_attr.location = (200, -600)
     opacity_attr.data_type = 'FLOAT'
     opacity_attr.inputs['Name'].default_value = 'opacity'
     
-    # Sigmoid: 1 / (1 + exp(-opacity))
+    # Sigmoid: 1 / (1 + exp(-x))
     neg_opacity = nodes.new('ShaderNodeMath')
-    neg_opacity.location = (350, -400)
+    neg_opacity.location = (350, -600)
     neg_opacity.operation = 'MULTIPLY'
     neg_opacity.inputs[1].default_value = -1.0
     links.new(opacity_attr.outputs['Attribute'], neg_opacity.inputs[0])
     
     exp_opacity = nodes.new('ShaderNodeMath')
-    exp_opacity.location = (500, -400)
+    exp_opacity.location = (500, -600)
     exp_opacity.operation = 'EXPONENT'
     links.new(neg_opacity.outputs[0], exp_opacity.inputs[0])
     
     add_one = nodes.new('ShaderNodeMath')
-    add_one.location = (650, -400)
+    add_one.location = (650, -600)
     add_one.operation = 'ADD'
     add_one.inputs[1].default_value = 1.0
     links.new(exp_opacity.outputs[0], add_one.inputs[0])
     
     sigmoid_opacity = nodes.new('ShaderNodeMath')
-    sigmoid_opacity.location = (800, -400)
+    sigmoid_opacity.location = (800, -600)
     sigmoid_opacity.operation = 'DIVIDE'
     sigmoid_opacity.inputs[0].default_value = 1.0
     links.new(add_one.outputs[0], sigmoid_opacity.inputs[1])
@@ -1400,95 +1249,61 @@ def _create_gsplat_geometry_nodes_advanced(
     store_opacity = nodes.new('GeometryNodeStoreNamedAttribute')
     store_opacity.location = (500, -200)
     store_opacity.data_type = 'FLOAT'
-    store_opacity.domain = 'INSTANCE'
-    store_opacity.inputs['Name'].default_value = "inst_opacity"
+    store_opacity.domain = 'POINT'
+    store_opacity.inputs['Name'].default_value = "splat_opacity"
     
     links.new(store_color.outputs['Geometry'], store_opacity.inputs['Geometry'])
     links.new(sigmoid_opacity.outputs[0], store_opacity.inputs['Value'])
     
-    # === Realize Instances ===
-    realize = nodes.new('GeometryNodeRealizeInstances')
-    realize.location = (700, 0)
+    # === Store Center Position ===
+    pos_node = nodes.new('GeometryNodeInputPosition')
+    pos_node.location = (500, 200)
     
-    links.new(store_opacity.outputs['Geometry'], realize.inputs['Geometry'])
+    store_center = nodes.new('GeometryNodeStoreNamedAttribute')
+    store_center.location = (700, 0)
+    store_center.data_type = 'FLOAT_VECTOR'
+    store_center.domain = 'POINT'
+    store_center.inputs['Name'].default_value = "splat_center"
     
-    # === Compute Gaussian Alpha on Realized Geometry ===
-    # After realization, Position gives local position within each instance
-    # For normalized mesh (radius 1), position magnitude = distance from center
-    position = nodes.new('GeometryNodeInputPosition')
-    position.location = (850, -300)
+    links.new(store_opacity.outputs['Geometry'], store_center.inputs['Geometry'])
+    links.new(pos_node.outputs['Position'], store_center.inputs['Value'])
     
-    # Calculate distance² = x² + y² + z²
-    dot_product = nodes.new('ShaderNodeVectorMath')
-    dot_product.location = (1000, -300)
-    dot_product.operation = 'DOT_PRODUCT'
-    links.new(position.outputs['Position'], dot_product.inputs[0])
-    links.new(position.outputs['Position'], dot_product.inputs[1])
+    # === Mesh to Points (Billboard Mode) ===
+    # Calculate point radius from scale (max component * geo_size)
+    separate_xyz = nodes.new('ShaderNodeSeparateXYZ')
+    separate_xyz.location = (-300, -350)
+    links.new(scale_output, separate_xyz.inputs['Vector'])
     
-    # Gaussian marginal: exp(-distance² * factor)
-    # factor controls sharpness (higher = sharper edge)
-    # Note: geo_size already scaled the mesh, so we need to account for that
-    # Standard Gaussian: exp(-r²/2σ²) = exp(-r² * 0.5/σ²)
-    scale_factor = nodes.new('ShaderNodeMath')
-    scale_factor.location = (1150, -300)
-    scale_factor.operation = 'MULTIPLY'
-    scale_factor.inputs[1].default_value = 0.5  # Gaussian parameter
-    links.new(dot_product.outputs['Value'], scale_factor.inputs[0])
+    max_01 = nodes.new('ShaderNodeMath')
+    max_01.location = (-100, -350)
+    max_01.operation = 'MAXIMUM'
+    links.new(separate_xyz.outputs['X'], max_01.inputs[0])
+    links.new(separate_xyz.outputs['Y'], max_01.inputs[1])
     
-    negate = nodes.new('ShaderNodeMath')
-    negate.location = (1300, -300)
-    negate.operation = 'MULTIPLY'
-    negate.inputs[1].default_value = -1.0
-    links.new(scale_factor.outputs[0], negate.inputs[0])
+    max_012 = nodes.new('ShaderNodeMath')
+    max_012.location = (50, -350)
+    max_012.operation = 'MAXIMUM'
+    links.new(max_01.outputs[0], max_012.inputs[0])
+    links.new(separate_xyz.outputs['Z'], max_012.inputs[1])
     
-    gaussian_marginal = nodes.new('ShaderNodeMath')
-    gaussian_marginal.location = (1450, -300)
-    gaussian_marginal.operation = 'EXPONENT'
-    links.new(negate.outputs[0], gaussian_marginal.inputs[0])
+    mult_geo_size = nodes.new('ShaderNodeMath')
+    mult_geo_size.location = (200, -350)
+    mult_geo_size.operation = 'MULTIPLY'
+    mult_geo_size.inputs[1].default_value = geo_size
+    links.new(max_012.outputs[0], mult_geo_size.inputs[0])
     
-    # Get stored opacity
-    get_inst_opacity = nodes.new('GeometryNodeInputNamedAttribute')
-    get_inst_opacity.location = (1200, -500)
-    get_inst_opacity.data_type = 'FLOAT'
-    get_inst_opacity.inputs['Name'].default_value = "inst_opacity"
+    mesh_to_points = nodes.new('GeometryNodeMeshToPoints')
+    mesh_to_points.location = (900, 0)
+    mesh_to_points.mode = 'VERTICES'
     
-    # computeAlpha = opacity * marginal
-    compute_alpha = nodes.new('ShaderNodeMath')
-    compute_alpha.location = (1600, -400)
-    compute_alpha.operation = 'MULTIPLY'
-    links.new(get_inst_opacity.outputs['Attribute'], compute_alpha.inputs[0])
-    links.new(gaussian_marginal.outputs[0], compute_alpha.inputs[1])
-    
-    # Store computeAlpha
-    store_alpha = nodes.new('GeometryNodeStoreNamedAttribute')
-    store_alpha.location = (900, 0)
-    store_alpha.data_type = 'FLOAT'
-    store_alpha.domain = 'POINT'
-    store_alpha.inputs['Name'].default_value = "computeAlpha"
-    
-    links.new(realize.outputs['Geometry'], store_alpha.inputs['Geometry'])
-    links.new(compute_alpha.outputs[0], store_alpha.inputs['Value'])
-    
-    # === Transfer Color to Realized Vertices ===
-    get_inst_color = nodes.new('GeometryNodeInputNamedAttribute')
-    get_inst_color.location = (900, -150)
-    get_inst_color.data_type = 'FLOAT_COLOR'
-    get_inst_color.inputs['Name'].default_value = "inst_color"
-    
-    store_final_color = nodes.new('GeometryNodeStoreNamedAttribute')
-    store_final_color.location = (1100, 0)
-    store_final_color.data_type = 'FLOAT_COLOR'
-    store_final_color.domain = 'POINT'
-    store_final_color.inputs['Name'].default_value = color_attr_name
-    
-    links.new(store_alpha.outputs['Geometry'], store_final_color.inputs['Geometry'])
-    links.new(get_inst_color.outputs['Attribute'], store_final_color.inputs['Value'])
+    links.new(store_center.outputs['Geometry'], mesh_to_points.inputs['Mesh'])
+    links.new(mult_geo_size.outputs[0], mesh_to_points.inputs['Radius'])
     
     # === Set Material ===
     set_material = nodes.new('GeometryNodeSetMaterial')
-    set_material.location = (1300, 0)
+    set_material.location = (1200, 0)
     
-    links.new(store_final_color.outputs['Geometry'], set_material.inputs['Geometry'])
+    links.new(mesh_to_points.outputs['Points'], set_material.inputs['Geometry'])
     links.new(set_material.outputs['Geometry'], output_node.inputs['Geometry'])
     
     return modifier
@@ -1502,215 +1317,337 @@ def _create_gsplat_material_advanced(
     output_channel: OutputChannel
 ) -> bpy.types.Material:
     """
-    Create advanced material for Gaussian splat display.
+    Create advanced material for Gaussian splat point cloud display.
     
-    For Gaussian shader mode, creates a disk-like splat with Gaussian falloff:
-    - Center is bright/opaque
-    - Edges fade to transparent using exp(-distance²) falloff
-    
-    Based on UGRS shader implementation.
+    Uses Point Info node to get point coordinates and calculates Gaussian falloff
+    based on the stored ellipsoid parameters (scale, rotation, center).
     """
     mat = bpy.data.materials.new(name=name)
     mat.use_nodes = True
     
     # Enable transparency
-    mat.blend_method = 'BLEND'  # Use alpha blending
-    # mat.shadow_method = 'HASHED'  # Better shadows with transparency
+    mat.blend_method = 'HASHED'  # HASHED generally works better for many overlapping transparent objects
     mat.use_backface_culling = False
     
     nodes = mat.node_tree.nodes
     links = mat.node_tree.links
-    
     nodes.clear()
     
     # Output
     output = nodes.new('ShaderNodeOutputMaterial')
-    output.location = (1000, 0)
+    output.location = (1400, 0)
     
-    # Color attribute
-    attr_node = nodes.new('ShaderNodeAttribute')
-    attr_node.location = (-600, 100)
-    attr_node.attribute_name = color_attr_name
-    attr_node.attribute_type = 'GEOMETRY'
+    # === Read Stored Attributes ===
     
-    # Handle different output channels
-    color_output = attr_node.outputs['Color']
+    # Color
+    color_attr = nodes.new('ShaderNodeAttribute')
+    color_attr.location = (-1200, 300)
+    color_attr.attribute_name = "splat_color"
+    color_attr.attribute_type = 'GEOMETRY'
     
-    if output_channel == OutputChannel.NORMAL:
-        geometry_node = nodes.new('ShaderNodeNewGeometry')
-        geometry_node.location = (-400, 100)
-        color_output = geometry_node.outputs['Normal']
-        
-        vector_math = nodes.new('ShaderNodeVectorMath')
-        vector_math.location = (-200, 100)
-        vector_math.operation = 'SCALE'
-        vector_math.inputs[3].default_value = 0.5
-        links.new(color_output, vector_math.inputs[0])
-        
-        add_node = nodes.new('ShaderNodeVectorMath')
-        add_node.location = (0, 100)
-        add_node.operation = 'ADD'
-        add_node.inputs[1].default_value = (0.5, 0.5, 0.5)
-        links.new(vector_math.outputs[0], add_node.inputs[0])
-        
-        color_output = add_node.outputs[0]
-        
-    elif output_channel == OutputChannel.DEPTH:
-        camera_data = nodes.new('ShaderNodeCameraData')
-        camera_data.location = (-400, 100)
-        
-        map_range = nodes.new('ShaderNodeMapRange')
-        map_range.location = (-200, 100)
-        map_range.inputs['From Min'].default_value = 0.0
-        map_range.inputs['From Max'].default_value = 100.0
-        links.new(camera_data.outputs['View Z Depth'], map_range.inputs['Value'])
-        
-        combine = nodes.new('ShaderNodeCombineColor')
-        combine.location = (0, 100)
-        links.new(map_range.outputs[0], combine.inputs['Red'])
-        links.new(map_range.outputs[0], combine.inputs['Green'])
-        links.new(map_range.outputs[0], combine.inputs['Blue'])
-        
-        color_output = combine.outputs['Color']
+    # Center position
+    # We use this directly from GN now instead of re-reading it later in Gaussian logic
+    # center_attr = nodes.new('ShaderNodeAttribute')
+    # center_attr.location = (-1200, 100)
+    # center_attr.attribute_name = "splat_center"
+    # center_attr.attribute_type = 'GEOMETRY'
     
-    # === GAUSSIAN SHADER MODE - Use pre-computed alpha from geometry nodes ===
+    # Scale (sigma for each axis)
+    scale_attr = nodes.new('ShaderNodeAttribute')
+    scale_attr.location = (-1200, -100)
+    scale_attr.attribute_name = "splat_scale"
+    scale_attr.attribute_type = 'GEOMETRY'
+    
+    # Quaternion components (stored as separate float attributes)
+    # We'll read these if we need rotation, but for now we simplify
+    # by using axis-aligned ellipsoids (no rotation applied in shader)
+    
+    # Opacity
+    opacity_attr = nodes.new('ShaderNodeAttribute')
+    opacity_attr.location = (-1200, -500)
+    opacity_attr.attribute_name = "splat_opacity"
+    opacity_attr.attribute_type = 'GEOMETRY'
+    
+    # === Opacity Scale (Global) ===
+    opacity_scale = nodes.new('ShaderNodeValue')
+    opacity_scale.location = (-1000, -600)
+    opacity_scale.name = "OpacityScale"
+    opacity_scale.label = "OpacityScale"
+    opacity_scale.outputs[0].default_value = 1.0
+    
+    # === Gaussian Computation ===
     if shader_mode == ShaderMode.GAUSSIAN:
-        # Read pre-computed alpha from geometry nodes
-        # This is computed as: sigmoid(opacity) * exp(-distance²/2)
-        alpha_attr = nodes.new('ShaderNodeAttribute')
-        alpha_attr.location = (-200, -200)
-        alpha_attr.attribute_name = 'computeAlpha'
-        alpha_attr.attribute_type = 'GEOMETRY'
+        # For point clouds, we need to calculate the distance from the point center
+        # to the shading point. ShaderNodeTexCoord 'Generated' does not work per-point.
         
-        # Emission shader for the color
-        emission = nodes.new('ShaderNodeEmission')
-        emission.location = (500, 100)
-        emission.inputs['Strength'].default_value = 1.0
-        links.new(color_output, emission.inputs['Color'])
+        # Get Shading Point Position (World Space)
+        geo_node = nodes.new('ShaderNodeNewGeometry')
+        geo_node.location = (-1200, 100)
         
-        # Transparent shader
-        transparent = nodes.new('ShaderNodeBsdfTransparent')
-        transparent.location = (500, -50)
+        # Transform World Position to Object Space
+        to_object = nodes.new('ShaderNodeVectorTransform')
+        to_object.location = (-1000, 100)
+        to_object.vector_type = 'POINT'      # Important: POINT for position (handles translation)
+        to_object.convert_from = 'WORLD'
+        to_object.convert_to = 'OBJECT'
+        links.new(geo_node.outputs['Position'], to_object.inputs['Vector'])
+
+        # Get Splat Center (Object Space) - stored in GN
+        center_attr = nodes.new('ShaderNodeAttribute')
+        center_attr.location = (-1000, -100)
+        center_attr.attribute_name = "splat_center"
+        center_attr.attribute_type = 'GEOMETRY'
+
+        # Calculate Delta = Position(Object) - Center(Object)
+        delta = nodes.new('ShaderNodeVectorMath')
+        delta.location = (-800, 0)
+        delta.operation = 'SUBTRACT'
+        links.new(to_object.outputs['Vector'], delta.inputs[0])
+        links.new(center_attr.outputs['Vector'], delta.inputs[1])
         
-        # Mix based on pre-computed alpha
-        mix_shader = nodes.new('ShaderNodeMixShader')
-        mix_shader.location = (800, 0)
-        links.new(alpha_attr.outputs['Fac'], mix_shader.inputs['Fac'])
-        links.new(transparent.outputs['BSDF'], mix_shader.inputs[1])
-        links.new(emission.outputs['Emission'], mix_shader.inputs[2])
+        # Apply Rotation (Inverse Quaternion) to Delta
+        # This aligns the object-space delta to the splat's local axes
         
-        links.new(mix_shader.outputs['Shader'], output.inputs['Surface'])
+        # Read Quaternion Attributes
+        rot_0 = nodes.new('ShaderNodeAttribute')
+        rot_0.location = (-1200, -200)
+        rot_0.attribute_name = "splat_rot_0" # W (Real)
+        rot_0.attribute_type = 'GEOMETRY'
         
-    elif shader_mode == ShaderMode.RING:
-        # Ring shader - hollow center using Generated coordinates
-        tex_coord = nodes.new('ShaderNodeTexCoord')
-        tex_coord.location = (-600, -200)
+        rot_1 = nodes.new('ShaderNodeAttribute')
+        rot_1.location = (-1200, -300)
+        rot_1.attribute_name = "splat_rot_1" # X
+        rot_1.attribute_type = 'GEOMETRY'
         
-        # Map Generated coords from [0,1] to [-1,1]
-        subtract_half = nodes.new('ShaderNodeVectorMath')
-        subtract_half.location = (-400, -200)
-        subtract_half.operation = 'SUBTRACT'
-        subtract_half.inputs[1].default_value = (0.5, 0.5, 0.5)
-        links.new(tex_coord.outputs['Generated'], subtract_half.inputs[0])
+        rot_2 = nodes.new('ShaderNodeAttribute')
+        rot_2.location = (-1200, -400)
+        rot_2.attribute_name = "splat_rot_2" # Y
+        rot_2.attribute_type = 'GEOMETRY'
         
-        scale_coords = nodes.new('ShaderNodeVectorMath')
-        scale_coords.location = (-250, -200)
-        scale_coords.operation = 'SCALE'
-        scale_coords.inputs[3].default_value = 2.0
-        links.new(subtract_half.outputs['Vector'], scale_coords.inputs[0])
+        rot_3 = nodes.new('ShaderNodeAttribute')
+        rot_3.location = (-1200, -500)
+        rot_3.attribute_name = "splat_rot_3" # Z
+        rot_3.attribute_type = 'GEOMETRY'
         
-        separate = nodes.new('ShaderNodeSeparateXYZ')
-        separate.location = (-100, -200)
-        links.new(scale_coords.outputs['Vector'], separate.inputs['Vector'])
+        # Construct Quaternion vector parts
+        # We need Inverse Quaternion for rotating vector "into" the local frame.
+        # Inverse of unit quaternion (w, x, y, z) is (w, -x, -y, -z)
         
-        # Distance from center (2D for ring)
-        x_sq = nodes.new('ShaderNodeMath')
-        x_sq.location = (50, -100)
-        x_sq.operation = 'POWER'
-        x_sq.inputs[1].default_value = 2.0
-        links.new(separate.outputs['X'], x_sq.inputs[0])
+        q_xyz = nodes.new('ShaderNodeCombineXYZ')
+        q_xyz.location = (-1000, -300)
         
-        y_sq = nodes.new('ShaderNodeMath')
-        y_sq.location = (50, -250)
-        y_sq.operation = 'POWER'
-        y_sq.inputs[1].default_value = 2.0
-        links.new(separate.outputs['Y'], y_sq.inputs[0])
+        neg_x = nodes.new('ShaderNodeMath')
+        neg_x.location = (-1100, -300)
+        neg_x.operation = 'MULTIPLY'
+        neg_x.inputs[1].default_value = -1.0
+        links.new(rot_1.outputs['Fac'], neg_x.inputs[0])
         
-        sum_sq = nodes.new('ShaderNodeMath')
-        sum_sq.location = (200, -150)
-        sum_sq.operation = 'ADD'
-        links.new(x_sq.outputs[0], sum_sq.inputs[0])
-        links.new(y_sq.outputs[0], sum_sq.inputs[1])
+        neg_y = nodes.new('ShaderNodeMath')
+        neg_y.location = (-1100, -400)
+        neg_y.operation = 'MULTIPLY'
+        neg_y.inputs[1].default_value = -1.0
+        links.new(rot_2.outputs['Fac'], neg_y.inputs[0])
         
-        dist = nodes.new('ShaderNodeMath')
-        dist.location = (350, -150)
-        dist.operation = 'SQRT'
-        links.new(sum_sq.outputs[0], dist.inputs[0])
+        neg_z = nodes.new('ShaderNodeMath')
+        neg_z.location = (-1100, -500)
+        neg_z.operation = 'MULTIPLY'
+        neg_z.inputs[1].default_value = -1.0
+        links.new(rot_3.outputs['Fac'], neg_z.inputs[0])
         
-        # Ring effect: visible when distance is in a certain range
-        # Inner radius check
-        inner = nodes.new('ShaderNodeMath')
-        inner.location = (500, -100)
-        inner.operation = 'GREATER_THAN'
-        inner.inputs[1].default_value = 0.3  # Inner radius
-        links.new(dist.outputs[0], inner.inputs[0])
+        links.new(neg_x.outputs[0], q_xyz.inputs['X'])
+        links.new(neg_y.outputs[0], q_xyz.inputs['Y'])
+        links.new(neg_z.outputs[0], q_xyz.inputs['Z'])
         
-        # Outer radius check
-        outer = nodes.new('ShaderNodeMath')
-        outer.location = (500, -250)
-        outer.operation = 'LESS_THAN'
-        outer.inputs[1].default_value = 0.7  # Outer radius
-        links.new(dist.outputs[0], outer.inputs[0])
+        # Rotate Vector Formula: v' = v + 2*cross(q.xyz, cross(q.xyz, v) + q.w*v)
         
-        # Both conditions (ring mask)
-        ring_mask = nodes.new('ShaderNodeMath')
-        ring_mask.location = (650, -150)
-        ring_mask.operation = 'MULTIPLY'
-        links.new(inner.outputs[0], ring_mask.inputs[0])
-        links.new(outer.outputs[0], ring_mask.inputs[1])
+        # 1. cross(q.xyz, v)
+        cross1 = nodes.new('ShaderNodeVectorMath')
+        cross1.location = (-800, -200)
+        cross1.operation = 'CROSS_PRODUCT'
+        links.new(q_xyz.outputs['Vector'], cross1.inputs[0])
+        links.new(delta.outputs['Vector'], cross1.inputs[1])
         
-        emission = nodes.new('ShaderNodeEmission')
-        emission.location = (500, 100)
-        links.new(color_output, emission.inputs['Color'])
+        # 2. q.w * v
+        scale_v = nodes.new('ShaderNodeVectorMath')
+        scale_v.location = (-800, -350)
+        scale_v.operation = 'SCALE'
+        links.new(delta.outputs['Vector'], scale_v.inputs[0])
+        links.new(rot_0.outputs['Fac'], scale_v.inputs[3]) # Scale
         
-        transparent = nodes.new('ShaderNodeBsdfTransparent')
-        transparent.location = (500, -50)
+        # 3. cross(q.xyz, v) + q.w*v
+        add1 = nodes.new('ShaderNodeVectorMath')
+        add1.location = (-650, -250)
+        add1.operation = 'ADD'
+        links.new(cross1.outputs['Vector'], add1.inputs[0])
+        links.new(scale_v.outputs['Vector'], add1.inputs[1])
         
-        mix_shader = nodes.new('ShaderNodeMixShader')
-        mix_shader.location = (850, 0)
-        links.new(ring_mask.outputs[0], mix_shader.inputs['Fac'])
-        links.new(transparent.outputs['BSDF'], mix_shader.inputs[1])
-        links.new(emission.outputs['Emission'], mix_shader.inputs[2])
+        # 4. cross(q.xyz, result_3)
+        cross2 = nodes.new('ShaderNodeVectorMath')
+        cross2.location = (-500, -250)
+        cross2.operation = 'CROSS_PRODUCT'
+        links.new(q_xyz.outputs['Vector'], cross2.inputs[0])
+        links.new(add1.outputs['Vector'], cross2.inputs[1])
         
-        links.new(mix_shader.outputs['Shader'], output.inputs['Surface'])
+        # 5. 2 * result_4
+        scale2 = nodes.new('ShaderNodeVectorMath')
+        scale2.location = (-350, -250)
+        scale2.operation = 'SCALE'
+        links.new(cross2.outputs['Vector'], scale2.inputs[0])
+        scale2.inputs[3].default_value = 2.0
         
-    elif shader_mode == ShaderMode.WIREFRAME:
-        wireframe = nodes.new('ShaderNodeWireframe')
-        wireframe.location = (300, -100)
-        wireframe.inputs['Size'].default_value = 0.02
+        # 6. v + result_5 (Final Rotated Vector)
+        delta_rotated = nodes.new('ShaderNodeVectorMath')
+        delta_rotated.location = (-200, 0)
+        delta_rotated.operation = 'ADD'
+        links.new(delta.outputs['Vector'], delta_rotated.inputs[0])
+        links.new(scale2.outputs['Vector'], delta_rotated.inputs[1])
         
-        emission = nodes.new('ShaderNodeEmission')
-        emission.location = (500, 100)
-        links.new(color_output, emission.inputs['Color'])
+        # We want to normalize this delta by the splat scale (sigma)
+        # Delta / Scale
         
-        transparent = nodes.new('ShaderNodeBsdfTransparent')
-        transparent.location = (500, -50)
+        separate_delta = nodes.new('ShaderNodeSeparateXYZ')
+        separate_delta.location = (0, 0)
+        links.new(delta_rotated.outputs['Vector'], separate_delta.inputs[0])
         
-        mix_shader = nodes.new('ShaderNodeMixShader')
-        mix_shader.location = (800, 0)
-        links.new(wireframe.outputs['Fac'], mix_shader.inputs['Fac'])
-        links.new(transparent.outputs['BSDF'], mix_shader.inputs[1])
-        links.new(emission.outputs['Emission'], mix_shader.inputs[2])
+        separate_scale = nodes.new('ShaderNodeSeparateXYZ')
+        separate_scale.location = (0, -200)
+        links.new(scale_attr.outputs['Vector'], separate_scale.inputs[0])
         
-        links.new(mix_shader.outputs['Shader'], output.inputs['Surface'])
+        # Divide Delta by Scale to get normalized distance
+        # normalized_x = delta_x / scale_x
+        div_x = nodes.new('ShaderNodeMath')
+        div_x.location = (200, 100)
+        div_x.operation = 'DIVIDE'
+        links.new(separate_delta.outputs['X'], div_x.inputs[0])
+        links.new(separate_scale.outputs['X'], div_x.inputs[1])
         
-    else:
-        # Freestyle / default - solid emission
-        emission = nodes.new('ShaderNodeEmission')
-        emission.location = (500, 0)
-        emission.inputs['Strength'].default_value = 1.0
-        links.new(color_output, emission.inputs['Color'])
-        links.new(emission.outputs['Emission'], output.inputs['Surface'])
+        div_y = nodes.new('ShaderNodeMath')
+        div_y.location = (200, 0)
+        div_y.operation = 'DIVIDE'
+        links.new(separate_delta.outputs['Y'], div_y.inputs[0])
+        links.new(separate_scale.outputs['Y'], div_y.inputs[1])
+        
+        div_z = nodes.new('ShaderNodeMath')
+        div_z.location = (200, -100)
+        div_z.operation = 'DIVIDE'
+        links.new(separate_delta.outputs['Z'], div_z.inputs[0])
+        links.new(separate_scale.outputs['Z'], div_z.inputs[1])
+        
+        # Square each component
+        sq_x = nodes.new('ShaderNodeMath')
+        sq_x.location = (400, 100)
+        sq_x.operation = 'MULTIPLY'
+        links.new(div_x.outputs[0], sq_x.inputs[0])
+        links.new(div_x.outputs[0], sq_x.inputs[1])
+        
+        sq_y = nodes.new('ShaderNodeMath')
+        sq_y.location = (400, 0)
+        sq_y.operation = 'MULTIPLY'
+        links.new(div_y.outputs[0], sq_y.inputs[0])
+        links.new(div_y.outputs[0], sq_y.inputs[1])
+        
+        sq_z = nodes.new('ShaderNodeMath')
+        sq_z.location = (400, -100)
+        sq_z.operation = 'MULTIPLY'
+        links.new(div_z.outputs[0], sq_z.inputs[0])
+        links.new(div_z.outputs[0], sq_z.inputs[1])
+        
+        # Sum squares to get distance squared (in normalized space)
+        # d^2 = x^2 + y^2 + z^2
+        add_xy = nodes.new('ShaderNodeMath')
+        add_xy.location = (600, 50)
+        add_xy.operation = 'ADD'
+        links.new(sq_x.outputs[0], add_xy.inputs[0])
+        links.new(sq_y.outputs[0], add_xy.inputs[1])
+        
+        dist_sq = nodes.new('ShaderNodeMath')
+        dist_sq.location = (800, 0)
+        dist_sq.operation = 'ADD'
+        links.new(add_xy.outputs[0], dist_sq.inputs[0])
+        links.new(sq_z.outputs[0], dist_sq.inputs[1])
+        
+        # Falloff Factor (configurable)
+        # Controls sharpness.
+        # Gaussian: exp(-0.5 * d^2) is standard.
+        factor_node = nodes.new('ShaderNodeValue')
+        factor_node.location = (800, -200)
+        factor_node.name = "GaussianFalloffFactor"
+        factor_node.label = "GaussianFalloffFactor"
+        factor_node.outputs[0].default_value = 0.5  # Standard Gaussian falloff
+        
+        # Multiply: -factor * d^2
+        mult_k = nodes.new('ShaderNodeMath')
+        mult_k.location = (400, 75)
+        mult_k.operation = 'MULTIPLY'
+        links.new(dist_sq.outputs[0], mult_k.inputs[0])
+        links.new(factor_node.outputs['Value'], mult_k.inputs[1])
+        
+        negate = nodes.new('ShaderNodeMath')
+        negate.location = (600, 75)
+        negate.operation = 'MULTIPLY'
+        negate.inputs[1].default_value = -1.0
+        links.new(mult_k.outputs[0], negate.inputs[0])
+        
+        # Gaussian: exp(-factor * d^2)
+        gaussian_falloff = nodes.new('ShaderNodeMath')
+        gaussian_falloff.location = (800, 75)
+        gaussian_falloff.operation = 'EXPONENT'
+        links.new(negate.outputs[0], gaussian_falloff.inputs[0])
+        
+        # Multiply by base opacity
+        mult_opacity = nodes.new('ShaderNodeMath')
+        mult_opacity.location = (1000, 75)
+        mult_opacity.operation = 'MULTIPLY'
+        links.new(gaussian_falloff.outputs['Value'], mult_opacity.inputs[0])
+        links.new(opacity_attr.outputs['Fac'], mult_opacity.inputs[1])
+        
+        # Multiply by opacity scale
+        mult_opacity_scale = nodes.new('ShaderNodeMath')
+        mult_opacity_scale.location = (1200, 75)
+        mult_opacity_scale.operation = 'MULTIPLY'
+        links.new(mult_opacity.outputs['Value'], mult_opacity_scale.inputs[0])
+        links.new(opacity_scale.outputs['Value'], mult_opacity_scale.inputs[1])
+        
+        # Clamp to [0, 1]
+        clamp_alpha = nodes.new('ShaderNodeClamp')
+        clamp_alpha.location = (1400, 75)
+        clamp_alpha.clamp_type = 'MINMAX'
+        clamp_alpha.inputs['Min'].default_value = 0.0
+        clamp_alpha.inputs['Max'].default_value = 1.0
+        links.new(mult_opacity_scale.outputs['Value'], clamp_alpha.inputs['Value'])
+        
+        # === Shader ===
+        if use_emission:
+            # Emission shader for bright, unlit splats
+            emission = nodes.new('ShaderNodeEmission')
+            emission.location = (1600, 200)
+            emission.inputs['Strength'].default_value = 1.0
+            links.new(color_attr.outputs['Color'], emission.inputs['Color'])
+            
+            # Transparent shader for alpha blending
+            transparent = nodes.new('ShaderNodeBsdfTransparent')
+            transparent.location = (1600, 0)
+            
+            # Mix based on alpha
+            mix_shader = nodes.new('ShaderNodeMixShader')
+            mix_shader.location = (1800, 100)
+            links.new(clamp_alpha.outputs['Result'], mix_shader.inputs['Fac'])
+            links.new(transparent.outputs['BSDF'], mix_shader.inputs[1])
+            links.new(emission.outputs['Emission'], mix_shader.inputs[2])
+            
+            links.new(mix_shader.outputs['Shader'], output.inputs['Surface'])
+        else:
+            # Principled BSDF
+            principled = nodes.new('ShaderNodeBsdfPrincipled')
+            principled.location = (1600, 100)
+            principled.inputs['Specular IOR Level'].default_value = 0
+            principled.inputs['Roughness'].default_value = 1.0
+            principled.inputs['Emission Strength'].default_value = 1.0
+            
+            links.new(color_attr.outputs['Color'], principled.inputs['Emission Color'])
+            links.new(clamp_alpha.outputs['Result'], principled.inputs['Alpha'])
+            
+            links.new(principled.outputs['BSDF'], output.inputs['Surface'])
     
     return mat
 

@@ -2,6 +2,11 @@ import bpy
 import math
 
 def create_cup_and_sphere():
+    # Ensure Object Mode and Frame 1
+    if bpy.context.object and bpy.context.object.mode != 'OBJECT':
+        bpy.ops.object.mode_set(mode='OBJECT')
+    bpy.context.scene.frame_set(1)
+
     # Clear existing objects
     bpy.ops.object.select_all(action='SELECT')
     bpy.ops.object.delete()
@@ -18,6 +23,7 @@ def create_cup_and_sphere():
     )
     cup = bpy.context.active_object
     cup.name = "Cup"
+    cup.location = (0, 0, 1.0)
     
     # Fill the bottom
     # Default cylinder local vertices z range is -1 to 1. 1 is top, -1 is bottom.
@@ -82,8 +88,8 @@ def create_cup_and_sphere():
     # Hide from render only
     controller.hide_render = True
 
-    # Animate Controller Location (Spiral Path without rotation)
-    # spiral parameters
+    # Animate Controller Location (Continuous Spiral Out)
+    # Radius grows linearly. Z goes Up then Down.
     total_frames = 250
     rotations = 3
     
@@ -91,29 +97,18 @@ def create_cup_and_sphere():
         t = (f - 1) / (total_frames - 1) # Normalized time 0 to 1
         angle = t * rotations * 2 * math.pi
         
-        # Calculate Radius (r) and Height (z) based on phase
-        # 1. Rising inside (0 to 0.4)
-        if t < 0.4:
-            phase_t = t / 0.4
-            r = 0.6 + 0.1 * phase_t # 0.6 -> 0.7
-            z = -0.8 + 2.0 * phase_t # -0.8 -> 1.2
-        # 2. Over the rim (0.4 to 0.6)
-        elif t < 0.6:
-            phase_t = (t - 0.4) / 0.2
-            r = 0.7 + 0.7 * phase_t # 0.7 -> 1.4
-            # Parabolic arc for Z
-            # Peak at 0.5 (midpoint)
-            # 1.2 -> 1.5 -> 1.4 roughly?
-            # Let's simple lerp 1.2 -> 1.5 -> 1.5
-            if phase_t < 0.5:
-                z = 1.2 + (1.5 - 1.2) * (phase_t * 2)
-            else:
-                z = 1.5
-        # 3. Down outside (0.6 to 1.0)
+        # Continuous Radius Growth (Center to Outside)
+        r = 0.1 + 1.5 * t  # 0.1 -> 1.6
+        
+        # Simple Z Phase: Up then Down
+        if t < 0.5:
+            # Phase 1: Up
+            phase_t = t / 0.5
+            z = 0.5 + 2.3 * phase_t # 0.5 -> 2.8
         else:
-            phase_t = (t - 0.6) / 0.4
-            r = 1.4 + 0.1 * phase_t # 1.4 -> 1.5
-            z = 1.5 - 2.3 * phase_t # 1.5 -> -0.8
+            # Phase 2: Down
+            phase_t = (t - 0.5) / 0.5
+            z = 2.8 - 2.3 * phase_t # 2.8 -> 0.5
             
         # Convert polar to cartesian
         x = r * math.cos(angle)

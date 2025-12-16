@@ -98,17 +98,12 @@ def create_cup_and_sphere():
         angle = t * rotations * 2 * math.pi
         
         # Continuous Radius Growth (Center to Outside)
-        r = 0.1 + 1.5 * t  # 0.1 -> 1.6
+        r = 0.0 + 1.5 * t  # 0.0 -> 1.5
         
-        # Simple Z Phase: Up then Down
-        if t < 0.5:
-            # Phase 1: Up
-            phase_t = t / 0.5
-            z = 0.5 + 2.3 * phase_t # 0.5 -> 2.8
-        else:
-            # Phase 2: Down
-            phase_t = (t - 0.5) / 0.5
-            z = 2.8 - 2.3 * phase_t # 2.8 -> 0.5
+        # Smooth Z Phase: Up then Down using a sine wave
+        z_min = 0.5
+        z_max = 2.8
+        z = z_min + (z_max - z_min) * math.sin(math.pi * t)
             
         # Convert polar to cartesian
         x = r * math.cos(angle)
@@ -121,52 +116,6 @@ def create_cup_and_sphere():
     bpy.context.scene.frame_start = 1
     bpy.context.scene.frame_end = total_frames
 
-    # Linear Interpolation
-    if controller.animation_data and controller.animation_data.action:
-        try:
-            for fcurve in controller.animation_data.action.fcurves:
-                for kf in fcurve.keyframe_points:
-                    kf.interpolation = 'LINEAR'
-        except AttributeError:
-             print("Warning: Could not set linear interpolation. Action object might not support .fcurves or API has changed.")
-
-    # --- 4. Rigid Body Setup ---
-    # Ensure Rigid Body World exists
-    if not bpy.context.scene.rigidbody_world:
-        bpy.ops.rigidbody.world_add()
-
-    # 4a. Cup: Passive, Mesh (accurate collision for hollow object)
-    bpy.ops.object.select_all(action='DESELECT')
-    cup.select_set(True)
-    bpy.context.view_layer.objects.active = cup
-    bpy.ops.rigidbody.object_add()
-    cup.rigid_body.type = 'PASSIVE'
-    cup.rigid_body.collision_shape = 'MESH'
-    cup.rigid_body.friction = 1.0 # High friction for rolling
-    cup.rigid_body.use_margin = True
-    cup.rigid_body.collision_margin = 0.005 # Small margin to avoid "plugging" the hole if it sees it as too thick
-
-    # 4b. Controller: Passive, Animated (It drives the motion)
-    bpy.ops.object.select_all(action='DESELECT')
-    controller.select_set(True)
-    bpy.context.view_layer.objects.active = controller
-    bpy.ops.rigidbody.object_add()
-    controller.rigid_body.type = 'PASSIVE'
-    controller.rigid_body.kinematic = True # 'Animated' check box
-    controller.rigid_body.collision_shape = 'BOX' # Explicit shape
-
-    # 4c. Sphere: Active, Sphere (Physical object)
-    # Use Kinematic (Animated) to follow controller precisely + Shrinkwrap
-    bpy.ops.object.select_all(action='DESELECT')
-    sphere.select_set(True)
-    bpy.context.view_layer.objects.active = sphere
-    bpy.ops.rigidbody.object_add()
-    sphere.rigid_body.type = 'ACTIVE'
-    sphere.rigid_body.collision_shape = 'SPHERE'
-    sphere.rigid_body.kinematic = True # drive by animation/constraint
-    sphere.rigid_body.friction = 1.0 
-    sphere.rigid_body.linear_damping = 0.5
-    sphere.rigid_body.angular_damping = 0.5
 
     # Parent Sphere to Controller to follow its orbit
     sphere.parent = controller
@@ -176,8 +125,9 @@ def create_cup_and_sphere():
     # Add Shrinkwrap to keep it on surface (trajectory Project)
     const = sphere.constraints.new(type='SHRINKWRAP')
     const.target = cup
-    const.shrinkwrap_type = 'NEAREST_SURFACE'
+    const.shrinkwrap_type = 'TARGET_PROJECT' # ('NEAREST_SURFACE', 'PROJECT', 'NEAREST_VERTEX', 'TARGET_PROJECT')
     const.distance = sphere_radius # Touch surface
+    
     
     print("Created Hollow Cup and Sphere. Kinematic Sphere + Shrinkwrap for controlled trajectory.")
 

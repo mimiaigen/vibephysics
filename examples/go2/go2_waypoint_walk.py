@@ -27,7 +27,7 @@ import argparse
 _root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
 sys.path.insert(0, os.path.join(_root, 'src'))
 
-from vibephysics.foundation import scene, physics, ground, materials, lighting, trajectory, go2
+from vibephysics.foundation import scene, physics, ground, water, objects, materials, lighting, trajectory, go2
 from vibephysics.annotation import AnnotationManager, viewport
 from vibephysics.camera import CameraManager
 from vibephysics.setup import save_blend
@@ -43,14 +43,18 @@ def parse_args():
     sim_group = parser.add_argument_group('Simulation Settings')
     sim_group.add_argument('--terrain-size', type=float, default=30.0,
                           help='Size of the ground area')
-    sim_group.add_argument('--terrain-strength', type=float, default=1.0,
+    sim_group.add_argument('--terrain-strength', type=float, default=1.5,
                           help='Strength of terrain unevenness (higher = more extreme)')
+    sim_group.add_argument('--puddle-depth', type=float, default=0.8,
+                          help='Depth of water puddles (higher = more water coverage)')
     sim_group.add_argument('--start-frame', type=int, default=1,
                           help='Animation start frame')
-    sim_group.add_argument('--end-frame', type=int, default=300,
+    sim_group.add_argument('--end-frame', type=int, default=150,
                           help='Animation end frame')
     sim_group.add_argument('--walk-speed', type=float, default=1.0,
                           help='Walking speed multiplier')
+    sim_group.add_argument('--num-spheres', type=int, default=100,
+                          help='Number of falling debris spheres')
     
     waypoint_group = parser.add_argument_group('Waypoint Settings')
     waypoint_group.add_argument('--waypoint-pattern', type=str, default='exploration',
@@ -98,7 +102,7 @@ def parse_args():
                                  help='Frame step for motion trail sampling')
     
     output_group = parser.add_argument_group('Output Settings')
-    output_group.add_argument('--output', type=str, default='go2_waypoint_walk.blend',
+    output_group.add_argument('--output', type=str, default='output/go2_waypoint_walk.blend',
                              help='Output blend file name')
     
     # Support both: python script.py --arg  AND  blender -P script.py -- --arg
@@ -117,8 +121,8 @@ def run_simulation_setup(args):
     print(f"   Pattern: {args.waypoint_pattern}")
     print(f"   Frames: {args.start_frame} - {args.end_frame}")
     
-    # USD path for Go2
-    usd_path = "/Users/shamangary/codeDemo/unitree_model/Go2/usd/go2.usd"
+    # Get USD path (auto-downloads if needed)
+    usd_path = go2.get_go2_usd_path()
     
     # 1. Universal scene initialization
     scene.init_simulation(
@@ -140,7 +144,37 @@ def run_simulation_setup(args):
     ground.apply_thickness(terrain, thickness=0.5, offset=-1.0)
     materials.create_mud_material(terrain)
     
-    # 3. Create waypoint pattern (from foundation.trajectory)
+    # 3. Water Surface (Puddles with Boolean cutting)
+    print("  - Creating water puddles...")
+    z_water_level = z_ground - (args.puddle_depth * 0.15)  # Adjust for water coverage
+    water_size = args.terrain_size * 0.95
+    
+    # Create cutter and water
+    ground_cutter = ground.create_ground_cutter(terrain, thickness=10.0, offset=-1.0)
+    water_visual = water.create_puddle_water(
+        z_level=z_water_level,
+        size=water_size,
+        ground_cutter_obj=ground_cutter
+    )
+    materials.create_water_material(water_visual, color=(0.3, 0.5, 0.6, 0.85))  # Blue-ish water
+    
+    # 3a. Add falling debris spheres
+    z_spawn = z_water_level + 3.0
+    positions = objects.generate_scattered_positions(
+        num_points=args.num_spheres,
+        spawn_radius=args.terrain_size / 3.0,
+        min_dist=0.8,
+        z_pos=z_spawn
+    )
+    debris_objects = objects.create_falling_spheres(
+        positions=positions,
+        radius_range=(0.15, 0.3),
+        physics={'mass': 0.3, 'friction': 0.7, 'restitution': 0.3},
+        num_total=args.num_spheres
+    )
+    print(f"  - Created {len(debris_objects)} falling spheres")
+    
+    # 4. Create waypoint pattern (from foundation.trajectory)
     waypoints = trajectory.create_waypoint_pattern(args.waypoint_pattern, args.waypoint_scale)
     
     print(f"\n  - Creating path through {len(waypoints)} waypoints...")
@@ -151,18 +185,18 @@ def run_simulation_setup(args):
         name="Go2WaypointPath"
     )
     
-    # 4. Load Go2
+    # 5. Load Go2
     print(f"  - Loading Go2 robot from {usd_path}...")
-    base_obj, robot_parts = go2.load_go2(usd_path)
+    base_obj, robot_parts, robot_meshes = go2.load_go2(usd_path)
     
     if not base_obj:
         print("❌ Failed to load Go2! Aborting.")
         return None
     
-    # 5. Rig Go2
+    # 6. Rig Go2
     armature = go2.rig_go2(base_obj)
     
-    # 6. Animate Go2 walking along waypoint path
+    # 7. Animate Go2 walking along waypoint path
     print(f"  - Animating Go2 walking...")
     go2.animate_go2_walking(
         armature=armature,
@@ -173,7 +207,20 @@ def run_simulation_setup(args):
         speed=args.walk_speed
     )
     
-    # 7. Annotation Setup using AnnotationManager
+    # 7a. Setup robot collision (kinematic - animated but can push objects)
+    # Use go2's dedicated collision setup that handles USD mesh hierarchy correctly
+    go2.setup_go2_collision(robot_meshes, kinematic=True, friction=0.8, restitution=0.1)
+    
+    # 7b. Water Interactions (dynamic paint ripples)
+    all_interactors = debris_objects + robot_meshes
+    water.setup_dynamic_paint_interaction(
+        water_visual,
+        all_interactors,
+        ripple_strength=2.0
+    )
+    print(f"  - Water interaction setup: {len(all_interactors)} objects")
+    
+    # 8. Annotation Setup using AnnotationManager
     if not args.no_annotations and robot_parts:
         print("\n📊 Setting up Annotations...")
         
@@ -201,7 +248,7 @@ def run_simulation_setup(args):
         mgr.finalize(setup_viewport=True)
         viewport.create_viewport_restore_script("AnnotationViz")
     
-    # 8. Lighting
+    # 9. Lighting
     lighting.setup_lighting(
         resolution_x=args.resolution_x,
         resolution_y=args.resolution_y,
@@ -211,12 +258,12 @@ def run_simulation_setup(args):
         enable_volumetric=False
     )
     
-    # 9. Camera Setup - Center, Following, and Mounted cameras
+    # 10. Camera Setup - Center, Following, and Mounted cameras
     print("\n📷 Setting up Camera Rigs...")
     
     cam_manager = CameraManager()
     
-    # 9a. Center pointing cameras - arranged in a circle, pointing at scene center
+    # 10a. Center pointing cameras - arranged in a circle, pointing at scene center
     center_rig = cam_manager.add_center_pointing(
         'center', 
         num_cameras=args.center_cameras, 
@@ -226,7 +273,7 @@ def run_simulation_setup(args):
     center_rig.create(target_location=(0, 0, 0))
     print(f"  - Center rig: {args.center_cameras} cameras at radius={args.camera_radius}, height={args.camera_height}")
     
-    # 9b. Following camera - follows robot from above
+    # 10b. Following camera - follows robot from above
     follow_rig = cam_manager.add_following(
         'following',
         height=args.camera_height,
@@ -235,7 +282,7 @@ def run_simulation_setup(args):
     follow_rig.create(target=armature)
     print(f"  - Following camera: height={args.camera_height}, look_angle=60°")
     
-    # 9c. Mounted cameras - attached to robot body (POV cameras)
+    # 10c. Mounted cameras - attached to robot body (POV cameras)
     mount_target = None
     search_name = args.mounted_mesh.lower()
     
@@ -273,7 +320,14 @@ def run_simulation_setup(args):
             rotation_offset=args.mounted_rotation
         )
         mounted_cams = mounted_rig.create(parent_object=mount_target, lens=20)
-        print(f"  - Mounted rig: {args.mounted_cameras} cameras on '{mount_target.name}' (lens=20, forward=+X)")
+        
+        # Add offset to mounted cameras (similar to robot_forest_walk.py)
+        for cam in mounted_cams:
+            cam.location.x -= 0.5  # back offset
+            cam.location.y -= 0.0  # right offset
+            cam.location.z -= 0.0  # down offset
+        
+        print(f"  - Mounted rig: {args.mounted_cameras} cameras on '{mount_target.name}' (lens=20, offset: back=0.2m, right=0.1m)")
     else:
         print("  - Mounted rig: Skipped (no suitable mesh part found)")
     
@@ -296,11 +350,16 @@ def run_simulation_setup(args):
             cam_manager.activate_rig('following', camera_index=0)
             print(f"  - Active camera: Following camera (default)")
     
+    # 11. Bake physics
+    print("\n  - Baking physics...")
+    physics.bake_all()
+    
     print("\n" + "=" * 60)
     print("✅ Go2 Waypoint Walk Complete!")
     print("=" * 60)
     print(f"   Waypoint pattern: {args.waypoint_pattern}")
     print(f"   Total waypoints: {len(waypoints)}")
+    print(f"   Debris spheres: {len(debris_objects)}")
     print(f"   Animation: {args.end_frame} frames")
     print(f"\n💡 Dual viewport setup: Left=Scene, Right=Annotations")
     
@@ -310,6 +369,11 @@ def run_simulation_setup(args):
 def main():
     args = parse_args()
     run_simulation_setup(args)
+    
+    # Create output directory if it doesn't exist
+    output_dir = os.path.dirname(args.output)
+    if output_dir:
+        os.makedirs(output_dir, exist_ok=True)
     
     # Save blend file
     save_blend(args.output)

@@ -8,10 +8,78 @@ Provides functionality to load, rig (USD to Armature), and animate the Go2.
 import bpy
 import math
 import os
+import subprocess
 from mathutils import Vector, Matrix, Euler
 from . import robot
 from . import trajectory
 
+try:
+    from tqdm import tqdm
+except ImportError:
+    # Fallback if tqdm not installed
+    def tqdm(iterable, **kwargs):
+        return iterable
+
+
+def get_go2_usd_path():
+    """
+    Get the path to the Go2 USD file.
+    If the unitree_model repository is not found, automatically clone it.
+    
+    The model is expected to be at: {vibephysics_parent}/unitree_model/Go2/usd/go2.usd
+    
+    Returns:
+        str: Path to the go2.usd file
+    """
+    # Get the vibephysics root directory (parent of src/vibephysics/foundation)
+    foundation_dir = os.path.dirname(os.path.abspath(__file__))
+    vibephysics_root = os.path.dirname(os.path.dirname(os.path.dirname(foundation_dir)))
+    
+    # unitree_model should be at the same level as vibephysics
+    parent_dir = os.path.dirname(vibephysics_root)
+    unitree_model_dir = os.path.join(parent_dir, "unitree_model")
+    usd_path = os.path.join(unitree_model_dir, "Go2", "usd", "go2.usd")
+    
+    # Check if the USD file exists
+    if os.path.exists(usd_path):
+        return usd_path
+    
+    # Check if unitree_model directory exists but USD is missing
+    if os.path.exists(unitree_model_dir):
+        raise FileNotFoundError(
+            f"unitree_model directory exists but Go2 USD not found at: {usd_path}\n"
+            f"Please check the repository structure."
+        )
+    
+    # Auto-download using git clone
+    print(f"  📥 Go2 model not found. Downloading from Hugging Face...")
+    print(f"     Target: {parent_dir}")
+    
+    try:
+        result = subprocess.run(
+            ["git", "clone", "https://huggingface.co/datasets/unitreerobotics/unitree_model"],
+            cwd=parent_dir,
+            capture_output=True,
+            text=True
+        )
+        
+        if result.returncode != 0:
+            raise RuntimeError(f"Git clone failed: {result.stderr}")
+        
+        print(f"  ✅ Successfully downloaded unitree_model")
+        
+        # Verify the file exists now
+        if os.path.exists(usd_path):
+            return usd_path
+        else:
+            raise FileNotFoundError(f"Downloaded but USD file not found at: {usd_path}")
+            
+    except FileNotFoundError:
+        raise RuntimeError(
+            "Git is not installed. Please install git and try again, or manually clone:\n"
+            f"  cd {parent_dir}\n"
+            "  git clone https://huggingface.co/datasets/unitreerobotics/unitree_model"
+        )
 
 def fix_robot_materials(mesh_objects):
     """
@@ -140,7 +208,7 @@ def load_go2(usd_path, transform=None):
         if obj.type == 'EMPTY':
             obj.empty_display_size = 0.0
 
-    return base_obj, robot_parts
+    return base_obj, robot_parts, robot_meshes
 
 def rig_go2(base_obj):
     """
@@ -282,7 +350,8 @@ def animate_go2_walking(armature, path_curve, ground_object,
     
     # Pre-calculate stride/step for consistency
     
-    for frame in range(start_frame, end_frame + 1):
+    total_frames = end_frame - start_frame + 1
+    for frame in tqdm(range(start_frame, end_frame + 1), desc="Animating Go2", total=total_frames):
         scene.frame_set(frame)
         
         # Calculate path position (center of robot projected on path)
@@ -448,3 +517,66 @@ def animate_go2_walking(armature, path_curve, ground_object,
     
     # Hide armature bones in viewport (after animation is complete)
     armature.hide_viewport = True
+
+
+def setup_go2_collision(robot_meshes, kinematic=True, friction=0.8, restitution=0.1):
+    """
+    Sets up collision physics for Go2 robot meshes.
+    
+    Only adds rigid body to meshes that are NOT parented to other meshes.
+    This avoids dependency cycles that break physics simulation.
+    
+    For kinematic mode, the mesh follows animation but can push active rigid bodies.
+    
+    Args:
+        robot_meshes: List of Go2 mesh objects from load_go2()
+        kinematic: If True, meshes follow animation but collide with active objects
+        friction: Collision friction coefficient
+        restitution: Bounciness coefficient
+    
+    Returns:
+        Number of meshes with collision added
+    """
+    print(f"  - Setting up Go2 collision physics ({len(robot_meshes)} meshes)...")
+    count = 0
+    skipped = 0
+    
+    # Create a set of mesh names for quick lookup
+    mesh_names = {m.name for m in robot_meshes if m and m.type == 'MESH'}
+    
+    for mesh in robot_meshes:
+        if not mesh or mesh.type != 'MESH':
+            continue
+        
+        # Skip meshes that are parented to other meshes in our list
+        # Only add rigid body to "root" meshes to avoid dependency cycles
+        parent = mesh.parent
+        if parent and parent.type == 'MESH' and parent.name in mesh_names:
+            skipped += 1
+            continue
+        
+        # Add rigid body
+        bpy.ops.object.select_all(action='DESELECT')
+        mesh.select_set(True)
+        bpy.context.view_layer.objects.active = mesh
+        
+        try:
+            if not mesh.rigid_body:
+                bpy.ops.rigidbody.object_add(type='ACTIVE')
+            
+            rb = mesh.rigid_body
+            rb.kinematic = kinematic
+            rb.collision_shape = 'CONVEX_HULL'
+            rb.friction = friction
+            rb.restitution = restitution
+            rb.collision_margin = 0.001
+            
+            count += 1
+        except Exception as e:
+            print(f"    Warning: Could not add rigid body to {mesh.name}: {e}")
+    
+    if skipped > 0:
+        print(f"    Added collision to {count} mesh parts (skipped {skipped} children)")
+    else:
+        print(f"    Added collision to {count} mesh parts")
+    return count

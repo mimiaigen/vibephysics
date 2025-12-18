@@ -39,7 +39,7 @@ def run_go2_simulation(usd_path, output_path):
     
     # 3. Load Go2
     # The user provided the path: /Users/shamangary/codeDemo/unitree_model/Go2/usd/go2.usd
-    base_obj, robot_parts = go2.load_go2(usd_path)
+    base_obj, robot_parts, robot_meshes = go2.load_go2(usd_path)
     
     if not base_obj:
         print("Failed to load Go2!")
@@ -89,7 +89,8 @@ def run_go2_simulation(usd_path, output_path):
     print(f"\n✅ Simulation saved to {output_path}")
 
 if __name__ == "__main__":
-    usd_path = "/Users/shamangary/codeDemo/unitree_model/Go2/usd/go2.usd"
+    # Get USD path (auto-downloads if needed)
+    usd_path = go2.get_go2_usd_path()
     output_path = "output/go2_walk.blend"
     
     # Create output dir

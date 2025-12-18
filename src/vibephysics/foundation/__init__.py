@@ -30,3 +30,4 @@ from . import lighting
 from . import trajectory
 from . import robot
 from . import open_duck
+from . import go2

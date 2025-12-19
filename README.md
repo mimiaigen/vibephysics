@@ -28,6 +28,12 @@
 
 *Water physics simulation with floating objects, buoyancy forces, dynamic ripples, and point cloud tracking.*
 
+## 🐕 Go2 Simulation Demo (`python examples/go2/go2_waypoint_walk.py`)
+
+![Go2 Demo](assets/go2_water_sphere_demo.gif)
+
+*Unitree Go2 robot walking through a physics-enabled environment with water puddles and falling debris.*
+
 ## ✨ Highlights
 
 - **🚀 No GPU Required** – Runs efficiently on CPU-only machines (MacBook Pro, laptops, standard workstations). GPU accelerates rendering but is not mandatory.

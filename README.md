@@ -31,7 +31,7 @@
 ## ✨ Highlights
 
 - **🚀 No GPU Required** – Runs efficiently on CPU-only machines (MacBook Pro, laptops, standard workstations). GPU accelerates rendering but is not mandatory.
-- **🤖 Robot Simulation** – Realistic IK-based walking animations with the Open Duck robot
+- **🤖 Robot Simulation** – Realistic IK-based walking animations with Open Duck and Unitree Go2 robots
 - **💧 Water Physics** – Dynamic water surfaces, puddles, ripples, and buoyancy simulation
 - **📊 Annotation Tools** – Bounding boxes, motion trails, and point cloud tracking for vision datasets
 - **🎯 Production Ready** – Clean API, modular architecture, and extensive examples
@@ -54,7 +54,8 @@ Perfect for researchers, animators, and robotics engineers who need physics simu
 > ⚠️ **Important**: This package requires Python 3.11. Python 3.12 and later versions are not compatible with the current version of bpy.
 
 ### Dependency
-We use the [Open Duck blender model](https://github.com/pollen-robotics/Open_Duck_Blender) as demo purpose. We do not own the model. Please refer to the original github repo.
+- **Open Duck**: We use the [Open Duck blender model](https://github.com/pollen-robotics/Open_Duck_Blender) as demo. We do not own the model. Please refer to the original github repo.
+- **Unitree Go2**: We use the [Unitree Go2 USD model](https://huggingface.co/datasets/unitreerobotics/unitree_model). The model is auto-downloaded when running Go2 examples. We do not own the model.
 
 ## Installation
 
@@ -82,13 +83,19 @@ pip install -e .
 # Run basic annotation demos (bbox, motion trail, point tracking, frustum culling)
 sh ./run_basics.sh
 
-# Run robot simulation (with mounted POV camera by default)
+# Run Open Duck robot simulation (with mounted POV camera by default)
 sh ./run_robot.sh
 
 # Run robot simulation with different camera views
 sh ./run_robot.sh mounted    # First-person POV (default)
 sh ./run_robot.sh center     # Overview from multiple angles
 sh ./run_robot.sh following  # Third-person tracking shot
+
+# Run Unitree Go2 robot simulation (auto-downloads model on first run)
+python examples/go2/go2_waypoint_walk.py
+
+# Go2 with custom settings
+python examples/go2/go2_waypoint_walk.py --end-frame 150 --num-spheres 50
 
 # Run forest walk simulation (robot walking through dense forest)
 sh ./run_forest.sh

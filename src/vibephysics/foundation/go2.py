@@ -355,7 +355,9 @@ def animate_go2_walking(armature, path_curve, ground_object,
         scene.frame_set(frame)
         
         # Calculate path position (center of robot projected on path)
-        t = (frame - start_frame) / (end_frame - start_frame)
+        # Safeguard against division by zero
+        frame_range = max(1, end_frame - start_frame)
+        t = (frame - start_frame) / frame_range
         t = min(t, 0.9999)
         
         path_pos_world, tangent_world = trajectory.evaluate_curve_at_t(path_curve, t)

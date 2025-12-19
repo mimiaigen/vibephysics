@@ -10,15 +10,20 @@ def setup_rigid_body_world(substeps=60, solver_iters=60):
     - Sets high substeps (60) to prevent 'tunneling' and 'explosion' of light objects (0.001kg).
     - Solver iterations (60) ensures contact stability.
     """
-    if not bpy.context.scene.rigidbody_world:
+    scene = bpy.context.scene
+    
+    if not scene.rigidbody_world:
         bpy.ops.rigidbody.world_add()
     
-    world = bpy.context.scene.rigidbody_world
+    world = scene.rigidbody_world
     world.substeps_per_frame = substeps
     world.solver_iterations = solver_iters
     
+    # Setup cache with proper frame range
     if world.point_cache:
         world.point_cache.use_disk_cache = False
+        world.point_cache.frame_start = scene.frame_start
+        world.point_cache.frame_end = scene.frame_end
 
 def create_buoyancy_field(z_bottom, z_surface, strength, flow=0.5, spawn_radius=2.0, hide=True):
     """
@@ -91,5 +96,12 @@ def setup_ground_physics(ground_object, friction=0.9, restitution=0.1):
         print(f"Physics setup warning: {e}")
 
 def bake_all():
-    """Bake all physics caches (rigid body, dynamic paint, etc.)."""
+    """Bake all physics caches (rigid body, dynamic paint, etc.).
+    
+    Frees existing caches first to ensure a fresh simulation.
+    """
+    # Free all existing caches first to ensure clean bake
+    bpy.ops.ptcache.free_bake_all()
+    
+    # Now bake fresh
     bpy.ops.ptcache.bake_all(bake=True)

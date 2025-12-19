@@ -49,7 +49,7 @@ def parse_args():
                           help='Depth of water puddles (higher = more water coverage)')
     sim_group.add_argument('--start-frame', type=int, default=1,
                           help='Animation start frame')
-    sim_group.add_argument('--end-frame', type=int, default=150,
+    sim_group.add_argument('--end-frame', type=int, default=250,
                           help='Animation end frame')
     sim_group.add_argument('--walk-speed', type=float, default=1.0,
                           help='Walking speed multiplier')

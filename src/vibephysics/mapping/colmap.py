@@ -92,9 +92,8 @@ def colmap_pipeline(
     """
     Run the complete COLMAP SfM pipeline: Extraction/Matching + Incremental Mapping.
     """
-    try:
-        import pycolmap
-    except ImportError:
+    import importlib.util
+    if importlib.util.find_spec("pycolmap") is None:
         print("\n[ERROR] 'pycolmap' is not installed.")
         print("Please install mapping tools with: pip install vibephysics[mapping]")
         return 1

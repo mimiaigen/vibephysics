@@ -47,11 +47,12 @@ def glomap_pipeline(
     """
     Run the complete GLOMAP SfM pipeline: COLMAP Extraction/Matching + GLOMAP Global Mapping.
     """
-    try:
-        import pyglomap
-        import pycolmap
-    except ImportError as e:
-        missing = "pyglomap" if "pyglomap" in str(e) else "pycolmap"
+    import importlib.util
+    pyglomap_spec = importlib.util.find_spec("pyglomap")
+    pycolmap_spec = importlib.util.find_spec("pycolmap")
+
+    if pyglomap_spec is None or pycolmap_spec is None:
+        missing = "pyglomap" if pyglomap_spec is None else "pycolmap"
         print(f"\n[vibephysics] '{missing}' is not installed.")
         
         if missing == "pyglomap":

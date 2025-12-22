@@ -67,36 +67,15 @@ Perfect for researchers, animators, and robotics engineers who need physics simu
 ## ⚙️ Installation
 
 ```bash
-# Create and activate environment
+# 1. Create environment
 conda create -n vibephysics python=3.11
 conda activate vibephysics
 
-# Install vibephysics
+# 2. Install core package (includes COLMAP mapping & Blender simulation)
 pip install vibephysics
 
-# Or install from source
-git clone https://github.com/mimiaigen/vibephysics
-cd vibephysics
-pip install -e .
-```
-
-### 🗺️ (Optional) Mapping & Reconstruction
-To use the built-in SfM pipelines:
-
-1. **Incremental COLMAP**: Install the mapping extra:
-   ```bash
-   pip install "vibephysics[mapping]"
-   ```
-
-2. **Global GLOMAP**: Just run your first mapping task! `vibephysics` will automatically offer to install the optimized GLOMAP backend from GitHub. 
-   *(Note: This requires a one-time C++ build which takes a few minutes).*
-
-### Requirements for Simulations
-If you intend to run physics simulations, you also need to install Blender's Python module:
-
-```bash
-# Install Blender module
-pip install bpy
+# 3. (Optional) Install GLOMAP backend
+pip install git+https://github.com/shamangary/glomap.git
 ```
 
 ## Quick Start

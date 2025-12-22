@@ -15,6 +15,32 @@ conda activate vibephysics
 pip install vibephysics
 
 # 3. (Optional) Install GLOMAP backend
+# Linux users: refer to "Linux System Dependencies" below first
+pip install git+https://github.com/shamangary/glomap.git
+
+## 🐧 Linux (Ubuntu) System Dependencies
+If you are on Linux and want to use the **GLOMAP** or **COLMAP** backends, you must install the following C++ development libraries to enable successful compilation:
+
+```bash
+sudo apt-get update
+sudo apt-get install -y \
+    libeigen3-dev \
+    libceres-dev \
+    libgoogle-glog-dev \
+    libboost-all-dev \
+    libsuitesparse-dev \
+    libsqlite3-dev \
+    libgflags-dev \
+    libfreeimage-dev \
+    libmetis-dev
+```
+
+## ⚠️ Troubleshooting (Linker Errors)
+If you are using **Anaconda** on Linux and see an error like `relocation R_X86_64_TPOFF32 ... can not be used when making a shared object`, it is due to a conflict with the Anaconda linker. Fix it by forcing the compiler to use the global-dynamic TLS model:
+
+```bash
+export CXXFLAGS="$CXXFLAGS -fPIC -ftls-model=global-dynamic"
+export CFLAGS="$CFLAGS -fPIC"
 pip install git+https://github.com/shamangary/glomap.git
 ```
 

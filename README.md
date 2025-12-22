@@ -64,26 +64,39 @@ Perfect for researchers, animators, and robotics engineers who need physics simu
 - **Open Duck**: We use the [Open Duck blender model](https://github.com/pollen-robotics/Open_Duck_Blender) as demo. We do not own the model. Please refer to the original github repo.
 - **Unitree Go2**: We use the [Unitree Go2 USD model](https://huggingface.co/datasets/unitreerobotics/unitree_model). The model is auto-downloaded when running Go2 examples. We do not own the model.
 
-## Installation
+## ⚙️ Installation
 
 ```bash
-# Create conda environment with Python 3.11
+# Create and activate environment
 conda create -n vibephysics python=3.11
 conda activate vibephysics
 
-# Install vibephysics (includes tqdm, numpy, pycolmap, and pyglomap)
+# Install vibephysics
 pip install vibephysics
 
-# Install bpy (Blender as Python module) for simulations
-pip install bpy
-
-# Or install everything together
-pip install vibephysics[blender]
-
-# Or install from source (automatically clones & builds GLOMAP fork)
+# Or install from source
 git clone https://github.com/mimiaigen/vibephysics
 cd vibephysics
 pip install -e .
+```
+
+### 🗺️ (Optional) Mapping & Reconstruction
+To use the built-in SfM pipelines:
+
+1. **Incremental COLMAP**: Install the mapping extra:
+   ```bash
+   pip install "vibephysics[mapping]"
+   ```
+
+2. **Global GLOMAP**: Just run your first mapping task! `vibephysics` will automatically offer to install the optimized GLOMAP backend from GitHub. 
+   *(Note: This requires a one-time C++ build which takes a few minutes).*
+
+### Requirements for Simulations
+If you intend to run physics simulations, you also need to install Blender's Python module:
+
+```bash
+# Install Blender module
+pip install bpy
 ```
 
 ## Quick Start

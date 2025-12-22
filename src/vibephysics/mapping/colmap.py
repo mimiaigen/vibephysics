@@ -92,6 +92,13 @@ def colmap_pipeline(
     """
     Run the complete COLMAP SfM pipeline: Extraction/Matching + Incremental Mapping.
     """
+    try:
+        import pycolmap
+    except ImportError:
+        print("\n[ERROR] 'pycolmap' is not installed.")
+        print("Please install mapping tools with: pip install vibephysics[mapping]")
+        return 1
+
     image_path = Path(image_path).absolute()
     output_path = prepare_output_directory(image_path, output_path, engine="colmap", verbose=verbose)
     sparse_path = output_path / "sparse"

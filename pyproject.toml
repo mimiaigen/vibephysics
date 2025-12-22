@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "vibephysics"
-version = "0.1.11"
+version = "0.2.0"
 description = "Physics simulation and annotation tools for Blender"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -35,11 +35,12 @@ classifiers = [
 dependencies = [
     "tqdm>=4.0",
     "numpy<2.0",
-    "pycolmap",
-    "pyglomap @ git+https://github.com/shamangary/glomap.git",
 ]
 
 [project.optional-dependencies]
+mapping = [
+    "pycolmap",
+]
 dev = [
     "pytest>=7.0",
     "black",

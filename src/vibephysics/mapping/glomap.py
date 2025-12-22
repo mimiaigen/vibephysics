@@ -49,9 +49,33 @@ def glomap_pipeline(
     """
     try:
         import pyglomap
-    except ImportError:
-        print("\n[ERROR] 'pyglomap' is not installed.")
-        return 1
+        import pycolmap
+    except ImportError as e:
+        missing = "pyglomap" if "pyglomap" in str(e) else "pycolmap"
+        print(f"\n[vibephysics] '{missing}' is not installed.")
+        
+        if missing == "pyglomap":
+            print("To use GLOMAP, we need to install the backend from GitHub.")
+            print("Choice: [1] Install now (Default) [2] Cancel")
+            choice = input("Select an option (1/2): ").strip() or "1"
+            
+            if choice == "1":
+                import subprocess
+                cmd = [sys.executable, "-m", "pip", "install", "git+https://github.com/shamangary/glomap.git"]
+                print(f"Running: {' '.join(cmd)}")
+                try:
+                    subprocess.check_call(cmd)
+                    print("\n[SUCCESS] pyglomap installed! Please restart your script.")
+                    return 0
+                except Exception as ex:
+                    print(f"\n[ERROR] Installation failed: {ex}")
+                    return 1
+            else:
+                print("Installation cancelled.")
+                return 1
+        else:
+            print("Please install pycolmap: pip install pycolmap")
+            return 1
 
     image_path = Path(image_path).absolute()
     output_path = prepare_output_directory(image_path, output_path, engine="glomap", verbose=verbose)

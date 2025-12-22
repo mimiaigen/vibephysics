@@ -7,7 +7,7 @@ from .utils import prepare_output_directory
 def run_colmap_stage(
     image_path: Path, 
     database_path: Path, 
-    camera_model: str = "SIMPLE_RADIAL", 
+    camera_model: str = "PINHOLE", 
     matcher: str = "exhaustive", 
     verbose: bool = True
 ) -> int:
@@ -86,7 +86,7 @@ def colmap_pipeline(
     output_path: str | Path | None = None,
     database_path: str | Path | None = None,
     matcher: str = "exhaustive",
-    camera_model: str = "SIMPLE_RADIAL",
+    camera_model: str = "PINHOLE",
     verbose: bool = True
 ) -> int:
     """

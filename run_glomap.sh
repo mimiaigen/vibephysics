@@ -3,7 +3,7 @@
 # Default values
 ENGINE="glomap"
 MATCHER="exhaustive"
-CAMERA_MODEL="SIMPLE_RADIAL"
+CAMERA_MODEL="PINHOLE"
 
 # Function to show usage
 usage() {

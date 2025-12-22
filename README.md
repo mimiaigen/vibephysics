@@ -264,7 +264,7 @@ VibePhysics integrates high-performance Structure-from-Motion (SfM) engines to c
 from vibephysics import mapping
 
 # 1. Simple Usage (Only image_path is REQUIRED)
-# Defaults: glomap engine, exhaustive matcher, SIMPLE_RADIAL camera
+# Defaults: glomap engine, exhaustive matcher, PINHOLE camera
 mapping.glomap_pipeline(image_path="path/to/images")
 
 # 2. COLMAP Incremental Pipeline
@@ -276,7 +276,7 @@ mapping.glomap_pipeline(
     output_path="output/dir",             # Optional: Defaults to image_path/../mapping_output/
     database_path="path/to/database.db",  # Optional: Defaults to output_path/sparse/database.db
     matcher="exhaustive",                 # Optional: "exhaustive" (default) or "sequential"
-    camera_model="SIMPLE_RADIAL",         # Optional: "PINHOLE", "SIMPLE_RADIAL" (default), "OPENCV", etc.
+    camera_model="PINHOLE",               # Optional: "PINHOLE" (default), "SIMPLE_RADIAL", "OPENCV", etc.
     verbose=True                          # Optional: Set to False to suppress logs
 )
 ```
@@ -287,7 +287,27 @@ mapping.glomap_pipeline(
 | **`output_path`** | No | `mapping_output/` | Directory for results. Creates `sparse/0` and symlinked `images/`. |
 | **`database_path`** | No | `database.db` | Optional path to an existing COLMAP database. |
 | **`matcher`** | No | `exhaustive` | Matching algorithm: `exhaustive` or `sequential`. |
-| **`camera_model`** | No | `SIMPLE_RADIAL` | COLMAP camera model (e.g., `PINHOLE`, `OPENCV`). |
+| **`camera_model`** | No | `PINHOLE` | COLMAP camera model (e.g., `PINHOLE`, `OPENCV`). |
+
+### 🎨 Visualization in Blender
+
+You can load your Colmap/GLOMAP reconstruction directly into Blender for inspection, featuring colored point clouds with high-visibility Geometry Node spheres and correct camera poses.
+
+```python
+from vibephysics import mapping
+
+# Load a sparse model folder (containing cameras.bin, points3D.bin etc.)
+mapping.load_colmap_reconstruction(
+    input_path="output/mapping_output/sparse/0",
+    point_size=0.01  # Adjust point blob size for visibility
+)
+```
+
+**Run the Demo:**
+```bash
+# Visualize an existing reconstruction
+python examples/colmap_format/demo_glomap.py --sparse /path/to/sparse/0 --point-size 0.02
+```
 
 ## Gaussian Splatting (3DGS) (BETA)
 

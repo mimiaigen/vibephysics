@@ -41,7 +41,7 @@ def glomap_pipeline(
     output_path: str | Path | None = None,
     database_path: str | Path | None = None,
     matcher: str = "exhaustive",
-    camera_model: str = "SIMPLE_RADIAL",
+    camera_model: str = "PINHOLE",
     verbose: bool = True
 ) -> int:
     """

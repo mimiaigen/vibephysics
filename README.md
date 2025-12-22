@@ -41,6 +41,7 @@
 - **💧 Water Physics** – Dynamic water surfaces, puddles, ripples, and buoyancy simulation
 - **📊 Annotation Tools** – Bounding boxes, motion trails, and point cloud tracking for vision datasets
 - **🎯 Production Ready** – Clean API, modular architecture, and extensive examples
+- **🗺️ SfM Mapping** – Integrated COLMAP and GLOMAP pipelines for high-speed 3D reconstruction
 - **🔧 Developer Friendly** – Pure Python, works with Blender as a module (bpy), no GUI needed
 
 Perfect for researchers, animators, and robotics engineers who need physics simulations without expensive GPU hardware.
@@ -70,7 +71,7 @@ Perfect for researchers, animators, and robotics engineers who need physics simu
 conda create -n vibephysics python=3.11
 conda activate vibephysics
 
-# Install vibephysics (includes tqdm, numpy<2.0)
+# Install vibephysics (includes tqdm, numpy, pycolmap, and pyglomap)
 pip install vibephysics
 
 # Install bpy (Blender as Python module) for simulations
@@ -79,7 +80,9 @@ pip install bpy
 # Or install everything together
 pip install vibephysics[blender]
 
-# Or install from source
+# Or install from source (automatically clones & builds GLOMAP fork)
+git clone https://github.com/mimiaigen/vibephysics
+cd vibephysics
 pip install -e .
 ```
 
@@ -241,6 +244,58 @@ exporter.export_fbx('output.fbx', selected_only=True)
 | DAE (Collada) | STL |
 | USD/USDA/USDC | USD |
 | Blend (append) | |
+
+## 🗺️ Mapping & Reconstruction
+
+VibePhysics integrates high-performance Structure-from-Motion (SfM) engines to convert image sequences into 3D reconstructions.
+
+- **GLOMAP Engine** – Global SfM that is 1-2 orders of magnitude faster than traditional methods.
+- **COLMAP Engine** – Industry-standard incremental SfM for robust reconstruction.
+- **GSplat Ready** – Automatically generates standard output structures (`sparse/0` and `images/` symlink) ready for instant GSplat training.
+
+### 💻 Usage (Command Line)
+
+```bash
+# Run GLOMAP pipeline (Fastest - Default)
+./run_glomap.sh --image_path path/to/images
+
+# Run COLMAP pipeline (Most Robust)
+./run_glomap.sh --image_path path/to/images --engine colmap
+
+# Advanced options
+./run_glomap.sh --image_path path/to/images --matcher sequential --camera_model PINHOLE
+```
+
+### 🐍 Usage (Python API)
+
+```python
+from vibephysics import mapping
+
+# 1. Simple Usage (Only image_path is REQUIRED)
+# Defaults: glomap engine, exhaustive matcher, SIMPLE_RADIAL camera
+mapping.glomap_pipeline(image_path="path/to/images")
+
+# 2. COLMAP Incremental Pipeline
+mapping.colmap_pipeline(image_path="path/to/images")
+
+# 3. Full Configuration (All parameters except image_path are OPTIONAL)
+mapping.glomap_pipeline(
+    image_path="path/to/images",          # REQUIRED
+    output_path="output/dir",             # Optional: Defaults to image_path/../mapping_output/
+    database_path="path/to/database.db",  # Optional: Defaults to output_path/sparse/database.db
+    matcher="exhaustive",                 # Optional: "exhaustive" (default) or "sequential"
+    camera_model="SIMPLE_RADIAL",         # Optional: "PINHOLE", "SIMPLE_RADIAL" (default), "OPENCV", etc.
+    verbose=True                          # Optional: Set to False to suppress logs
+)
+```
+
+| Parameter | Required | Default | Description |
+|-----------|----------|---------|-------------|
+| **`image_path`** | **Yes** | - | Path to the folder containing raw images. |
+| **`output_path`** | No | `mapping_output/` | Directory for results. Creates `sparse/0` and symlinked `images/`. |
+| **`database_path`** | No | `database.db` | Optional path to an existing COLMAP database. |
+| **`matcher`** | No | `exhaustive` | Matching algorithm: `exhaustive` or `sequential`. |
+| **`camera_model`** | No | `SIMPLE_RADIAL` | COLMAP camera model (e.g., `PINHOLE`, `OPENCV`). |
 
 ## Gaussian Splatting (3DGS) (BETA)
 

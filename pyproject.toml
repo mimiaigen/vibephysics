@@ -33,9 +33,10 @@ classifiers = [
 
 # Core dependencies
 dependencies = [
-    "bpy>=5.0",
     "tqdm>=4.0",
     "numpy<2.0",
+    "pycolmap",
+    "pyglomap @ git+https://github.com/shamangary/glomap.git",
 ]
 
 [project.optional-dependencies]

@@ -42,3 +42,6 @@ output/
 
 # Video
 *.mov
+
+# Virtual environments
+*venv*

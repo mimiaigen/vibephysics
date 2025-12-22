@@ -19,34 +19,39 @@ Note: This package requires Blender 5.0's Python environment (bpy) for simulatio
 __version__ = "0.1.11"
 __author__ = "Tsun-Yi Yang"
 
-# Import subpackages for convenient access
-from . import setup
-from . import foundation
-from . import annotation
+# Core modules (non-Blender)
+from . import mapping
 
-# Quick access to commonly used classes
-from .annotation import AnnotationManager, quick_annotate
-
-# Scene setup
-from .setup import init_simulation, setup_dual_viewport, clear_scene
-
-# Asset import/export (smart functions that auto-detect format)
-from .setup import load_asset, save_blend
+# Blender-dependent modules
+try:
+    import bpy
+    from . import setup
+    from . import foundation
+    from . import annotation
+    from .annotation import AnnotationManager, quick_annotate
+    from .setup import init_simulation, setup_dual_viewport, clear_scene, load_asset, save_blend
+    HAS_BPY = True
+except ImportError:
+    HAS_BPY = False
+    setup = None
+    foundation = None
+    annotation = None
 
 __all__ = [
     "__version__",
-    # Modules
-    "setup",
-    "foundation",
-    "annotation",
-    # Annotation
-    "AnnotationManager",
-    "quick_annotate",
-    # Scene setup
-    "init_simulation",
-    "setup_dual_viewport",
-    "clear_scene",
-    # Import/Export (auto-detect format)
-    "load_asset",
-    "save_blend",
+    "mapping",
 ]
+
+if HAS_BPY:
+    __all__ += [
+        "setup",
+        "foundation",
+        "annotation",
+        "AnnotationManager",
+        "quick_annotate",
+        "init_simulation",
+        "setup_dual_viewport",
+        "clear_scene",
+        "load_asset",
+        "save_blend",
+    ]

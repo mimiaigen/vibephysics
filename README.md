@@ -4,6 +4,20 @@
 
 **A lightweight Blender physics simulation framework for creating realistic robot animations, rigid body physics, water dynamics, and comprehensive annotation tools — all running efficiently on CPU.**
 
+## ⚙️ Installation
+
+```bash
+# 1. Create environment
+conda create -n vibephysics python=3.11
+conda activate vibephysics
+
+# 2. Install core package (includes COLMAP mapping & Blender simulation)
+pip install vibephysics
+
+# 3. (Optional) Install GLOMAP backend
+pip install git+https://github.com/shamangary/glomap.git
+```
+
 ## 🎬 Example Results (`sh run_robot.sh`)
 
 ![Result Demo](assets/result_demo.gif)
@@ -63,20 +77,6 @@ Perfect for researchers, animators, and robotics engineers who need physics simu
 ### Dependency
 - **Open Duck**: We use the [Open Duck blender model](https://github.com/pollen-robotics/Open_Duck_Blender) as demo. We do not own the model. Please refer to the original github repo.
 - **Unitree Go2**: We use the [Unitree Go2 USD model](https://huggingface.co/datasets/unitreerobotics/unitree_model). The model is auto-downloaded when running Go2 examples. We do not own the model.
-
-## ⚙️ Installation
-
-```bash
-# 1. Create environment
-conda create -n vibephysics python=3.11
-conda activate vibephysics
-
-# 2. Install core package (includes COLMAP mapping & Blender simulation)
-pip install vibephysics
-
-# 3. (Optional) Install GLOMAP backend
-pip install git+https://github.com/shamangary/glomap.git
-```
 
 ## Quick Start
 

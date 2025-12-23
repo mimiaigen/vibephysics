@@ -1,9 +1,9 @@
 #!/bin/bash
 
 # Default values
-SPARSE_PATH="/Users/shamangary/codeDemo/data/da3/output/mapping_output/glomap_20251223_120214_fps2/sparse/0"
+SPARSE_PATH="<your_folder>/mapping_output/glomap_20251223_120214/sparse/0"
 POINT_SIZE=0.03
-OUTPUT_PATH="/Users/shamangary/codeDemo/data/da3/output/mapping_output/glomap_20251223_120214_fps2/visualize_color.blend"
+OUTPUT_PATH="<your_folder>/mapping_output/glomap_20251223_120214/visualize_color.blend"
 ROTATION="-90 0 0"
 
 # Function to show usage

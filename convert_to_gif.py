@@ -68,7 +68,7 @@ def main():
     parser.add_argument('input', help='Input video file (e.g., video.mov)')
     parser.add_argument('output', nargs='?', default=None, help='Output GIF file')
     parser.add_argument('--fps', type=int, default=10, help='Frames per second (default: 15)')
-    parser.add_argument('--width', type=int, default=None, help='Width in pixels (default: original size)')
+    parser.add_argument('--width', type=int, default=2048, help='Width in pixels (default: original size)')
     
     args = parser.parse_args()
     

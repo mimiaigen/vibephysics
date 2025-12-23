@@ -49,6 +49,8 @@ pip install git+https://github.com/shamangary/glomap.git
 
 VibePhysics integrates high-performance Structure-from-Motion (SfM) engines to convert image sequences into 3D reconstructions.
 
+![GLOMAP Demo](assets/glomap_pointcloud_demo.gif)
+
 - **GLOMAP Engine** – Global SfM that is 1-2 orders of magnitude faster than traditional methods.
 - **COLMAP Engine** – Industry-standard incremental SfM for robust reconstruction.
 - **GSplat Ready** – Automatically generates standard output structures (`sparse/0` and `images/` symlink) ready for instant GSplat training.

@@ -66,7 +66,7 @@ if __name__ == "__main__":
     parser.add_argument("video_path", type=str, help="Path to the input video file (mp4, mov, etc.)")
     parser.add_argument("--output", "-o", type=str, help="Output directory (default: ./output/<video_name>)")
     parser.add_argument("--quality", "-q", type=int, default=2, help="JPEG quality (1-31, default: 2)")
-    parser.add_argument("--fps", "-f", type=float, default=5, help="Target frames per second (e.g., 1, 10, 24)")
+    parser.add_argument("--fps", "-f", type=float, default=2, help="Target frames per second (e.g., 1, 10, 24)")
     
     args = parser.parse_args()
     

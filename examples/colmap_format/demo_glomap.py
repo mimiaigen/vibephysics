@@ -38,6 +38,7 @@ def main():
     parser.add_argument("--sparse", type=str, help="Direct path to sparse model folder (containing cameras.bin)")
     parser.add_argument("--point-size", type=float, default=0.01, help="Size of points in the reconstruction")
     parser.add_argument("--camera-model", type=str, default="PINHOLE", help="Camera model for reconstruction (e.g. PINHOLE, SIMPLE_RADIAL)")
+    parser.add_argument("--rotation", type=float, nargs=3, default=[0, 0, 0], help="Global rotation in degrees (Euler XYZ)")
     
     args = parser.parse_args(argv)
 
@@ -94,7 +95,7 @@ def main():
     print(f"Visualizing model from {sparse_path}...")
     reset_scene()
     
-    mapping.load_colmap_reconstruction(str(sparse_path), collection_name="GLOMAP_Result", point_size=args.point_size)
+    mapping.load_colmap_reconstruction(str(sparse_path), collection_name="GLOMAP_Result", point_size=args.point_size, rotation=args.rotation)
     
     # 4. Save
     save_path = Path(args.save_blend)

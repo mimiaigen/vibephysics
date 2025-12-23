@@ -91,7 +91,7 @@ def create_camera_object(image, camera, collection, scale=0.1):
     
     return cam_obj
 
-def create_point_cloud(points3D, collection, name="PointCloud", point_size=0.01):
+def create_point_cloud(points3D, collection, name="PointCloud", point_size=0.03):
     """
     Create a point cloud visualization using a mesh with vertices and colors.
     Uses Geometry Nodes to make points visible as spheres.
@@ -118,9 +118,10 @@ def create_point_cloud(points3D, collection, name="PointCloud", point_size=0.01)
     
     # Add colors as a generic attribute
     if rgb:
-        # For Blender 3.6/4.0+
-        color_attr = mesh.attributes.new(name="Color", type='FLOAT_COLOR', domain='POINT')
-        color_attr.data.foreach_set("color", [c for color in rgb for c in (*color, 1.0)]) # RGBA
+        # Check Blender version for attribute creation
+        if hasattr(mesh.attributes, "new"):
+            color_attr = mesh.attributes.new(name="Color", type='FLOAT_COLOR', domain='POINT')
+            color_attr.data.foreach_set("color", [c for color in rgb for c in (*color, 1.0)]) # RGBA
     
     # Simple Geometry Nodes setup to render points as spheres
     modifier = obj.modifiers.new(name="PointVisualizer", type='NODES')
@@ -151,7 +152,6 @@ def create_point_cloud(points3D, collection, name="PointCloud", point_size=0.01)
     node_out = nodes.new('NodeGroupOutput')
     
     # Point to Volume / Instances
-    # Let's use Mesh to Points then Instances
     node_m2p = nodes.new('GeometryNodeMeshToPoints')
     node_inst = nodes.new('GeometryNodeInstanceOnPoints')
     node_sph = nodes.new('GeometryNodeMeshIcoSphere')
@@ -164,7 +164,7 @@ def create_point_cloud(points3D, collection, name="PointCloud", point_size=0.01)
     # Material
     node_mat = nodes.new('GeometryNodeSetMaterial')
     
-    # ... material setup same as before
+    # Material setup
     mat_name = "PointCloudMaterial"
     if mat_name not in bpy.data.materials:
         mat = bpy.data.materials.new(name=mat_name)
@@ -178,11 +178,18 @@ def create_point_cloud(points3D, collection, name="PointCloud", point_size=0.01)
         # Use Attribute node to get the vertex color
         node_attr = nodes_mat.new('ShaderNodeAttribute')
         node_attr.attribute_name = "Color"
+        node_attr.attribute_type = 'GEOMETRY'
         
         links_mat.new(node_attr.outputs['Color'], node_principled.inputs['Base Color'])
         links_mat.new(node_principled.outputs['BSDF'], node_out_mat.inputs['Surface'])
+    else:
+        mat = bpy.data.materials[mat_name]
         
-    node_mat.inputs['Material'].default_value = bpy.data.materials[mat_name]
+    # Assign material to object slots (important for some Blender versions to see attributes)
+    if mat.name not in obj.data.materials:
+        obj.data.materials.append(mat)
+        
+    node_mat.inputs['Material'].default_value = mat
     
     # Link nodes
     links.new(node_in.outputs[0], node_m2p.inputs['Mesh'])
@@ -195,11 +202,12 @@ def create_point_cloud(points3D, collection, name="PointCloud", point_size=0.01)
     modifier.node_group = node_tree
     
     # Attempt to set viewport shading to MATERIAL for better UX
-    for area in bpy.context.screen.areas:
-        if area.type == 'VIEW_3D':
-            for space in area.spaces:
-                if space.type == 'VIEW_3D':
-                    space.shading.type = 'MATERIAL'
+    if bpy.context.screen:
+        for area in bpy.context.screen.areas:
+            if area.type == 'VIEW_3D':
+                for space in area.spaces:
+                    if space.type == 'VIEW_3D':
+                        space.shading.type = 'MATERIAL'
     
     return obj
 
@@ -209,7 +217,8 @@ def load_colmap_reconstruction(
     import_cameras: bool = True,
     import_points: bool = True,
     camera_scale: float = 0.1,
-    point_size: float = 0.01
+    point_size: float = 0.03,
+    rotation: tuple = (-90, 0, 0) # Global rotation in degrees (Euler XYZ)
 ):
     """
     Load Colmap reconstruction output (sparse folder) into Blender.
@@ -229,16 +238,37 @@ def load_colmap_reconstruction(
         col = bpy.data.collections.new(collection_name)
         bpy.context.scene.collection.children.link(col)
         
+    # Create a root object for the whole reconstruction to allow global manipulation
+    root_name = f"{collection_name}_Root"
+    if root_name in bpy.data.objects:
+        root_obj = bpy.data.objects[root_name]
+    else:
+        root_obj = bpy.data.objects.new(root_name, None)
+        col.objects.link(root_obj)
+    
+    # Apply global rotation to the root
+    root_obj.rotation_mode = 'XYZ'
+    root_obj.rotation_euler = [math.radians(a) for a in rotation]
+        
     if import_points:
         print(f"Importing {len(recon.points3D)} points...")
-        create_point_cloud(recon.points3D, col, point_size=point_size)
+        pc_obj = create_point_cloud(recon.points3D, col, point_size=point_size)
+        pc_obj.parent = root_obj
         
     if import_cameras:
         print(f"Importing {len(recon.images)} cameras...")
         for img_id, image in recon.images.items():
             if image.camera_id in recon.cameras:
                 cam = recon.cameras[image.camera_id]
-                create_camera_object(image, cam, col, scale=camera_scale)
+                cam_obj = create_camera_object(image, cam, col, scale=camera_scale)
+                cam_obj.parent = root_obj
+                # Keep the same world matrix when parenting if the root has no rotation yet
+                # or just set it relative to parent. 
+                # Since we set root rotation ABOVE, we should set matrix_world AFTER parenting 
+                # or use matrix_local if we want it to be relative.
+                # The create_camera_object returns an object with matrix_world set for the SfM space.
+                # If we parent it to root_obj, and then set matrix_world again, 
+                # it will stay in the correct spot while being a child.
                 
     print("Done.")
 

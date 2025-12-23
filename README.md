@@ -45,6 +45,63 @@ export CFLAGS="$CFLAGS -fPIC"
 pip install git+https://github.com/shamangary/glomap.git
 ```
 
+## 🗺️ Mapping & Reconstruction
+
+VibePhysics integrates high-performance Structure-from-Motion (SfM) engines to convert image sequences into 3D reconstructions.
+
+- **GLOMAP Engine** – Global SfM that is 1-2 orders of magnitude faster than traditional methods.
+- **COLMAP Engine** – Industry-standard incremental SfM for robust reconstruction.
+- **GSplat Ready** – Automatically generates standard output structures (`sparse/0` and `images/` symlink) ready for instant GSplat training.
+
+### 💻 1. Run Reconstruction (SfM)
+
+You can run the SfM pipeline via shell script or Python API:
+
+**Command Line:**
+```bash
+# Run GLOMAP pipeline (Fastest - Default)
+./run_glomap.sh --image_path path/to/images
+
+# Run COLMAP pipeline (Most Robust)
+./run_glomap.sh --image_path path/to/images --engine colmap
+
+# Advanced options
+./run_glomap.sh --image_path path/to/images --matcher sequential --camera_model PINHOLE
+```
+
+**Python API:**
+```python
+from vibephysics import mapping
+
+# Simple Usage (Directly run GLOMAP on a folder of images)
+mapping.glomap_pipeline(image_path="path/to/images")
+
+# COLMAP Incremental Pipeline
+mapping.colmap_pipeline(image_path="path/to/images")
+```
+
+### 🎨 2. Visualize in Blender
+
+Load your reconstruction into Blender for inspection with colored point clouds and correct camera poses.
+
+**Command Line:**
+```bash
+# Visualize a sparse model folder (containing cameras.bin, points3D.bin etc.)
+./run_glomap_visual.sh --sparse path/to/sparse/0 --output result.blend
+```
+
+**Python API:**
+```python
+from vibephysics import mapping
+
+# Load reconstruction directly into active Blender scene
+mapping.load_colmap_reconstruction(
+    input_path="output/mapping_output/sparse/0",
+    point_size=0.01,
+    rotation=(-90, 0, 0) # Optional: global rotation
+)
+```
+
 ## 🎬 Example Results (`sh run_robot.sh`)
 
 ![Result Demo](assets/result_demo.gif)
@@ -264,77 +321,6 @@ exporter.export_fbx('output.fbx', selected_only=True)
 | USD/USDA/USDC | USD |
 | Blend (append) | |
 
-## 🗺️ Mapping & Reconstruction
-
-VibePhysics integrates high-performance Structure-from-Motion (SfM) engines to convert image sequences into 3D reconstructions.
-
-- **GLOMAP Engine** – Global SfM that is 1-2 orders of magnitude faster than traditional methods.
-- **COLMAP Engine** – Industry-standard incremental SfM for robust reconstruction.
-- **GSplat Ready** – Automatically generates standard output structures (`sparse/0` and `images/` symlink) ready for instant GSplat training.
-
-### 💻 Usage (Command Line)
-
-```bash
-# Run GLOMAP pipeline (Fastest - Default)
-./run_glomap.sh --image_path path/to/images
-
-# Run COLMAP pipeline (Most Robust)
-./run_glomap.sh --image_path path/to/images --engine colmap
-
-# Advanced options
-./run_glomap.sh --image_path path/to/images --matcher sequential --camera_model PINHOLE
-```
-
-### 🐍 Usage (Python API)
-
-```python
-from vibephysics import mapping
-
-# 1. Simple Usage (Only image_path is REQUIRED)
-# Defaults: glomap engine, exhaustive matcher, PINHOLE camera
-mapping.glomap_pipeline(image_path="path/to/images")
-
-# 2. COLMAP Incremental Pipeline
-mapping.colmap_pipeline(image_path="path/to/images")
-
-# 3. Full Configuration (All parameters except image_path are OPTIONAL)
-mapping.glomap_pipeline(
-    image_path="path/to/images",          # REQUIRED
-    output_path="output/dir",             # Optional: Defaults to image_path/../mapping_output/
-    database_path="path/to/database.db",  # Optional: Defaults to output_path/sparse/database.db
-    matcher="exhaustive",                 # Optional: "exhaustive" (default) or "sequential"
-    camera_model="PINHOLE",               # Optional: "PINHOLE" (default), "SIMPLE_RADIAL", "OPENCV", etc.
-    verbose=True                          # Optional: Set to False to suppress logs
-)
-```
-
-| Parameter | Required | Default | Description |
-|-----------|----------|---------|-------------|
-| **`image_path`** | **Yes** | - | Path to the folder containing raw images. |
-| **`output_path`** | No | `mapping_output/` | Directory for results. Creates `sparse/0` and symlinked `images/`. |
-| **`database_path`** | No | `database.db` | Optional path to an existing COLMAP database. |
-| **`matcher`** | No | `exhaustive` | Matching algorithm: `exhaustive` or `sequential`. |
-| **`camera_model`** | No | `PINHOLE` | COLMAP camera model (e.g., `PINHOLE`, `OPENCV`). |
-
-### 🎨 Visualization in Blender
-
-You can load your Colmap/GLOMAP reconstruction directly into Blender for inspection, featuring colored point clouds with high-visibility Geometry Node spheres and correct camera poses.
-
-```python
-from vibephysics import mapping
-
-# Load a sparse model folder (containing cameras.bin, points3D.bin etc.)
-mapping.load_colmap_reconstruction(
-    input_path="output/mapping_output/sparse/0",
-    point_size=0.01  # Adjust point blob size for visibility
-)
-```
-
-**Run the Demo:**
-```bash
-# Visualize an existing reconstruction
-python examples/colmap_format/demo_glomap.py --sparse /path/to/sparse/0 --point-size 0.02
-```
 
 ## Gaussian Splatting (3DGS) (BETA)
 

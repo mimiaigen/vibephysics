@@ -97,12 +97,12 @@ from vibephysics import mapping
 # Load reconstruction directly into active Blender scene
 mapping.load_colmap_reconstruction(
     input_path="output/mapping_output/sparse/0",
-    point_size=0.01,
+    point_size=0.03,
     rotation=(-90, 0, 0) # Optional: global rotation
 )
 ```
 
-## 🎬 Example Results (`sh run_robot.sh`)
+## 🎬 Simulation Results (`sh run_robot.sh`)
 
 ![Result Demo](assets/result_demo.gif)
 

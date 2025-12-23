@@ -1,8 +1,9 @@
 import bpy
 import pycolmap
 import numpy as np
-from pathlib import Path
 import math
+import mathutils
+from pathlib import Path
 
 def create_camera_object(image, camera, collection, scale=0.1):
     """
@@ -10,84 +11,86 @@ def create_camera_object(image, camera, collection, scale=0.1):
     """
     name = image.name
     
-    # Colmap pose is World-to-Camera (R, t)
-    # pycolmap 3.x uses image.cam_from_world() method
+    # 1. Pose: World-to-Camera (SfM) -> Camera-to-World (Blender)
     if hasattr(image, "cam_from_world") and callable(image.cam_from_world):
         pose = image.cam_from_world()
         rot_mat = pose.rotation.matrix()
         tvec = pose.translation
     else:
-        # Fallback for older pycolmap
+        # Fallback for older pycolmap (World-to-Camera)
         qvec = getattr(image, "qvec", np.array([1, 0, 0, 0]))
         tvec = getattr(image, "tvec", np.zeros(3))
-        # Manual qvec to rotmat if function is missing
-        if hasattr(pycolmap, "qvec_to_rotmat"):
-            rot_mat = pycolmap.qvec_to_rotmat(qvec)
-        else:
-            # Standard Hamilton quaternion to rotation matrix
-            w, x, y, z = qvec
-            rot_mat = np.array([
-                [1 - 2*y**2 - 2*z**2, 2*x*y - 2*z*w, 2*x*z + 2*y*w],
-                [2*x*y + 2*z*w, 1 - 2*x**2 - 2*z**2, 2*y*z - 2*x*w],
-                [2*x*z - 2*y*w, 2*y*z + 2*x*w, 1 - 2*x**2 - 2*y**2]
-            ])
+        w, x, y, z = qvec
+        rot_mat = np.array([
+            [1 - 2*y**2 - 2*z**2, 2*x*y - 2*z*w, 2*x*z + 2*y*w],
+            [2*x*y + 2*z*w, 1 - 2*x**2 - 2*z**2, 2*y*z - 2*x*w],
+            [2*x*z - 2*y*w, 2*y*z + 2*x*w, 1 - 2*x**2 - 2*y**2]
+        ])
     
-    # Inverse rotation and translation to get Camera-to-World
+    # Camera-to-World matrix in OpenCV frame (X-right, Y-down, Z-forward)
     rot_mat_inv = rot_mat.T
     tvec_inv = -rot_mat_inv @ tvec
     
-    # Create Camera Data
+    # Construct 4x4 matrix in mathutils
+    mat_world_cv = mathutils.Matrix.Identity(4)
+    for i in range(3):
+        for j in range(3):
+            mat_world_cv[i][j] = rot_mat_inv[i, j]
+        mat_world_cv[i][3] = tvec_inv[i]
+    
+    # Convert from OpenCV (X-right, Y-down, Z-forward) 
+    # to Blender (X-right, Y-up, Z-back / points -Z)
+    # This is a 180-degree rotation around the X-axis
+    flip_mat = mathutils.Matrix.Rotation(math.pi, 4, 'X')
+    final_matrix = mat_world_cv @ flip_mat
+    
+    # 2. Create Camera Data and Object
+    # We use the native bpy camera object
     cam_data = bpy.data.cameras.new(name=f"CamData_{name}")
     cam_obj = bpy.data.objects.new(name=name, object_data=cam_data)
     collection.objects.link(cam_obj)
     
-    # Construct 4x4 matrix in OpenCV frame (X-right, Y-down, Z-forward)
-    mat_world_cv = np.eye(4)
-    mat_world_cv[:3, :3] = rot_mat_inv
-    mat_world_cv[:3, 3] = tvec_inv
+    cam_obj.matrix_world = final_matrix
     
-    # Convert from OpenCV to Blender coordinate system
-    # Blender camera looks down -Z, Y is up.
-    # We rotate 180 degrees around X to flip Y and Z.
-    transform_matrix = np.array([
-        [1, 0, 0, 0],
-        [0, -1, 0, 0],
-        [0, 0, -1, 0],
-        [0, 0, 0, 1]
-    ])
-    
-    final_matrix = mat_world_cv @ transform_matrix
-    
-    # Assign to object
-    import mathutils
-    m = mathutils.Matrix(final_matrix.tolist())
-    cam_obj.matrix_world = m
-    
-    # Set camera intrinsics
-    # Params mapping depends on camera model
+    # 3. Intrinsics: Focal length and Principal Point (Image x, y)
     width = camera.width
     height = camera.height
-    cam_data.sensor_width = 36.0 # standard 36mm sensor
-    
-    # f_mm = f_px * sensor_width / width_px
-    f_px = 1000.0 # fallback
-    
-    # Get camera model name
-    if hasattr(camera, "model") and hasattr(camera.model, "name"):
-        model = camera.model.name
-    else:
-        model = getattr(camera, "model_name", "UNKNOWN")
-    
     params = camera.params
+    model = camera.model_name if hasattr(camera, "model_name") else "PINHOLE"
     
-    if model in ["SIMPLE_PINHOLE", "SIMPLE_RADIAL"]:
-        # f, cx, cy
-        f_px = params[0]
-    elif model in ["PINHOLE", "OPENCV", "FULL_OPENCV"]:
-        # fx, fy, cx, cy
-        f_px = (params[0] + params[1]) / 2.0
+    # Standard Blender sensor width (36mm)
+    cam_data.sensor_fit = 'HORIZONTAL'
+    cam_data.sensor_width = 36.0
+    cam_data.sensor_height = 36.0 * height / width
     
-    cam_data.lens = f_px * cam_data.sensor_width / width
+    # Extract params based on model
+    if model == "SIMPLE_PINHOLE":
+        f, cx, cy = params
+        fx = fy = f
+    elif model == "PINHOLE":
+        fx, fy, cx, cy = params
+    elif model in ["SIMPLE_RADIAL", "RADIAL"]:
+        f, cx, cy = params[:3]
+        fx = fy = f
+    elif model in ["OPENCV", "FULL_OPENCV"]:
+        fx, fy, cx, cy = params[:4]
+    else:
+        # Fallback
+        fx = fy = params[0] if len(params) > 0 else 1000.0
+        cx = width / 2.0
+        cy = height / 2.0
+        
+    # Focal length: f_mm = f_px * sensor_width / width_px
+    cam_data.lens = fx * cam_data.sensor_width / width
+    
+    # Principal Point Shift (consider image x and y offsets)
+    # shift_x/y are ratios of the larger dimension (if fit is AUTO) or the fit dimension
+    # Since we use 'HORIZONTAL', both are relative to width.
+    cam_data.shift_x = (cx / width) - 0.5
+    cam_data.shift_y = (height / 2.0 - cy) / width
+    
+    # Set display size for the camera gizmo in viewport
+    cam_data.display_size = scale
     
     return cam_obj
 
@@ -249,6 +252,14 @@ def load_colmap_reconstruction(
     # Apply global rotation to the root
     root_obj.rotation_mode = 'XYZ'
     root_obj.rotation_euler = [math.radians(a) for a in rotation]
+
+    # Set scene resolution from the first camera to correctly reflect aspect ratio (e.g. 9:16)
+    if import_cameras and recon.cameras:
+        first_cam = next(iter(recon.cameras.values()))
+        bpy.context.scene.render.resolution_x = first_cam.width
+        bpy.context.scene.render.resolution_y = first_cam.height
+        bpy.context.scene.render.pixel_aspect_x = 1.0
+        bpy.context.scene.render.pixel_aspect_y = 1.0
         
     if import_points:
         print(f"Importing {len(recon.points3D)} points...")
@@ -257,18 +268,18 @@ def load_colmap_reconstruction(
         
     if import_cameras:
         print(f"Importing {len(recon.images)} cameras...")
+        first_cam_obj = None
         for img_id, image in recon.images.items():
             if image.camera_id in recon.cameras:
                 cam = recon.cameras[image.camera_id]
                 cam_obj = create_camera_object(image, cam, col, scale=camera_scale)
                 cam_obj.parent = root_obj
-                # Keep the same world matrix when parenting if the root has no rotation yet
-                # or just set it relative to parent. 
-                # Since we set root rotation ABOVE, we should set matrix_world AFTER parenting 
-                # or use matrix_local if we want it to be relative.
-                # The create_camera_object returns an object with matrix_world set for the SfM space.
-                # If we parent it to root_obj, and then set matrix_world again, 
-                # it will stay in the correct spot while being a child.
+                if first_cam_obj is None:
+                    first_cam_obj = cam_obj
+        
+        # Set the first camera as active for the scene
+        if first_cam_obj:
+            bpy.context.scene.camera = first_cam_obj
                 
     print("Done.")
 

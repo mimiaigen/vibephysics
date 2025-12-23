@@ -1,9 +1,9 @@
 #!/bin/bash
 
 # Default values
-SPARSE_PATH="/Users/shamangary/codeDemo/data/da3/output/mapping_output/glomap_20251223_111950/sparse/0"
+SPARSE_PATH="/Users/shamangary/codeDemo/data/da3/output/mapping_output/glomap_20251223_120214_fps2/sparse/0"
 POINT_SIZE=0.03
-OUTPUT_PATH="/Users/shamangary/codeDemo/data/da3/output/mapping_output/glomap_20251223_111950/visualize_color.blend"
+OUTPUT_PATH="/Users/shamangary/codeDemo/data/da3/output/mapping_output/glomap_20251223_120214_fps2/visualize_color.blend"
 ROTATION="-90 0 0"
 
 # Function to show usage
@@ -31,7 +31,7 @@ while [[ "$#" -gt 0 ]]; do
 done
 
 # Run the visualization script
-python examples/colmap_format/demo_glomap.py \
+python examples/colmap_format/demo_glomap_visual.py \
     --sparse "$SPARSE_PATH" \
     --save-blend "$OUTPUT_PATH" \
     --point-size "$POINT_SIZE" \

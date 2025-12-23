@@ -4,7 +4,7 @@
 
 **A lightweight Blender physics simulation framework for creating realistic robot animations, rigid body physics, water dynamics, and comprehensive annotation tools — all running efficiently on CPU.**
 
-## ⚙️ Installation
+## ⚙️ Installation (MacOS)
 
 ```bash
 # 1. Create environment
@@ -17,6 +17,7 @@ pip install vibephysics
 # 3. (Optional) Install GLOMAP backend
 # Linux users: refer to "Linux System Dependencies" below first
 pip install git+https://github.com/shamangary/glomap.git
+```
 
 ## 🐧 Linux (Ubuntu) System Dependencies
 If you are on Linux and want to use the **GLOMAP** or **COLMAP** backends, you must install the following C++ development libraries to enable successful compilation:

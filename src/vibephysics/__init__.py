@@ -16,7 +16,7 @@ Usage:
 Note: This package requires Blender 5.0's Python environment (bpy) for simulation.
 """
 
-__version__ = "0.2.2"
+__version__ = "0.2.3"
 __author__ = "Tsun-Yi Yang"
 
 # Core modules (non-Blender)

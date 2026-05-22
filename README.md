@@ -17,6 +17,11 @@ pip install vibephysics
 # 3. (Optional) Install GLOMAP backend
 # Linux users: refer to "Linux System Dependencies" below first
 pip install git+https://github.com/shamangary/glomap.git
+
+# 4. (Optional) Install feedforward backends from GitHub
+# Or skip these — ./run_lingbot_map.sh / ./run_vggt_omega.sh auto-install on first run
+pip install git+https://github.com/robbyant/lingbot-map.git
+pip install git+https://github.com/facebookresearch/vggt-omega.git
 ```
 
 ## 🐧 Linux (Ubuntu) System Dependencies
@@ -91,7 +96,7 @@ mapping.glomap_pipeline(image_path="path/to/images")  # programmatic kwargs stil
 
 ![Feedforward Comparison](assets/feedforward_comparison.gif)
 
-Install feedforward backends automatically on first run (only core `vibephysics` + `bpy` required upfront):
+Install feedforward backends (Python 3.11 + `bpy` required). Either pre-install from GitHub (see step 4 above) or let the run scripts auto-install on first use:
 
 ```bash
 pip install vibephysics bpy
@@ -99,7 +104,12 @@ pip install vibephysics bpy
 ./run_vggt_omega.sh --input path/to/images
 ```
 
-Missing engine dependencies (torch, opencv, lingbot-map, vggt-omega, etc.) are installed automatically when you run reconstruction.
+Manual pre-install (optional):
+
+```bash
+pip install git+https://github.com/robbyant/lingbot-map.git
+pip install git+https://github.com/facebookresearch/vggt-omega.git
+```
 
 Per-engine demo configs live in `src/vibephysics/feedforward/configs/`:
 
@@ -171,9 +181,9 @@ pred = feedforward.load_prediction(output_dir / "predictions.npz")
 
 | Engine | Best for | Frames | Install |
 |--------|----------|--------|---------|
-| **LingBot-Map** | Long video, streaming, drift correction | 100-25,000+ | `pip install vibephysics` then `./run_lingbot_map.sh` |
-| **VGGT-Omega** | High-quality medium batches | 10-100 | `pip install vibephysics` then `./run_vggt_omega.sh` + HF access |
-| **GLOMAP/COLMAP** | Sparse SfM, GSplat handoff | any | core install |
+| **LingBot-Map** | Long video, streaming, drift correction | 100-25,000+ | `pip install git+https://github.com/robbyant/lingbot-map.git` or `./run_lingbot_map.sh` |
+| **VGGT-Omega** | High-quality medium batches | 10-100 | `pip install git+https://github.com/facebookresearch/vggt-omega.git` or `./run_vggt_omega.sh` + HF access |
+| **GLOMAP/COLMAP** | Sparse SfM, GSplat handoff | any | `pip install git+https://github.com/shamangary/glomap.git` |
 
 **Output layout:**
 ```

@@ -89,6 +89,8 @@ mapping.glomap_pipeline(image_path="path/to/images")  # programmatic kwargs stil
 
 ### 🌲 1b. Run Dense Feedforward Reconstruction
 
+![Feedforward Comparison](assets/feedforward_comparison.gif)
+
 Install one or more optional backends (use separate conda envs if torch/CUDA versions conflict):
 
 ```bash

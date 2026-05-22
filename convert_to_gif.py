@@ -34,7 +34,8 @@ def convert_to_gif(input_path, output_path, fps=10, width=None):
         'ffmpeg', '-y',
         '-i', input_path,
         '-vf', vf_palette,
-        '-t', '30',  # Limit to 30 seconds
+        '-update', '1',
+        '-frames:v', '1',
         '/tmp/palette.png'
     ]
     
@@ -45,7 +46,6 @@ def convert_to_gif(input_path, output_path, fps=10, width=None):
         '-i', '/tmp/palette.png',
         '-lavfi', vf_gif,
         '-loop', '0',  # 0 = infinite loop
-        '-t', '30',  # Limit to 30 seconds
         output_path
     ]
     

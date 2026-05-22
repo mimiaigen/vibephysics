@@ -37,9 +37,28 @@ dependencies = [
     "numpy<2.0",
     "bpy>=5.0",
     "pycolmap",
+    "pyyaml>=6.0",
 ]
 
 [project.optional-dependencies]
+lingbot_map = [
+    "torch",
+    "torchvision",
+    "opencv-python",
+    "pillow",
+    "tqdm",
+    "einops",
+    "scipy",
+    "safetensors",
+    "huggingface_hub",
+    "lingbot-map @ git+https://github.com/robbyant/lingbot-map.git",
+]
+vggt_omega = [
+    "torch",
+    "opencv-python",
+    "huggingface_hub",
+    "vggt-omega @ git+https://github.com/facebookresearch/vggt-omega.git",
+]
 dev = [
     "pytest>=7.0",
     "black",
@@ -63,6 +82,8 @@ where = ["src"]
 
 [tool.setuptools.package-data]
 "*" = ["*.md"]
+"vibephysics.feedforward" = ["configs/*.yaml"]
+"vibephysics.mapping" = ["configs/*.yaml"]
 
 [tool.black]
 line-length = 100

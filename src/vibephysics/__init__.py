@@ -19,26 +19,16 @@ Note: This package requires Blender 5.0's Python environment (bpy) for simulatio
 __version__ = "0.2.4"
 __author__ = "Tsun-Yi Yang"
 
-# Core modules (non-Blender)
-from . import mapping
-
-# Blender-dependent modules
 try:
     import bpy
-    from . import setup
-    from . import foundation
-    from . import annotation
-    from .annotation import AnnotationManager, quick_annotate
-    from .setup import init_simulation, setup_dual_viewport, clear_scene, load_asset, save_blend
+
     HAS_BPY = True
 except ImportError:
     HAS_BPY = False
-    setup = None
-    foundation = None
-    annotation = None
 
 __all__ = [
     "__version__",
+    "feedforward",
     "mapping",
 ]
 
@@ -55,3 +45,57 @@ if HAS_BPY:
         "load_asset",
         "save_blend",
     ]
+
+
+def __getattr__(name: str):
+    if name == "mapping":
+        from . import mapping
+
+        return mapping
+    if name == "feedforward":
+        from . import feedforward
+
+        return feedforward
+    if not HAS_BPY:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    if name == "setup":
+        from . import setup
+
+        return setup
+    if name == "foundation":
+        from . import foundation
+
+        return foundation
+    if name == "annotation":
+        from . import annotation
+
+        return annotation
+    if name == "AnnotationManager":
+        from .annotation import AnnotationManager
+
+        return AnnotationManager
+    if name == "quick_annotate":
+        from .annotation import quick_annotate
+
+        return quick_annotate
+    if name == "init_simulation":
+        from .setup import init_simulation
+
+        return init_simulation
+    if name == "setup_dual_viewport":
+        from .setup import setup_dual_viewport
+
+        return setup_dual_viewport
+    if name == "clear_scene":
+        from .setup import clear_scene
+
+        return clear_scene
+    if name == "load_asset":
+        from .setup import load_asset
+
+        return load_asset
+    if name == "save_blend":
+        from .setup import save_blend
+
+        return save_blend
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

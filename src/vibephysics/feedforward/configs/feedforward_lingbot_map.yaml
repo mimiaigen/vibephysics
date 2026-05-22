@@ -1,0 +1,39 @@
+# LingBot-Map demo config (defaults match official demo.py)
+# image_path accepts: folder of images, single image, or video (.mov, .mp4, ...)
+engine: lingbot_map
+image_path: test_recording.MOV
+output_path: null
+verbose: true
+
+video:
+  fps: 2              # extraction rate; saved to .vibephysics_extract_fps and reused for animation
+  quality: 2
+
+output:
+  save_blend: scene.blend
+  min_confidence: 1.5   # official demo.py --conf_threshold
+  filter_edges: true
+  point_scale: 1.0
+  animate: true
+  animation_fps: 24
+  align_ground: true
+
+lingbot_map:
+  model: lingbot-map
+  checkpoint: null
+  image_size: 518       # official --image_size
+  batch_size: null      # null = all frames (official stride=1); set N to subsample
+  keyframe_interval: null  # null = 1 (or auto if streaming and >320 frames)
+  window_size: 64       # official --window_size
+  overlap_size: 16      # official --overlap_size
+  overlap_keyframes: null
+  use_sdpa: false       # official CUDA default (FlashInfer); auto-falls back to SDPA on Mac
+  mask_sky: false
+
+vggt_omega:
+  checkpoint: null
+  checkpoint_name: vggt-omega-1b-512
+  resolution: 512
+  enable_alignment: false
+  conf_percentile: 50.0
+  depth_edge_rtol: 0.03

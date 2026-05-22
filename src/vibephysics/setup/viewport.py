@@ -98,6 +98,25 @@ def configure_viewport_overlays(space, show_floor=True, show_axes=True,
     space.overlay.show_relationship_lines = False
 
 
+def configure_viewport_chrome(
+    space,
+    *,
+    show_toolbar: bool = False,
+    show_tool_header: bool = False,
+    show_ui: bool = False,
+) -> None:
+    """Hide viewport side panels (toolbar, tool header, N-panel) for a cleaner view."""
+    if not space:
+        return
+    for attr, value in (
+        ("show_region_toolbar", show_toolbar),
+        ("show_region_tool_header", show_tool_header),
+        ("show_region_ui", show_ui),
+    ):
+        if hasattr(space, attr):
+            setattr(space, attr, value)
+
+
 def lock_viewport_to_camera(space):
     """Lock a viewport to the scene camera."""
     if space and bpy.context.scene.camera:
@@ -149,6 +168,10 @@ def sync_viewport_views(source_space, target_space):
     target_space.region_3d.view_location = source_space.region_3d.view_location.copy()
 
 
+def _window_region(area):
+    return next((region for region in area.regions if region.type == "WINDOW"), None)
+
+
 def enter_local_view(area, objects):
     """
     Enter local view in a specific viewport area with given objects.
@@ -158,25 +181,29 @@ def enter_local_view(area, objects):
         return False
         
     space = get_space_view3d(area)
-    if not space:
+    region = _window_region(area)
+    if not space or not region:
         return False
         
     # 1. Exit Local View if active
     if space.local_view:
-        with bpy.context.temp_override(area=area, region=area.regions[-1], space_data=space):
+        with bpy.context.temp_override(area=area, region=region, space_data=space):
             bpy.ops.view3d.localview()
     
     if not objects:
         return False
         
     # 2. Select objects
-    bpy.ops.object.select_all(action='DESELECT')
+    target = _point_cloud_object(objects) or objects[0]
+    bpy.ops.object.select_all(action="DESELECT")
     for obj in objects:
         if obj and obj.name in bpy.data.objects:
             obj.select_set(True)
+    if target is not None:
+        bpy.context.view_layer.objects.active = target
     
     # 3. Enter Local View
-    with bpy.context.temp_override(area=area, region=area.regions[-1], space_data=space):
+    with bpy.context.temp_override(area=area, region=region, space_data=space):
         bpy.ops.view3d.localview()
         
     return space.local_view is not None
@@ -235,6 +262,105 @@ def setup_dual_viewport(point_cloud_objects, collection_name="PointTrackingViz")
     
     print("✅ Dual viewport setup complete (Dual Local View)")
     return main_area, tracking_area
+
+
+def _objects_in_collection(collection_name: str) -> list[bpy.types.Object]:
+    collection = bpy.data.collections.get(collection_name)
+    if collection is None:
+        return []
+    return list(collection.all_objects)
+
+
+def _point_cloud_object(objects: list[bpy.types.Object]) -> bpy.types.Object | None:
+    for obj in objects:
+        if obj.type == "MESH" and obj.name.startswith("Points"):
+            return obj
+    for obj in objects:
+        if obj.type == "MESH":
+            return obj
+    return None
+
+
+def _frame_viewport_area(area, objects: list[bpy.types.Object], *, fill: float = 0.9) -> None:
+    space = get_space_view3d(area)
+    if not space or not objects:
+        return
+
+    region = next((r for r in area.regions if r.type == "WINDOW"), None)
+    if region is None:
+        return
+
+    target = _point_cloud_object(objects) or objects[0]
+    window = bpy.context.window_manager.windows[0] if bpy.context.window_manager.windows else None
+    if window is None:
+        return
+
+    bpy.ops.object.select_all(action="DESELECT")
+    target.select_set(True)
+    bpy.context.view_layer.objects.active = target
+
+    try:
+        with bpy.context.temp_override(
+            window=window,
+            screen=window.screen,
+            area=area,
+            region=region,
+            space_data=space,
+        ):
+            bpy.ops.view3d.view_selected(use_all_regions=False)
+        if space.region_3d is not None:
+            space.region_3d.view_distance *= fill
+    except Exception as exc:
+        print(f"⚠️ Could not frame viewport: {exc}")
+
+
+def _setup_compare_viewport(area, objects: list[bpy.types.Object], *, fill: float = 0.9) -> bool:
+    """Configure one compare pane: material shading, local view, and framing."""
+    space = get_space_view3d(area)
+    if not space or not objects:
+        return False
+
+    configure_viewport_shading(space, shading_type="MATERIAL")
+    configure_viewport_overlays(space, show_floor=False, show_axes=False, show_extras=True)
+    configure_viewport_chrome(space)
+
+    # Isolate the full reconstruction in local view, but frame on the point cloud only
+    # (same as single-export blends — not the entire camera path).
+    if not enter_local_view(area, objects):
+        return False
+
+    _frame_viewport_area(area, objects, fill=fill)
+    return space.local_view is not None
+
+
+def setup_compare_dual_viewport(left_collection: str, right_collection: str):
+    """
+    Split the 3D view into two independent viewports with a shared timeline.
+
+    Left and right panes each isolate one reconstruction via Local View.
+    View orientation is framed independently per side (not camera-synced).
+    """
+    left_objects = _objects_in_collection(left_collection)
+    right_objects = _objects_in_collection(right_collection)
+    if not left_objects or not right_objects:
+        print("⚠️ Compare viewport skipped: missing collection objects")
+        return None, None
+
+    left_area, right_area = split_viewport_horizontal(0.5)
+    if not left_area or not right_area:
+        print("⚠️ Compare viewport skipped: could not split 3D view")
+        return None, None
+
+    left_ok = _setup_compare_viewport(left_area, left_objects)
+    right_ok = _setup_compare_viewport(right_area, right_objects)
+    if not left_ok or not right_ok:
+        print("⚠️ Compare viewport setup incomplete (local view may be missing)")
+
+    print(
+        f"✅ Compare viewport ready: left={left_collection}, right={right_collection} "
+        "(shared timeline, independent views)"
+    )
+    return left_area, right_area
 
 
 def register_view_sync_handler(main_area, tracking_area):

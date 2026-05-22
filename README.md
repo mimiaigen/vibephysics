@@ -53,34 +53,134 @@ VibePhysics integrates high-performance Structure-from-Motion (SfM) engines to c
 
 - **GLOMAP Engine** – Global SfM that is 1-2 orders of magnitude faster than traditional methods.
 - **COLMAP Engine** – Industry-standard incremental SfM for robust reconstruction.
-- **GSplat Ready** – Automatically generates standard output structures (`sparse/0` and `images/` symlink) ready for instant GSplat training.
+- **Feedforward Engines** – Unified dense reconstruction via [LingBot-Map](https://github.com/robbyant/lingbot-map) and [VGGT-Omega](https://github.com/facebookresearch/vggt-omega). Pick the engine explicitly for your workload.
+- **GSplat Ready** – GLOMAP/COLMAP automatically generate standard output structures (`sparse/0` and `images/` symlink) ready for instant GSplat training.
 
 ### 💻 1. Run Reconstruction (SfM)
 
-You can run the SfM pipeline via shell script or Python API:
+Edit `src/vibephysics/mapping/configs/sfm.yaml`, then run via shell script or Python API:
+
+**Config (`src/vibephysics/mapping/configs/sfm.yaml`):**
+```yaml
+engine: glomap          # glomap | colmap
+image_path: path/to/images
+output_path: null
+matcher: exhaustive
+camera_model: SIMPLE_RADIAL
+verbose: true
+```
 
 **Command Line:**
 ```bash
-# Run GLOMAP pipeline (Fastest - Default)
+# Use default config, override image path
 ./run_glomap.sh --image_path path/to/images
 
-# Run COLMAP pipeline (Most Robust)
-./run_glomap.sh --image_path path/to/images --engine colmap
-
-# Advanced options
-./run_glomap.sh --image_path path/to/images --matcher sequential --camera_model PINHOLE
+# Custom config file
+./run_glomap.sh --config my_sfm.yaml --image_path path/to/images
 ```
 
 **Python API:**
 ```python
 from vibephysics import mapping
 
-# Simple Usage (Directly run GLOMAP on a folder of images)
-mapping.glomap_pipeline(image_path="path/to/images")
-
-# COLMAP Incremental Pipeline
-mapping.colmap_pipeline(image_path="path/to/images")
+mapping.run_sfm_from_config("src/vibephysics/mapping/configs/sfm.yaml", image_path="path/to/images")
+mapping.glomap_pipeline(image_path="path/to/images")  # programmatic kwargs still supported
 ```
+
+### 🌲 1b. Run Dense Feedforward Reconstruction
+
+Install one or more optional backends (use separate conda envs if torch/CUDA versions conflict):
+
+```bash
+pip install "vibephysics[lingbot_map]"  # long video / streaming; installs lingbot-map from GitHub
+pip install "vibephysics[vggt_omega]"   # medium batches (HF checkpoint auto-downloads on first run)
+```
+
+Per-engine demo configs live in `src/vibephysics/feedforward/configs/`:
+
+| Config | Engine | Notes |
+|--------|--------|-------|
+| `feedforward.yaml` | `lingbot_map` (default) | Generic template |
+| `feedforward_lingbot_map.yaml` | `lingbot_map` | Demo defaults (`min_confidence: 1.5`) |
+| `feedforward_vggt_omega.yaml` | `vggt_omega` | Requires [gated HF access](https://huggingface.co/facebook/VGGT-Omega) |
+
+**Config (`src/vibephysics/feedforward/configs/feedforward.yaml`):**
+```yaml
+engine: lingbot_map       # lingbot_map | vggt_omega
+image_path: path/to/images   # folder, single image, or video (.mov, .mp4, ...)
+output_path: null         # null → feedforward_output/{engine}_{timestamp}/
+
+video:
+  fps: 2                  # extraction rate when image_path is a video
+  quality: 2
+
+output:
+  save_blend: scene.blend
+  min_confidence: 0.5
+  align_ground: true      # RANSAC ground-plane align before saving NPZ/blend
+  animate: true
+  animation_fps: 24
+
+lingbot_map:
+  model: lingbot-map
+  image_size: 518
+  window_size: 64
+  overlap_size: 16
+
+vggt_omega:
+  checkpoint: null        # auto-downloads checkpoint_name on first run
+  checkpoint_name: vggt-omega-1b-512
+  resolution: 512
+  preprocess_mode: balanced
+  conf_percentile: 50.0
+```
+
+**Input:** `image_path` accepts an image folder, a single image, or a video file. Videos are converted to frames with ffmpeg at `video.fps` (default 2 fps). Frames are cached under `output/<video_stem>/` next to the video and **reused on reruns** — if that folder already contains images, ffmpeg is skipped even when you pass the video path again.
+
+**Command Line:**
+```bash
+# Per-engine demos
+./run_lingbot_map.sh --input test_recording.MOV
+./run_vggt_omega.sh --input path/to/images
+
+# Side-by-side compare (dual viewports, shared timeline)
+./run_compare_blend.sh \
+  --left  feedforward_output/vggt_omega_test/predictions.npz \
+  --right feedforward_output/lingbot_map_test/predictions.npz \
+  --output feedforward_output/compare.blend
+```
+
+**Python API:**
+```python
+from vibephysics import feedforward
+
+output_dir = feedforward.reconstruct_from_config(
+    "src/vibephysics/feedforward/configs/feedforward_lingbot_map.yaml",
+    image_path="test_recording.MOV",  # or "output/test_recording"
+)
+# predictions.npz is the canonical artifact; scene.blend is optional
+pred = feedforward.load_prediction(output_dir / "predictions.npz")
+```
+
+**When to use which engine:**
+
+| Engine | Best for | Frames | Install |
+|--------|----------|--------|---------|
+| **LingBot-Map** | Long video, streaming, drift correction | 100-25,000+ | `pip install "vibephysics[lingbot_map]"` |
+| **VGGT-Omega** | High-quality medium batches | 10-100 | `pip install "vibephysics[vggt_omega]"` + HF access |
+| **GLOMAP/COLMAP** | Sparse SfM, GSplat handoff | any | core install |
+
+**Output layout:**
+```
+feedforward_output/{engine}_{timestamp}/
+  predictions.npz          # canonical arrays (depth, conf, poses, world_points, image_paths)
+  reconstruct_config.json  # engine + run settings (includes source image_path)
+  scene.blend              # dense point cloud + cameras (optional)
+```
+
+RGB for visualization is loaded from `image_paths` in the saved NPZ (or from in-memory arrays during the same run). Input frames are not copied or symlinked into the output folder.
+
+Ground alignment runs once in `reconstruct.py` before saving; Blender import uses the aligned NPZ as-is (no extra root rotation).
 
 ### 🎨 2. Visualize in Blender
 
@@ -141,7 +241,8 @@ mapping.load_colmap_reconstruction(
 - **💧 Water Physics** – Dynamic water surfaces, puddles, ripples, and buoyancy simulation
 - **📊 Annotation Tools** – Bounding boxes, motion trails, and point cloud tracking for vision datasets
 - **🎯 Production Ready** – Clean API, modular architecture, and extensive examples
-- **🗺️ SfM Mapping** – Integrated COLMAP and GLOMAP pipelines for high-speed 3D reconstruction
+- **🗺️ SfM Mapping** – COLMAP and GLOMAP sparse reconstruction
+- **🧠 Feedforward Reconstruction** – LingBot-Map and VGGT-Omega dense reconstruction (`vibephysics.feedforward`)
 - **🔧 Developer Friendly** – Pure Python, works with Blender as a module (bpy), no GUI needed
 
 Perfect for researchers, animators, and robotics engineers who need physics simulations without expensive GPU hardware.

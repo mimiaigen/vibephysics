@@ -1,0 +1,13 @@
+# Sparse SfM pipeline (GLOMAP / COLMAP)
+# image_path accepts: folder of images, single image, or video (.mov, .mp4, ...)
+engine: glomap
+image_path: path/to/images
+output_path: null
+
+video:
+  fps: 2
+  quality: 2
+
+matcher: exhaustive
+camera_model: SIMPLE_RADIAL
+verbose: true

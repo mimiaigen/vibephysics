@@ -5,6 +5,8 @@ include CHANGELOG.md
 
 # Include package data
 recursive-include src/vibephysics *.md
+recursive-include src/vibephysics/mapping/configs *.yaml
+recursive-include src/vibephysics/feedforward/configs *.yaml
 
 # Exclude build artifacts
 global-exclude __pycache__

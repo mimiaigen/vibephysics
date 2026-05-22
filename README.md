@@ -94,8 +94,11 @@ mapping.glomap_pipeline(image_path="path/to/images")  # programmatic kwargs stil
 Install one or more optional backends (use separate conda envs if torch/CUDA versions conflict):
 
 ```bash
-pip install "vibephysics[lingbot_map]"  # long video / streaming; installs lingbot-map from GitHub
-pip install "vibephysics[vggt_omega]"   # medium batches (HF checkpoint auto-downloads on first run)
+pip install "vibephysics[lingbot_map]"
+pip install git+https://github.com/robbyant/lingbot-map.git
+
+pip install "vibephysics[vggt_omega]"
+pip install git+https://github.com/facebookresearch/vggt-omega.git
 ```
 
 Per-engine demo configs live in `src/vibephysics/feedforward/configs/`:
@@ -168,8 +171,8 @@ pred = feedforward.load_prediction(output_dir / "predictions.npz")
 
 | Engine | Best for | Frames | Install |
 |--------|----------|--------|---------|
-| **LingBot-Map** | Long video, streaming, drift correction | 100-25,000+ | `pip install "vibephysics[lingbot_map]"` |
-| **VGGT-Omega** | High-quality medium batches | 10-100 | `pip install "vibephysics[vggt_omega]"` + HF access |
+| **LingBot-Map** | Long video, streaming, drift correction | 100-25,000+ | `pip install "vibephysics[lingbot_map]"` + `lingbot-map` from GitHub |
+| **VGGT-Omega** | High-quality medium batches | 10-100 | `pip install "vibephysics[vggt_omega]"` + `vggt-omega` from GitHub + HF access |
 | **GLOMAP/COLMAP** | Sparse SfM, GSplat handoff | any | core install |
 
 **Output layout:**

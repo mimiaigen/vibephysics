@@ -10,6 +10,9 @@ import numpy as np
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".tif", ".tiff", ".JPG", ".PNG"}
 
 DEFAULT_LINGBOT_MAP_MODEL = "lingbot-map"
+
+LINGBOT_MAP_GIT = "git+https://github.com/robbyant/lingbot-map.git"
+VGGT_OMEGA_GIT = "git+https://github.com/facebookresearch/vggt-omega.git"
 DEFAULT_VIDEO_FPS = 2.0
 VIDEO_EXTRACT_FPS_FILE = ".vibephysics_extract_fps"
 

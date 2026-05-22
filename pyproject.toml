@@ -4,10 +4,10 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "vibephysics"
-version = "0.3.0"
+version = "0.3.1"
 description = "Physics simulation and annotation tools for Blender"
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.11,<3.12"
 authors = [
     {name = "tsunyi", email = "tsunyi@mimiaigen.com"}
 ]
@@ -35,7 +35,7 @@ classifiers = [
 dependencies = [
     "tqdm>=4.0",
     "numpy<2.0",
-    "bpy>=5.0",
+    "bpy>=5.0,<5.1",
     "pycolmap",
     "pyyaml>=6.0",
 ]

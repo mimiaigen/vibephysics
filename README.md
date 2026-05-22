@@ -91,15 +91,15 @@ mapping.glomap_pipeline(image_path="path/to/images")  # programmatic kwargs stil
 
 ![Feedforward Comparison](assets/feedforward_comparison.gif)
 
-Install one or more optional backends (use separate conda envs if torch/CUDA versions conflict):
+Install feedforward backends automatically on first run (only core `vibephysics` + `bpy` required upfront):
 
 ```bash
-pip install "vibephysics[lingbot_map]"
-pip install git+https://github.com/robbyant/lingbot-map.git
-
-pip install "vibephysics[vggt_omega]"
-pip install git+https://github.com/facebookresearch/vggt-omega.git
+pip install vibephysics bpy
+./run_lingbot_map.sh --input test_recording.MOV
+./run_vggt_omega.sh --input path/to/images
 ```
+
+Missing engine dependencies (torch, opencv, lingbot-map, vggt-omega, etc.) are installed automatically when you run reconstruction.
 
 Per-engine demo configs live in `src/vibephysics/feedforward/configs/`:
 
@@ -171,8 +171,8 @@ pred = feedforward.load_prediction(output_dir / "predictions.npz")
 
 | Engine | Best for | Frames | Install |
 |--------|----------|--------|---------|
-| **LingBot-Map** | Long video, streaming, drift correction | 100-25,000+ | `pip install "vibephysics[lingbot_map]"` + `lingbot-map` from GitHub |
-| **VGGT-Omega** | High-quality medium batches | 10-100 | `pip install "vibephysics[vggt_omega]"` + `vggt-omega` from GitHub + HF access |
+| **LingBot-Map** | Long video, streaming, drift correction | 100-25,000+ | `pip install vibephysics` then `./run_lingbot_map.sh` |
+| **VGGT-Omega** | High-quality medium batches | 10-100 | `pip install vibephysics` then `./run_vggt_omega.sh` + HF access |
 | **GLOMAP/COLMAP** | Sparse SfM, GSplat handoff | any | core install |
 
 **Output layout:**
@@ -264,7 +264,7 @@ Perfect for researchers, animators, and robotics engineers who need physics simu
 - Only needed to view/render the generated `.blend` files
 - Not required to run simulations
 
-> ⚠️ **Important**: This package requires Python 3.11. Python 3.12 and later versions are not compatible with the current version of bpy.
+> ⚠️ **Important**: This package requires **Python 3.11**. PyPI `bpy` 5.0 ships cp311 wheels only — Python 3.12+ is not supported.
 
 ### Dependency
 - **Open Duck**: We use the [Open Duck blender model](https://github.com/pollen-robotics/Open_Duck_Blender) as demo. We do not own the model. Please refer to the original github repo.

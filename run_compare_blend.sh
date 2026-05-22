@@ -34,7 +34,6 @@ collect_python_candidates() {
     shopt -u nullglob
 
     add_candidate "$(command -v python3.11 2>/dev/null)"
-    add_candidate "$(command -v python3.13 2>/dev/null)"
     add_candidate "$(command -v python 2>/dev/null)"
     add_candidate "$(command -v python3 2>/dev/null)"
 }
@@ -78,7 +77,7 @@ fi
 
 if ! resolve_python; then
     echo "Error: no Python with PyPI bpy found." >&2
-    echo "Use Python 3.11 or 3.13 with: pip install bpy" >&2
+    echo "Use Python 3.11 with: pip install vibephysics bpy" >&2
     echo "Or set VIBEPHYSICS_PYTHON=/path/to/python" >&2
     exit 1
 fi

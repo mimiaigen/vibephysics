@@ -4,13 +4,13 @@ from __future__ import annotations
 
 import importlib.util
 import os
-import subprocess
 import sys
 from pathlib import Path
 
 import numpy as np
 
 from ..common import discover_images, feedforward_engine_dir, get_vram_gb, images_chw_to_hwc, select_skip_frames
+from ..deps import ensure_engine_dependencies, pip_install
 from ..schema import FeedforwardPrediction
 
 DEFAULT_CACHE = feedforward_engine_dir("vggt_omega")
@@ -98,15 +98,9 @@ def is_available() -> bool:
     return importlib.util.find_spec("vggt_omega") is not None
 
 
-def _pip_install(spec: str, verbose: bool = True) -> None:
-    if verbose:
-        print(f"--- [vibephysics] Installing {spec} ---")
-    subprocess.check_call([sys.executable, "-m", "pip", "install", spec])
-
-
 def _ensure_huggingface_hub(verbose: bool = True) -> None:
     if importlib.util.find_spec("huggingface_hub") is None:
-        _pip_install("huggingface_hub", verbose=verbose)
+        pip_install("huggingface_hub", verbose=verbose)
 
 
 def _token_from_env() -> str | None:
@@ -156,17 +150,10 @@ def ensure_hf_auth(verbose: bool = True, *, interactive: bool = True) -> bool:
 
 
 def ensure_dependencies(verbose: bool = True) -> bool:
-    missing = []
-    for package in ("torch", "cv2", "vggt_omega"):
-        if importlib.util.find_spec("cv2" if package == "cv2" else package) is None:
-            missing.append("opencv-python" if package == "cv2" else package)
-    if missing:
-        if verbose:
-            print(f"\n[vibephysics] VGGT-Omega dependencies missing: {', '.join(missing)}")
-            print('Install with: pip install "vibephysics[vggt_omega]"')
+    if not ensure_engine_dependencies("vggt_omega", verbose=verbose):
         return False
     try:
-        _ensure_huggingface_hub(verbose=False)
+        _ensure_huggingface_hub(verbose=verbose)
     except Exception:
         if verbose:
             print("\n[vibephysics] huggingface_hub is required for automatic checkpoint download.")
@@ -276,7 +263,7 @@ def run_vggt_omega(
     verbose: bool = True,
 ) -> FeedforwardPrediction:
     if not ensure_dependencies(verbose):
-        raise RuntimeError('VGGT-Omega not installed. Run: pip install "vibephysics[vggt_omega]"')
+        raise RuntimeError("VGGT-Omega not installed. Run: ./run_vggt_omega.sh (deps auto-install on first run)")
 
     import torch
     from vggt_omega.models import VGGTOmega

@@ -472,8 +472,8 @@ class RunProfiler:
 
 
 _INSTALL_HINTS = {
-    "lingbot_map": 'pip install "vibephysics[lingbot_map]"',
-    "vggt_omega": 'pip install "vibephysics[vggt_omega]" (checkpoint auto-downloads on first run; HF access required)',
+    "lingbot_map": "pip install vibephysics (deps auto-install on first run)",
+    "vggt_omega": "pip install vibephysics (deps auto-install on first run; HF access required)",
 }
 
 
@@ -484,8 +484,8 @@ def _require_bpy() -> None:
         py = f"{sys.version_info.major}.{sys.version_info.minor}"
         raise RuntimeError(
             f"bpy is required for .blend export (current Python {py}). "
-            "On macOS, PyPI bpy supports Python 3.11 or 3.13 — not 3.12. "
-            'Use a 3.11/3.13 env and: pip install "vibephysics[lingbot_map]"'
+            "PyPI bpy 5.0 requires Python 3.11 (not 3.12+). "
+            "Use a 3.11 env and: pip install vibephysics bpy"
         ) from exc
 
 

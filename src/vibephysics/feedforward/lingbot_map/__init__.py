@@ -50,6 +50,9 @@ _BATCHED_NDIMS = {
 }
 
 
+from ..deps import ensure_engine_dependencies
+
+
 def is_available() -> bool:
     if importlib.util.find_spec("torch") is None:
         return False
@@ -57,20 +60,7 @@ def is_available() -> bool:
 
 
 def ensure_dependencies(verbose: bool = True) -> bool:
-    missing = []
-    for package in ("torch", "cv2", "PIL", "lingbot_map"):
-        if importlib.util.find_spec("cv2" if package == "cv2" else package) is None:
-            missing.append(
-                "opencv-python"
-                if package == "cv2"
-                else ("pillow" if package == "PIL" else package)
-            )
-    if missing:
-        if verbose:
-            print(f"\n[vibephysics] LingBot-Map dependencies missing: {', '.join(missing)}")
-            print('Install with: pip install "vibephysics[lingbot_map]"')
-        return False
-    return True
+    return ensure_engine_dependencies("lingbot_map", verbose=verbose)
 
 
 def download_checkpoint(
@@ -313,7 +303,7 @@ def run_lingbot_map(
     verbose: bool = True,
 ) -> FeedforwardPrediction:
     if not ensure_dependencies(verbose):
-        raise RuntimeError('LingBot-Map not ready. Run: pip install "vibephysics[lingbot_map]"')
+        raise RuntimeError("LingBot-Map not ready. Run: ./run_lingbot_map.sh (deps auto-install on first run)")
 
     import torch
     from lingbot_map.utils.geometry import unproject_depth_map_to_point_map

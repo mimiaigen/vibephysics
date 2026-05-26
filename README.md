@@ -480,15 +480,14 @@ sh run_3dgs_viewer.sh
 
 ## License
 
-© 2025 MIMI AI LTD. Free for academic use; commercial license available.
+Licensed under the [Apache License, Version 2.0](LICENSE).
 
 <details>
 <summary>License & citation</summary>
 
-**© 2025 MIMI AI LTD, UK. All rights reserved.**
+Copyright 2025 MIMI AI LTD
 
-- **Academic / student use:** free  
-- **Commercial:** tsunyi@mimiaigen.com  
+Licensed under the Apache License, Version 2.0. See [LICENSE](LICENSE) for the full text.
 
 ```
 @misc{VibePhysics,

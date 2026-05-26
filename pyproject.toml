@@ -20,10 +20,12 @@ keywords = [
     "water",
     "robotics",
 ]
+license = "Apache-2.0"
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
     "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: Apache Software License",
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.11",
@@ -73,7 +75,7 @@ Repository = "https://github.com/yourusername/vibephysics.git"
 Issues = "https://github.com/yourusername/vibephysics/issues"
 
 [tool.setuptools]
-license-files = []
+license-files = ["LICENSE"]
 
 [tool.setuptools.packages.find]
 where = ["src"]

@@ -58,6 +58,16 @@ vggt_omega = [
     "opencv-python",
     "huggingface_hub",
 ]
+vgg_ttt = [
+    "torch",
+    "torchvision",
+    "opencv-python",
+    "huggingface_hub",
+    "einops",
+    "roma",
+    "trimesh",
+    "hydra-core",
+]
 dev = [
     "pytest>=7.0",
     "black",

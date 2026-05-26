@@ -28,6 +28,7 @@ from .common import (
     discover_images,
     get_vram_gb,
     is_lingbot_map_engine,
+    is_vgg_ttt_engine,
     is_vggt_omega_engine,
     persist_preprocessed_frames,
     resolve_confidence_threshold,
@@ -474,6 +475,7 @@ class RunProfiler:
 _INSTALL_HINTS = {
     "lingbot_map": "pip install vibephysics (deps auto-install on first run)",
     "vggt_omega": "pip install vibephysics (deps auto-install on first run; HF access required)",
+    "vgg_ttt": "pip install vibephysics (deps auto-install on first run)",
 }
 
 
@@ -537,6 +539,10 @@ def _engine_available(engine: str) -> bool:
         from .vggt_omega import is_available
 
         return is_available()
+    if engine == "vgg_ttt":
+        from .vgg_ttt import is_available
+
+        return is_available()
     return False
 
 
@@ -580,6 +586,13 @@ def reconstruct(
     vggt_omega_enable_alignment: bool = False,
     vggt_omega_conf_percentile: float = 50.0,
     vggt_omega_depth_edge_rtol: float = 0.03,
+    vgg_ttt_model_id: str = "nvidia/vgg-ttt",
+    vgg_ttt_preprocess_mode: str = "crop",
+    vgg_ttt_image_size: int = 518,
+    vgg_ttt_conf_percentile: float = 50.0,
+    vgg_ttt_depth_edge_rtol: float = 0.03,
+    vgg_ttt_num_ttt_steps: int | None = 1,
+    vgg_ttt_memory_efficient_inference: bool = False,
     video_fps: float | None = None,
     video_quality: int = 2,
     verbose: bool = True,
@@ -647,6 +660,23 @@ def reconstruct(
                 conf_percentile=vggt_omega_conf_percentile,
                 verbose=verbose,
             )
+        elif engine == "vgg_ttt":
+            from .vgg_ttt import run_vgg_ttt
+
+            prediction = run_vgg_ttt(
+                image_path=image_path,
+                model_id=vgg_ttt_model_id,
+                preprocess_mode=vgg_ttt_preprocess_mode,
+                image_size=vgg_ttt_image_size,
+                max_frames=max_frames,
+                max_frames_mode=max_frames_mode,
+                filter_depth_edges=filter_edges,
+                depth_edge_rtol=vgg_ttt_depth_edge_rtol,
+                conf_percentile=vgg_ttt_conf_percentile,
+                num_ttt_steps=vgg_ttt_num_ttt_steps,
+                memory_efficient_inference=vgg_ttt_memory_efficient_inference,
+                verbose=verbose,
+            )
         else:
             raise ValueError(f"Unknown engine: {engine}")
 
@@ -658,6 +688,12 @@ def reconstruct(
             prediction,
             min_confidence,
             conf_percentile=vggt_omega_conf_percentile,
+        )
+    elif is_vgg_ttt_engine(prediction.engine):
+        export_min_confidence = resolve_confidence_threshold(
+            prediction,
+            min_confidence,
+            conf_percentile=vgg_ttt_conf_percentile,
         )
 
     if align_ground:
@@ -686,7 +722,13 @@ def reconstruct(
             "max_frames_mode": max_frames_mode,
             "vram_gb": vram_gb,
             "min_confidence": export_min_confidence,
-            "conf_percentile": vggt_omega_conf_percentile if is_vggt_omega_engine(engine) else None,
+            "conf_percentile": (
+                vggt_omega_conf_percentile
+                if is_vggt_omega_engine(engine)
+                else vgg_ttt_conf_percentile
+                if is_vgg_ttt_engine(engine)
+                else None
+            ),
             "point_scale": point_scale,
             "filter_edges": filter_edges,
             "mask_sky": mask_sky,
@@ -719,6 +761,7 @@ def reconstruct(
 
 _PREPROCESS_MODES = {
     "vggt_omega": ("balanced", "max_size"),
+    "vgg_ttt": ("crop", "pad"),
 }
 
 
@@ -799,7 +842,7 @@ def main() -> None:
         "--mode",
         dest="preprocess_mode",
         default=None,
-        help="Preprocess mode override (vggt_omega: balanced|max_size).",
+        help="Preprocess mode override (vggt_omega: balanced|max_size; vgg_ttt: crop|pad).",
     )
     args = parser.parse_args()
 

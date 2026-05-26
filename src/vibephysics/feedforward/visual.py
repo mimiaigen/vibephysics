@@ -14,13 +14,14 @@ import bpy
 import numpy as np
 from mathutils import Matrix
 
-from .common import is_lingbot_map_engine, is_vggt_omega_engine
+from .common import is_lingbot_map_engine, is_vgg_ttt_engine, is_vggt_omega_engine
 from .common import collect_colored_point_cloud, resolve_confidence_threshold
 from .schema import FeedforwardPrediction, load_prediction
 
 ENGINE_COLLECTION_NAMES = {
     "lingbot_map": "LingBot_Map_Result",
     "vggt_omega": "VGGT_Omega_Result",
+    "vgg_ttt": "VGGT_TTT_Result",
     "lingbot": "LingBot_Map_Result",
     "vggt": "VGGT_Omega_Result",
 }
@@ -869,6 +870,16 @@ def load_reconstruction(
     if min_confidence == 0.5 and is_lingbot_map_engine(engine):
         min_confidence = 1.5
     elif is_vggt_omega_engine(engine):
+        min_confidence = resolve_confidence_threshold(
+            predictions,
+            min_confidence,
+            conf_percentile=(
+                predictions.metadata.get("conf_percentile")
+                if isinstance(predictions, FeedforwardPrediction)
+                else (predictions.get("metadata") or {}).get("conf_percentile")
+            ),
+        )
+    elif is_vgg_ttt_engine(engine):
         min_confidence = resolve_confidence_threshold(
             predictions,
             min_confidence,

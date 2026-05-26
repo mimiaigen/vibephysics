@@ -13,6 +13,7 @@ DEFAULT_LINGBOT_MAP_MODEL = "lingbot-map"
 
 LINGBOT_MAP_GIT = "git+https://github.com/robbyant/lingbot-map.git"
 VGGT_OMEGA_GIT = "git+https://github.com/facebookresearch/vggt-omega.git"
+VGG_TTT_GIT = "git+https://github.com/nv-dvl/vgg-ttt.git"
 DEFAULT_VIDEO_FPS = 2.0
 VIDEO_EXTRACT_FPS_FILE = ".vibephysics_extract_fps"
 
@@ -48,6 +49,11 @@ def is_lingbot_map_engine(engine: str) -> bool:
 def is_vggt_omega_engine(engine: str) -> bool:
     engine = str(engine)
     return engine == "vggt_omega" or engine == "vggt" or engine.startswith("vggt_omega")
+
+
+def is_vgg_ttt_engine(engine: str) -> bool:
+    engine = str(engine)
+    return engine == "vgg_ttt" or engine == "vggttt" or engine.startswith("vgg_ttt")
 
 
 def discover_images(image_path: Path) -> list[Path]:
@@ -241,7 +247,7 @@ def resolve_confidence_threshold(
         metadata = predictions.get("metadata", {})
         conf = predictions["conf"]
 
-    if is_vggt_omega_engine(engine):
+    if is_vggt_omega_engine(engine) or is_vgg_ttt_engine(engine):
         percentile = conf_percentile
         if percentile is None and isinstance(metadata, dict):
             percentile = metadata.get("conf_percentile")

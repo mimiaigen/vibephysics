@@ -1,0 +1,51 @@
+# VGG-T³ demo config (defaults match official README)
+# image_path accepts: folder of images, single image, or video (.mov, .mp4, ...)
+engine: vgg_ttt
+image_path: test_recording.MOV
+output_path: null
+verbose: true
+
+video:
+  fps: 2              # extraction rate; saved to .vibephysics_extract_fps and reused for animation
+  quality: 2
+  max_frames: null     # null = all frames; set N to limit count (all engines)
+  max_frames_mode: first   # first = first N consecutive; spread = evenly across input
+
+output:
+  save_blend: scene.blend
+  min_confidence: 0.5          # ignored for vgg_ttt; see vgg_ttt.conf_percentile
+  filter_edges: true
+  point_scale: 1.0
+  animate: true
+  animation_fps: 24
+  align_ground: true
+
+lingbot_map:
+  model: lingbot-map
+  checkpoint: null
+  image_size: 518
+  mode: auto
+  keyframe_interval: null
+  window_size: 64
+  overlap_size: 16
+  overlap_keyframes: null
+  use_sdpa: false
+  mask_sky: false
+
+vggt_omega:
+  checkpoint: null
+  checkpoint_name: vggt-omega-1b-512
+  resolution: 512
+  preprocess_mode: balanced
+  enable_alignment: false
+  conf_percentile: 50.0
+  depth_edge_rtol: 0.03
+
+vgg_ttt:
+  model_id: nvidia/vgg-ttt       # auto-downloads from Hugging Face on first run
+  preprocess_mode: crop          # official load_fn default
+  image_size: 518
+  conf_percentile: 50.0
+  depth_edge_rtol: 0.03
+  num_ttt_steps: 1
+  memory_efficient_inference: false

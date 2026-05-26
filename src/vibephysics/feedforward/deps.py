@@ -6,7 +6,7 @@ import importlib.util
 import subprocess
 import sys
 
-from .common import LINGBOT_MAP_GIT, VGGT_OMEGA_GIT
+from .common import LINGBOT_MAP_GIT, VGGT_OMEGA_GIT, VGG_TTT_GIT
 
 # (import_name, pip_spec)
 _PYPI_DEPS: dict[str, list[tuple[str, str]]] = {
@@ -25,16 +25,28 @@ _PYPI_DEPS: dict[str, list[tuple[str, str]]] = {
         ("cv2", "opencv-python"),
         ("huggingface_hub", "huggingface_hub"),
     ],
+    "vgg_ttt": [
+        ("torch", "torch"),
+        ("torchvision", "torchvision"),
+        ("cv2", "opencv-python"),
+        ("huggingface_hub", "huggingface_hub"),
+        ("einops", "einops"),
+        ("roma", "roma"),
+        ("trimesh", "trimesh"),
+        ("hydra", "hydra-core"),
+    ],
 }
 
 _ENGINE_MODULES: dict[str, str] = {
     "lingbot_map": "lingbot_map",
     "vggt_omega": "vggt_omega",
+    "vgg_ttt": "vggttt",
 }
 
 _ENGINE_GIT: dict[str, str] = {
     "lingbot_map": LINGBOT_MAP_GIT,
     "vggt_omega": VGGT_OMEGA_GIT,
+    "vgg_ttt": VGG_TTT_GIT,
 }
 
 

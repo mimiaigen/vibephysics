@@ -12,7 +12,7 @@ from .common import DEFAULT_LINGBOT_MAP_MODEL, DEFAULT_VIDEO_FPS
 CONFIGS_DIR = Path(__file__).resolve().parent / "configs"
 DEFAULT_FEEDFORWARD_CONFIG = CONFIGS_DIR / "feedforward.yaml"
 
-FEEDFORWARD_ENGINES = ("lingbot_map", "vggt_omega")
+FEEDFORWARD_ENGINES = ("lingbot_map", "vggt_omega", "vgg_ttt")
 
 MAX_FRAMES_MODES = ("spread", "first")
 
@@ -134,6 +134,7 @@ def parse_feedforward_config(cfg: dict[str, Any], config_path: Path | None = Non
 
     lingbot_map = _nested(cfg, "lingbot_map")
     vggt_omega = _nested(cfg, "vggt_omega")
+    vgg_ttt = _nested(cfg, "vgg_ttt")
     output = _nested(cfg, "output")
     video = _nested(cfg, "video")
 
@@ -172,4 +173,11 @@ def parse_feedforward_config(cfg: dict[str, Any], config_path: Path | None = Non
         "vggt_omega_enable_alignment": vggt_omega.get("enable_alignment", False),
         "vggt_omega_conf_percentile": vggt_omega.get("conf_percentile", 50.0),
         "vggt_omega_depth_edge_rtol": vggt_omega.get("depth_edge_rtol", 0.03),
+        "vgg_ttt_model_id": vgg_ttt.get("model_id", "nvidia/vgg-ttt"),
+        "vgg_ttt_preprocess_mode": vgg_ttt.get("preprocess_mode", "crop"),
+        "vgg_ttt_image_size": vgg_ttt.get("image_size", 518),
+        "vgg_ttt_conf_percentile": vgg_ttt.get("conf_percentile", 50.0),
+        "vgg_ttt_depth_edge_rtol": vgg_ttt.get("depth_edge_rtol", 0.03),
+        "vgg_ttt_num_ttt_steps": vgg_ttt.get("num_ttt_steps", 1),
+        "vgg_ttt_memory_efficient_inference": vgg_ttt.get("memory_efficient_inference", False),
     }

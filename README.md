@@ -178,6 +178,8 @@ feedforward_output/{engine}_{timestamp}/
 
 ## 🔀 Time-sync comparison (GLOMAP vs feedforward)
 
+![GLOMAP vs LingBot-Map comparison](assets/glomap_vs_lingbot_comparison.gif)
+
 Side-by-side `.blend` with a **shared timeline** — scrub once, both reconstructions play in sync. Use the same input video and the same extraction fps (`video.fps: 2` in both mapping and feedforward configs).
 
 <details>

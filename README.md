@@ -80,65 +80,6 @@ Output: `sparse/0/` plus `visualize.blend` (unless `--no-blend`).
 
 ---
 
-## 🔀 Time-sync comparison (GLOMAP vs feedforward)
-
-Side-by-side `.blend` with a **shared timeline** — scrub once, both reconstructions play in sync. Use the same input video and the same extraction fps (`video.fps: 2` in both mapping and feedforward configs).
-
-<details>
-<summary>Compare workflow</summary>
-
-**1. Run both pipelines on the same input**
-
-```bash
-./run_glomap.sh --input test_home.mp4 --output_path mapping_output/test_home_glomap
-./run_lingbot_map.sh --input test_home.mp4 --output_path feedforward_output/lingbot_map_test_home
-```
-
-**2. Combine into one compare `.blend`**
-
-```bash
-./run_compare_blend.sh \
-  --left  mapping_output/test_home_glomap/sparse/0 \
-  --right feedforward_output/lingbot_map_test_home/predictions.npz \
-  --output compare_output/glomap_vs_lingbot.blend
-```
-
-Each side can be:
-- `predictions.npz` (LingBot-Map, VGGT-Omega, …)
-- `sparse/0/` folder from GLOMAP/COLMAP mapping
-
-**3. View in Blender**
-
-Open the compare `.blend` — split viewport (left vs right), shared timeline. Press **Spacebar** to play both animations together.
-
-**Feedforward vs feedforward** works the same way:
-
-```bash
-./run_compare_blend.sh \
-  --left  feedforward_output/vggt_omega_test/predictions.npz \
-  --right feedforward_output/lingbot_map_test/predictions.npz \
-  --output compare_output/vggt_vs_lingbot.blend
-```
-
-**Python API:**
-
-```python
-python -m vibephysics.feedforward.export compare \
-  --inputs mapping_output/test_home_glomap/sparse/0 \
-           feedforward_output/lingbot_map_test_home/predictions.npz \
-  --output compare_output/glomap_vs_lingbot.blend \
-  --video_fps 2
-```
-
-**Timing notes**
-- Both sides use the same animation model: duration ≈ `(num_frames - 1) / video_fps`
-- For a fair comparison, use the **same video** and **same `video.fps`** when extracting frames
-- GLOMAP may register fewer cameras than extracted frames → its animation can be shorter than the source video
-
-</details>
-
----
-
 ## 🧠 Feedforward reconstruction
 
 ![Feedforward Comparison](assets/feedforward_comparison.gif)
@@ -230,6 +171,65 @@ feedforward_output/{engine}_{timestamp}/
 ```
 
 `predictions.npz` uses Blender Z-up (`metadata.world_coordinates: blender_z_up`). Ground align runs before save when `align_ground: true`; Blender does not re-align or re-axis-convert on load.
+
+</details>
+
+---
+
+## 🔀 Time-sync comparison (GLOMAP vs feedforward)
+
+Side-by-side `.blend` with a **shared timeline** — scrub once, both reconstructions play in sync. Use the same input video and the same extraction fps (`video.fps: 2` in both mapping and feedforward configs).
+
+<details>
+<summary>Compare workflow</summary>
+
+**1. Run both pipelines on the same input**
+
+```bash
+./run_glomap.sh --input test_home.mp4 --output_path mapping_output/test_home_glomap
+./run_lingbot_map.sh --input test_home.mp4 --output_path feedforward_output/lingbot_map_test_home
+```
+
+**2. Combine into one compare `.blend`**
+
+```bash
+./run_compare_blend.sh \
+  --left  mapping_output/test_home_glomap/sparse/0 \
+  --right feedforward_output/lingbot_map_test_home/predictions.npz \
+  --output compare_output/glomap_vs_lingbot.blend
+```
+
+Each side can be:
+- `predictions.npz` (LingBot-Map, VGGT-Omega, …)
+- `sparse/0/` folder from GLOMAP/COLMAP mapping
+
+**3. View in Blender**
+
+Open the compare `.blend` — split viewport (left vs right), shared timeline. Press **Spacebar** to play both animations together.
+
+**Feedforward vs feedforward** works the same way:
+
+```bash
+./run_compare_blend.sh \
+  --left  feedforward_output/vggt_omega_test/predictions.npz \
+  --right feedforward_output/lingbot_map_test/predictions.npz \
+  --output compare_output/vggt_vs_lingbot.blend
+```
+
+**Python API:**
+
+```python
+python -m vibephysics.feedforward.export compare \
+  --inputs mapping_output/test_home_glomap/sparse/0 \
+           feedforward_output/lingbot_map_test_home/predictions.npz \
+  --output compare_output/glomap_vs_lingbot.blend \
+  --video_fps 2
+```
+
+**Timing notes**
+- Both sides use the same animation model: duration ≈ `(num_frames - 1) / video_fps`
+- For a fair comparison, use the **same video** and **same `video.fps`** when extracting frames
+- GLOMAP may register fewer cameras than extracted frames → its animation can be shorter than the source video
 
 </details>
 

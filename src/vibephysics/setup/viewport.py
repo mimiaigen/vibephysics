@@ -29,6 +29,14 @@ def get_view3d_areas(screen):
     return sorted(view3d_areas, key=lambda a: a.x)
 
 
+def _get_view3d_areas_for_layout(screen, layout="left-right"):
+    """Get VIEW_3D areas ordered by compare layout."""
+    view3d_areas = [a for a in screen.areas if a.type == 'VIEW_3D']
+    if layout == "top-down":
+        return sorted(view3d_areas, key=lambda a: a.y, reverse=True)
+    return sorted(view3d_areas, key=lambda a: a.x)
+
+
 def get_space_view3d(area):
     """Get the SpaceView3D from an area."""
     for space in area.spaces:
@@ -37,15 +45,21 @@ def get_space_view3d(area):
     return None
 
 
-def split_viewport_horizontal(factor=0.5):
+def split_viewport_pair(factor=0.5, layout="left-right"):
     """
-    Split the current 3D viewport horizontally into two viewports.
+    Split the current 3D viewport into two viewports.
+
+    layout="left-right" creates side-by-side panes. layout="top-down" creates
+    vertically stacked panes and returns them as (top, bottom).
     """
+    if layout not in {"left-right", "top-down"}:
+        raise ValueError("layout must be 'left-right' or 'top-down'")
+
     screen = bpy.context.screen
     if not screen:
         return None, None
     
-    view3d_areas = get_view3d_areas(screen)
+    view3d_areas = _get_view3d_areas_for_layout(screen, layout)
     
     if not view3d_areas:
         return None, None
@@ -56,16 +70,24 @@ def split_viewport_horizontal(factor=0.5):
     area = view3d_areas[0]
     with bpy.context.temp_override(area=area, region=area.regions[0]):
         try:
-            bpy.ops.screen.area_split(direction='VERTICAL', factor=factor)
+            direction = 'VERTICAL' if layout == "left-right" else 'HORIZONTAL'
+            bpy.ops.screen.area_split(direction=direction, factor=factor)
         except Exception as e:
             print(f"⚠️ Could not split viewport: {e}")
             return None, None
     
-    view3d_areas = get_view3d_areas(screen)
+    view3d_areas = _get_view3d_areas_for_layout(screen, layout)
     if len(view3d_areas) < 2:
         return None, None
     
     return view3d_areas[0], view3d_areas[-1]
+
+
+def split_viewport_horizontal(factor=0.5):
+    """
+    Split the current 3D viewport horizontally into two side-by-side viewports.
+    """
+    return split_viewport_pair(factor=factor, layout="left-right")
 
 
 def configure_viewport_shading(space, shading_type='SOLID', light='FLAT', 
@@ -333,11 +355,11 @@ def _setup_compare_viewport(area, objects: list[bpy.types.Object], *, fill: floa
     return space.local_view is not None
 
 
-def setup_compare_dual_viewport(left_collection: str, right_collection: str):
+def setup_compare_dual_viewport(left_collection: str, right_collection: str, *, layout: str = "left-right"):
     """
     Split the 3D view into two independent viewports with a shared timeline.
 
-    Left and right panes each isolate one reconstruction via Local View.
+    Left/right or top/bottom panes each isolate one reconstruction via Local View.
     View orientation is framed independently per side (not camera-synced).
     """
     left_objects = _objects_in_collection(left_collection)
@@ -346,7 +368,7 @@ def setup_compare_dual_viewport(left_collection: str, right_collection: str):
         print("⚠️ Compare viewport skipped: missing collection objects")
         return None, None
 
-    left_area, right_area = split_viewport_horizontal(0.5)
+    left_area, right_area = split_viewport_pair(0.5, layout=layout)
     if not left_area or not right_area:
         print("⚠️ Compare viewport skipped: could not split 3D view")
         return None, None
@@ -358,7 +380,7 @@ def setup_compare_dual_viewport(left_collection: str, right_collection: str):
 
     print(
         f"✅ Compare viewport ready: left={left_collection}, right={right_collection} "
-        "(shared timeline, independent views)"
+        f"(layout={layout}, shared timeline, independent views)"
     )
     return left_area, right_area
 

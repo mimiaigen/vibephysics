@@ -12,7 +12,7 @@ from .common import DEFAULT_LINGBOT_MAP_MODEL, DEFAULT_VIDEO_FPS
 CONFIGS_DIR = Path(__file__).resolve().parent / "configs"
 DEFAULT_FEEDFORWARD_CONFIG = CONFIGS_DIR / "feedforward.yaml"
 
-FEEDFORWARD_ENGINES = ("lingbot_map", "vggt_omega", "vgg_ttt")
+FEEDFORWARD_ENGINES = ("lingbot_map", "vggt_omega", "vgg_ttt", "map_anything")
 
 MAX_FRAMES_MODES = ("spread", "first")
 
@@ -135,6 +135,7 @@ def parse_feedforward_config(cfg: dict[str, Any], config_path: Path | None = Non
     lingbot_map = _nested(cfg, "lingbot_map")
     vggt_omega = _nested(cfg, "vggt_omega")
     vgg_ttt = _nested(cfg, "vgg_ttt")
+    map_anything = _nested(cfg, "map_anything")
     output = _nested(cfg, "output")
     video = _nested(cfg, "video")
 
@@ -180,4 +181,12 @@ def parse_feedforward_config(cfg: dict[str, Any], config_path: Path | None = Non
         "vgg_ttt_depth_edge_rtol": vgg_ttt.get("depth_edge_rtol", 0.03),
         "vgg_ttt_num_ttt_steps": vgg_ttt.get("num_ttt_steps", 1),
         "vgg_ttt_memory_efficient_inference": vgg_ttt.get("memory_efficient_inference", False),
+        "map_anything_model": map_anything.get("model", "vggt"),
+        "map_anything_model_kwargs": map_anything.get("model_kwargs"),
+        "map_anything_install_all": map_anything.get("install_all", False),
+        "map_anything_resolution": map_anything.get("resolution"),
+        "map_anything_norm_type": map_anything.get("norm_type"),
+        "map_anything_patch_size": map_anything.get("patch_size"),
+        "map_anything_resize_mode": map_anything.get("resize_mode", "fixed_mapping"),
+        "map_anything_size": map_anything.get("size"),
     }

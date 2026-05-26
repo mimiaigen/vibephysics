@@ -1,8 +1,8 @@
 #!/bin/bash
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-CONFIG="${CONFIG:-$SCRIPT_DIR/src/vibephysics/feedforward/configs/feedforward_vgg_ttt.yaml}"
-RUN_LABEL="run_vgg_ttt"
+CONFIG="${CONFIG:-$SCRIPT_DIR/src/vibephysics/feedforward/configs/feedforward_map_anything.yaml}"
+RUN_LABEL="run_map_anything"
 source "$SCRIPT_DIR/feedforward_run.inc.sh"
 
 python_has() {
@@ -105,23 +105,22 @@ if ! resolve_python; then
     echo "Fix options:" >&2
     echo '  conda create -n vibephysics python=3.11 && conda activate vibephysics' >&2
     echo '  pip install "numpy<2" vibephysics bpy' >&2
-    echo "First run will auto-install VGG-T³ and download the model from Hugging Face." >&2
+    echo "First run will auto-install Map-Anything and download any model checkpoints." >&2
     echo "Or set VIBEPHYSICS_PYTHON=/path/to/python" >&2
     exit 1
 fi
 
 export PYTHONPATH="${SCRIPT_DIR}/src${PYTHONPATH:+:$PYTHONPATH}"
 export KMP_DUPLICATE_LIB_OK=TRUE
-export TORCHDYNAMO_DISABLE="${TORCHDYNAMO_DISABLE:-1}"
-
-"$PYTHON" -c "from vibephysics.feedforward.vgg_ttt import ensure_dependencies; import sys; sys.exit(0 if ensure_dependencies() else 1)"
 
 usage() {
-    echo "Usage: $0 [--config <yaml>] [--input <path>] [--output_path <path>] [--mode crop|pad] [--max_frames N] [--max_frames_mode first|spread]"
+    echo "Usage: $0 [--config <yaml>] [--input <path>] [--output_path <path>] [--model <factory-key>] [--install-all] [--no-install] [--mode fixed_mapping|longest_side|square|fixed_size] [--max_frames N] [--max_frames_mode first|spread]"
     echo ""
     feedforward_usage_frame_args
     echo ""
     echo "Frame limits apply via video.max_frames in config (shared by all engines)."
+    echo "Map-Anything model keys include: mapanything, mapanything_apache, vggt, dust3r, mast3r, pi3, pi3x, pow3r, pow3r_ba, anycalib, must3r, da3."
+    echo "Per-model extras auto-install with numpy<2 pinned; --no-install disables all pip installs."
     exit 1
 }
 
@@ -130,6 +129,9 @@ while [[ "$#" -gt 0 ]]; do
         --config) CONFIG="$2"; shift ;;
         --input|--image_path) INPUT="$2"; shift ;;
         --output_path) OUTPUT_PATH="$2"; shift ;;
+        --model) MODEL="$2"; shift ;;
+        --install-all|--install_all|--map-anything-install-all|--map_anything_install_all) INSTALL_ALL=1 ;;
+        --no-install|--no_install) export VIBEPHYSICS_NO_AUTO_INSTALL=1 ;;
         --mode) MODE="$2"; shift ;;
         --max_frames) MAX_FRAMES="$2"; shift ;;
         --max_frames_mode) MAX_FRAMES_MODE="$2"; shift ;;
@@ -139,13 +141,28 @@ while [[ "$#" -gt 0 ]]; do
     shift
 done
 
+"$PYTHON" - "$CONFIG" "${MODEL:-}" "${INSTALL_ALL:-0}" <<'PY'
+import sys
+from pathlib import Path
+
+from vibephysics.feedforward.config import load_yaml_config
+from vibephysics.feedforward.map_anything import ensure_dependencies
+
+config = load_yaml_config(Path(sys.argv[1]))
+model = sys.argv[2] or (config.get("map_anything") or {}).get("model") or "vggt"
+install_all = sys.argv[3] == "1"
+sys.exit(0 if ensure_dependencies(model_name=model, install_all=install_all) else 1)
+PY
+
 ARGS=(--config "$CONFIG")
 [ -n "${INPUT:-}" ] && ARGS+=(--input "$INPUT")
 [ -n "${OUTPUT_PATH:-}" ] && ARGS+=(--output_path "$OUTPUT_PATH")
+[ -n "${MODEL:-}" ] && ARGS+=(--model "$MODEL")
+[ -n "${INSTALL_ALL:-}" ] && ARGS+=(--map-anything-install-all)
 [ -n "${MODE:-}" ] && ARGS+=(--mode "$MODE")
 feedforward_append_frame_args
 
-echo "--- [run_vgg_ttt] Python: $PYTHON ---"
+echo "--- [run_map_anything] Python: $PYTHON ---"
 feedforward_print_frame_plan "$CONFIG" "${INPUT:-}"
 
 exec "$PYTHON" -m vibephysics.feedforward.reconstruct "${ARGS[@]}"

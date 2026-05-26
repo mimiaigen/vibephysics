@@ -28,6 +28,7 @@ ENGINE_COLLECTION_NAMES = {
 
 TRAJECTORY_RADIUS_FACTOR = 0.0015
 TRAJECTORY_RADIUS_MIN = 0.0008
+POINT_RADIUS_FACTOR = 0.01
 
 
 class _AnimationTiming:
@@ -148,7 +149,7 @@ def add_point_cloud_geo_nodes(
     mesh_to_points = node_group.nodes.new("GeometryNodeMeshToPoints")
     math_node = node_group.nodes.new("ShaderNodeMath")
     math_node.operation = "MULTIPLY"
-    math_node.inputs[1].default_value = 0.002
+    math_node.inputs[1].default_value = POINT_RADIUS_FACTOR
     named_attr = node_group.nodes.new("GeometryNodeInputNamedAttribute")
     named_attr.inputs["Name"].default_value = "conf"
     named_attr.data_type = "FLOAT"

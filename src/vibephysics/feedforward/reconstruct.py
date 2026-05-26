@@ -476,6 +476,7 @@ _INSTALL_HINTS = {
     "lingbot_map": "pip install vibephysics (deps auto-install on first run)",
     "vggt_omega": "pip install vibephysics (deps auto-install on first run; HF access required)",
     "vgg_ttt": "pip install vibephysics (deps auto-install on first run)",
+    "map_anything": "pip install vibephysics (deps auto-install on first run)",
 }
 
 
@@ -543,6 +544,10 @@ def _engine_available(engine: str) -> bool:
         from .vgg_ttt import is_available
 
         return is_available()
+    if engine == "map_anything":
+        from .map_anything import is_available
+
+        return is_available()
     return False
 
 
@@ -593,6 +598,14 @@ def reconstruct(
     vgg_ttt_depth_edge_rtol: float = 0.03,
     vgg_ttt_num_ttt_steps: int | None = 1,
     vgg_ttt_memory_efficient_inference: bool = False,
+    map_anything_model: str = "vggt",
+    map_anything_model_kwargs: dict | None = None,
+    map_anything_install_all: bool = False,
+    map_anything_resolution: int | None = None,
+    map_anything_norm_type: str | None = None,
+    map_anything_patch_size: int | None = None,
+    map_anything_resize_mode: str = "fixed_mapping",
+    map_anything_size: int | tuple[int, int] | None = None,
     video_fps: float | None = None,
     video_quality: int = 2,
     verbose: bool = True,
@@ -675,6 +688,23 @@ def reconstruct(
                 conf_percentile=vgg_ttt_conf_percentile,
                 num_ttt_steps=vgg_ttt_num_ttt_steps,
                 memory_efficient_inference=vgg_ttt_memory_efficient_inference,
+                verbose=verbose,
+            )
+        elif engine == "map_anything":
+            from .map_anything import run_map_anything
+
+            prediction = run_map_anything(
+                image_path=image_path,
+                model_name=map_anything_model,
+                model_kwargs=map_anything_model_kwargs,
+                install_all_extras=map_anything_install_all,
+                resolution=map_anything_resolution,
+                norm_type=map_anything_norm_type,
+                patch_size=map_anything_patch_size,
+                resize_mode=map_anything_resize_mode,
+                size=map_anything_size,
+                max_frames=max_frames,
+                max_frames_mode=max_frames_mode,
                 verbose=verbose,
             )
         else:
@@ -762,6 +792,7 @@ def reconstruct(
 _PREPROCESS_MODES = {
     "vggt_omega": ("balanced", "max_size"),
     "vgg_ttt": ("crop", "pad"),
+    "map_anything": ("fixed_mapping", "longest_side", "square", "fixed_size"),
 }
 
 
@@ -772,6 +803,8 @@ def reconstruct_from_config(
     preprocess_mode: str | None = None,
     max_frames: int | None = None,
     max_frames_mode: str | None = None,
+    map_anything_model: str | None = None,
+    map_anything_install_all: bool = False,
 ) -> Path:
     from .config import apply_overrides, apply_video_frame_overrides, load_yaml_config, parse_feedforward_config
 
@@ -785,6 +818,27 @@ def reconstruct_from_config(
         max_frames=max_frames,
         max_frames_mode=max_frames_mode,
     )
+    if map_anything_model is not None:
+        if cfg.get("engine") != "map_anything":
+            raise ValueError("--model is only supported when engine is 'map_anything'")
+        from .map_anything import _model_defaults, default_model_kwargs
+
+        section = cfg.setdefault("map_anything", {})
+        if not isinstance(section, dict):
+            raise ValueError("Config section 'map_anything' must be a mapping")
+        resolution, norm_type, patch_size = _model_defaults(map_anything_model)
+        section["model"] = map_anything_model
+        section["model_kwargs"] = default_model_kwargs(map_anything_model)
+        section["resolution"] = resolution
+        section["norm_type"] = norm_type
+        section["patch_size"] = patch_size
+    if map_anything_install_all:
+        if cfg.get("engine") != "map_anything":
+            raise ValueError("--map-anything-install-all is only supported when engine is 'map_anything'")
+        section = cfg.setdefault("map_anything", {})
+        if not isinstance(section, dict):
+            raise ValueError("Config section 'map_anything' must be a mapping")
+        section["install_all"] = True
     if preprocess_mode is not None:
         engine = cfg.get("engine")
         if engine not in _PREPROCESS_MODES:
@@ -797,7 +851,10 @@ def reconstruct_from_config(
         section = cfg.setdefault(engine, {})
         if not isinstance(section, dict):
             raise ValueError(f"Config section '{engine}' must be a mapping")
-        section["preprocess_mode"] = preprocess_mode
+        if engine == "map_anything":
+            section["resize_mode"] = preprocess_mode
+        else:
+            section["preprocess_mode"] = preprocess_mode
     params = parse_feedforward_config(cfg, config_path=config_path.resolve())
     return reconstruct(**params)
 
@@ -809,7 +866,7 @@ def main() -> None:
 
     os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
 
-    parser = argparse.ArgumentParser(description="Run dense feedforward reconstruction (LingBot-Map or VGGT-Omega).")
+    parser = argparse.ArgumentParser(description="Run dense feedforward reconstruction.")
     parser.add_argument(
         "--config",
         type=Path,
@@ -842,7 +899,19 @@ def main() -> None:
         "--mode",
         dest="preprocess_mode",
         default=None,
-        help="Preprocess mode override (vggt_omega: balanced|max_size; vgg_ttt: crop|pad).",
+        help="Preprocess mode override (vggt_omega: balanced|max_size; vgg_ttt: crop|pad; map_anything: fixed_mapping|longest_side|square|fixed_size).",
+    )
+    parser.add_argument(
+        "--model",
+        dest="map_anything_model",
+        default=None,
+        help="Map-Anything model_factory key override (for engine=map_anything).",
+    )
+    parser.add_argument(
+        "--map-anything-install-all",
+        "--map_anything_install_all",
+        action="store_true",
+        help="Install Map-Anything with the upstream [all] extra before running.",
     )
     args = parser.parse_args()
 
@@ -854,6 +923,8 @@ def main() -> None:
             preprocess_mode=args.preprocess_mode,
             max_frames=args.max_frames,
             max_frames_mode=args.max_frames_mode,
+            map_anything_model=args.map_anything_model,
+            map_anything_install_all=args.map_anything_install_all,
         )
         sys.exit(0)
     except ValueError as exc:

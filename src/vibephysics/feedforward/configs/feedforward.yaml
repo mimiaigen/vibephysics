@@ -40,3 +40,22 @@ vggt_omega:
   enable_alignment: false
   conf_percentile: 50.0
   depth_edge_rtol: 0.03
+
+vgg_ttt:
+  model_id: nvidia/vgg-ttt
+  preprocess_mode: crop
+  image_size: 518
+  conf_percentile: 50.0
+  depth_edge_rtol: 0.03
+  num_ttt_steps: 1
+  memory_efficient_inference: false
+
+map_anything:
+  model: vggt                  # model_factory key; e.g. vggt, mapanything, pi3, moge
+  model_kwargs: null           # null = use repo defaults for the selected model
+  install_all: false          # true = pip install upstream mapanything[all]
+  resolution: 518              # resolution_set for load_images
+  norm_type: identity          # vggt/pi3/moge=identity, mapanything/da3=dinov2, dust3r family=dust3r
+  patch_size: 14
+  resize_mode: fixed_mapping   # fixed_mapping | longest_side | square | fixed_size
+  size: null                   # required for longest_side/square/fixed_size

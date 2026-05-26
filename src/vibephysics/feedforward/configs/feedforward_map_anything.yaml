@@ -1,19 +1,19 @@
-# VGGT-Omega demo config (defaults match official demo_gradio.py)
+# Map-Anything model_factory demo config
 # image_path accepts: folder of images, single image, or video (.mov, .mp4, ...)
-engine: vggt_omega
-image_path: path/to/images
+engine: map_anything
+image_path: test_recording.MOV
 output_path: null
 verbose: true
 
 video:
-  fps: 2              # extraction rate; saved to .vibephysics_extract_fps and reused for animation
+  fps: 2
   quality: 2
-  max_frames: null     # null = all frames; set N to limit count (both engines)
-  max_frames_mode: first   # first = first N consecutive; spread = evenly across input
+  max_frames: null
+  max_frames_mode: first
 
 output:
   save_blend: scene.blend
-  min_confidence: 0.5          # ignored for vggt_omega; see vggt_omega.conf_percentile
+  min_confidence: 0.5
   filter_edges: true
   point_scale: 1.0
   animate: true
@@ -33,14 +33,13 @@ lingbot_map:
   mask_sky: false
 
 vggt_omega:
-  checkpoint: null             # auto-downloads checkpoint_name on first run
+  checkpoint: null
   checkpoint_name: vggt-omega-1b-512
-  resolution: 512              # official --image-resolution
-  preprocess_mode: balanced    # official load_fn default
+  resolution: 512
+  preprocess_mode: balanced
   enable_alignment: false
-  conf_percentile: 50.0        # official demo conf_thres default
+  conf_percentile: 50.0
   depth_edge_rtol: 0.03
-  # Auth: interactive HF login on first run, or export HF_TOKEN before running
 
 vgg_ttt:
   model_id: nvidia/vgg-ttt
@@ -52,8 +51,13 @@ vgg_ttt:
   memory_efficient_inference: false
 
 map_anything:
+  # Direct model_factory key. Defaults follow README "Example 2".
+  # Try other keys by changing model plus preprocessing below:
+  #   mapanything/mapanything_apache/da3 -> norm_type: dinov2
+  #   dust3r/mast3r/pow3r -> resolution: 512, norm_type: dust3r, patch_size: 16
+  #   pi3/pi3x/moge -> norm_type: identity
   model: vggt
-  model_kwargs: null
+  model_kwargs: null          # null = use repo defaults for the selected model
   install_all: false
   resolution: 518
   norm_type: identity

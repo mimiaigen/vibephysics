@@ -14,6 +14,7 @@ DEFAULT_LINGBOT_MAP_MODEL = "lingbot-map"
 LINGBOT_MAP_GIT = "git+https://github.com/robbyant/lingbot-map.git"
 VGGT_OMEGA_GIT = "git+https://github.com/facebookresearch/vggt-omega.git"
 VGG_TTT_GIT = "git+https://github.com/nv-dvl/vgg-ttt.git"
+MAP_ANYTHING_GIT = "git+https://github.com/facebookresearch/map-anything.git"
 DEFAULT_VIDEO_FPS = 2.0
 VIDEO_EXTRACT_FPS_FILE = ".vibephysics_extract_fps"
 
@@ -54,6 +55,11 @@ def is_vggt_omega_engine(engine: str) -> bool:
 def is_vgg_ttt_engine(engine: str) -> bool:
     engine = str(engine)
     return engine == "vgg_ttt" or engine == "vggttt" or engine.startswith("vgg_ttt")
+
+
+def is_map_anything_engine(engine: str) -> bool:
+    engine = str(engine)
+    return engine == "map_anything" or engine == "mapanything" or engine.startswith("map_anything")
 
 
 def discover_images(image_path: Path) -> list[Path]:

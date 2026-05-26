@@ -68,6 +68,15 @@ vgg_ttt = [
     "trimesh",
     "hydra-core",
 ]
+map_anything = [
+    "torch",
+    "torchvision",
+    "opencv-python",
+    "pillow",
+    "huggingface_hub",
+    "hydra-core",
+    "omegaconf",
+]
 dev = [
     "pytest>=7.0",
     "black",

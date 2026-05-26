@@ -189,7 +189,7 @@ def export_compare_blend(args: argparse.Namespace) -> None:
         )
 
     left_collection, right_collection = collection_names
-    setup_compare_dual_viewport(left_collection, right_collection)
+    setup_compare_dual_viewport(left_collection, right_collection, layout=args.layout)
     bpy.context.scene.frame_set(0)
 
     args.output.parent.mkdir(parents=True, exist_ok=True)
@@ -235,6 +235,12 @@ def main() -> None:
     compare.add_argument("--align-ground", action=argparse.BooleanOptionalAction, default=True)
     compare.add_argument("--animation_fps", type=int, default=None)
     compare.add_argument("--video_fps", type=float, default=None)
+    compare.add_argument(
+        "--layout",
+        choices=("left-right", "top-down"),
+        default="left-right",
+        help="Compare viewport layout: side-by-side (left-right) or stacked (top-down)",
+    )
 
     args = parser.parse_args(_script_argv())
 

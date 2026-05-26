@@ -50,9 +50,10 @@ resolve_python() {
 }
 
 usage() {
-    echo "Usage: $0 --left <path> --right <path> [--output <path.blend>]"
+    echo "Usage: $0 --left <path> --right <path> [--output <path.blend>] [--layout left-right|top-down]"
     echo ""
     echo "Each side can be predictions.npz or a COLMAP sparse model folder (sparse/0)."
+    echo "Default layout is left-right; top-down stacks the first input above the second."
     echo ""
     echo "Examples:"
     echo "  # GLOMAP vs LingBot-Map (same video, same fps in both configs)"
@@ -74,6 +75,7 @@ while [[ "$#" -gt 0 ]]; do
         --left) LEFT="$2"; shift ;;
         --right) RIGHT="$2"; shift ;;
         --output) OUTPUT="$2"; shift ;;
+        --layout) LAYOUT="$2"; shift ;;
         -h|--help) usage ;;
         *) echo "Unknown parameter: $1"; usage ;;
     esac
@@ -92,9 +94,11 @@ if ! resolve_python; then
 fi
 
 OUTPUT="${OUTPUT:-$SCRIPT_DIR/feedforward_output/compare.blend}"
+LAYOUT="${LAYOUT:-left-right}"
 export PYTHONPATH="${SCRIPT_DIR}/src${PYTHONPATH:+:$PYTHONPATH}"
 
 echo "--- [run_compare_blend] Python: $PYTHON ---"
 exec "$PYTHON" -m vibephysics.feedforward.export compare \
     --inputs "$LEFT" "$RIGHT" \
-    --output "$OUTPUT"
+    --output "$OUTPUT" \
+    --layout "$LAYOUT"

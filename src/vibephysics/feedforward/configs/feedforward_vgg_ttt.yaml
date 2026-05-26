@@ -49,3 +49,13 @@ vgg_ttt:
   depth_edge_rtol: 0.03
   num_ttt_steps: 1
   memory_efficient_inference: false
+
+map_anything:
+  model: vggt
+  model_kwargs: null
+  install_all: false
+  resolution: 518
+  norm_type: identity
+  patch_size: 14
+  resize_mode: fixed_mapping
+  size: null

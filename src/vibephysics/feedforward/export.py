@@ -95,10 +95,73 @@ def export_blend(args: argparse.Namespace) -> None:
     print(f"[vibephysics] Saved Blender scene to {args.output}")
 
 
+def _reconstruction_kind(path: Path) -> str:
+    path = path.expanduser().resolve()
+    if path.is_file() and path.suffix == ".npz":
+        return "npz"
+    if path.is_dir() and (
+        (path / "cameras.bin").exists() or (path / "cameras.txt").exists()
+    ):
+        return "sparse"
+    raise ValueError(
+        f"Unsupported reconstruction path: {path}. "
+        "Provide predictions.npz or a COLMAP sparse model folder (with cameras.bin)."
+    )
+
+
+def _sparse_frames_dir(sparse_path: Path) -> Path | None:
+    images_link = sparse_path.parent.parent / "images"
+    if images_link.exists():
+        return images_link.resolve()
+    return None
+
+
+def _load_compare_side(
+    path: Path,
+    *,
+    side: str,
+    load_kwargs: dict,
+    align_ground: bool,
+    point_size: float,
+) -> str:
+    kind = _reconstruction_kind(path)
+    if kind == "npz":
+        from vibephysics.feedforward.visual import ENGINE_COLLECTION_NAMES, load_reconstruction
+
+        prediction = _prepare_prediction_for_blend(path, align_ground=align_ground)
+        col_name = ENGINE_COLLECTION_NAMES.get(prediction.engine, f"{prediction.engine.upper()}_Result")
+        load_reconstruction(
+            prediction,
+            global_indices=prediction.metadata.get("selected_indices"),
+            frame_viewports=False,
+            **load_kwargs,
+        )
+        return col_name
+
+    from vibephysics.mapping.map_visual import load_colmap_reconstruction
+
+    parent_name = path.parent.parent.name.lower()
+    if "glomap" in parent_name:
+        col_name = "GLOMAP_Result"
+    elif "colmap" in parent_name:
+        col_name = "COLMAP_Result"
+    else:
+        col_name = f"{side}_Result"
+    load_colmap_reconstruction(
+        str(path),
+        collection_name=col_name,
+        point_size=point_size,
+        animate=load_kwargs.get("animate", True),
+        animation_fps=load_kwargs.get("animation_fps", 24),
+        video_fps=load_kwargs.get("video_fps"),
+        frames_dir=_sparse_frames_dir(path),
+    )
+    return col_name
+
+
 def export_compare_blend(args: argparse.Namespace) -> None:
     import bpy
 
-    from vibephysics.feedforward.visual import ENGINE_COLLECTION_NAMES, load_reconstruction
     from vibephysics.setup.exporter import save_blend as save_blend_file
     from vibephysics.setup.viewport import setup_compare_dual_viewport
 
@@ -106,18 +169,24 @@ def export_compare_blend(args: argparse.Namespace) -> None:
 
     collection_names: list[str] = []
     align_ground = getattr(args, "align_ground", True)
-    for predictions_path in args.predictions:
-        prediction = _prepare_prediction_for_blend(predictions_path, align_ground=align_ground)
-        col_name = ENGINE_COLLECTION_NAMES.get(prediction.engine, f"{prediction.engine.upper()}_Result")
-        load_kwargs = _blend_load_settings(predictions_path, args)
+    point_size = getattr(args, "point_size", 0.03)
+    left_path, right_path = args.inputs
 
-        load_reconstruction(
-            prediction,
-            global_indices=prediction.metadata.get("selected_indices"),
-            frame_viewports=False,
-            **load_kwargs,
+    for side, path in zip(("LEFT", "RIGHT"), (left_path, right_path)):
+        load_kwargs = _blend_load_settings(path, args) if _reconstruction_kind(path) == "npz" else {
+            "animate": bool(args.animate),
+            "animation_fps": int(args.animation_fps or 24),
+            "video_fps": args.video_fps,
+        }
+        collection_names.append(
+            _load_compare_side(
+                path,
+                side=side,
+                load_kwargs=load_kwargs,
+                align_ground=align_ground,
+                point_size=point_size,
+            )
         )
-        collection_names.append(col_name)
 
     left_collection, right_collection = collection_names
     setup_compare_dual_viewport(left_collection, right_collection)
@@ -145,17 +214,23 @@ def main() -> None:
     single.add_argument("--animation_fps", type=int, default=24)
     single.add_argument("--video_fps", type=float, default=None)
 
-    compare = sub.add_parser("compare", help="Combine two predictions into one compare .blend")
+    compare = sub.add_parser(
+        "compare",
+        help="Combine two reconstructions into one time-synced compare .blend",
+    )
     compare.add_argument(
+        "--inputs",
         "--predictions",
         type=Path,
         nargs=2,
         metavar=("LEFT", "RIGHT"),
         required=True,
-        help="Left and right predictions.npz paths",
+        dest="inputs",
+        help="Left/right paths: predictions.npz and/or COLMAP sparse/0 folder",
     )
     compare.add_argument("--output", type=Path, required=True, help="Output .blend path")
     compare.add_argument("--point_scale", type=float, default=1.0)
+    compare.add_argument("--point-size", type=float, default=0.03, dest="point_size")
     compare.add_argument("--animate", action=argparse.BooleanOptionalAction, default=True)
     compare.add_argument("--align-ground", action=argparse.BooleanOptionalAction, default=True)
     compare.add_argument("--animation_fps", type=int, default=None)
@@ -168,9 +243,13 @@ def main() -> None:
             parser.error(f"Predictions file not found: {args.predictions}")
         export_blend(args)
     elif args.command == "compare":
-        for path in args.predictions:
-            if not path.is_file():
-                parser.error(f"Predictions file not found: {path}")
+        for path in args.inputs:
+            try:
+                _reconstruction_kind(path)
+            except ValueError as exc:
+                parser.error(str(exc))
+            if not path.exists():
+                parser.error(f"Input not found: {path}")
         export_compare_blend(args)
 
 

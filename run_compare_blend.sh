@@ -50,9 +50,18 @@ resolve_python() {
 }
 
 usage() {
-    echo "Usage: $0 --left <predictions.npz> --right <predictions.npz> [--output <path.blend>]"
+    echo "Usage: $0 --left <path> --right <path> [--output <path.blend>]"
     echo ""
-    echo "Example:"
+    echo "Each side can be predictions.npz or a COLMAP sparse model folder (sparse/0)."
+    echo ""
+    echo "Examples:"
+    echo "  # GLOMAP vs LingBot-Map (same video, same fps in both configs)"
+    echo "  $0 \\"
+    echo "    --left  mapping_output/test_home_glomap/sparse/0 \\"
+    echo "    --right feedforward_output/lingbot_map_test_home/predictions.npz \\"
+    echo "    --output compare_output/glomap_vs_lingbot.blend"
+    echo ""
+    echo "  # Feedforward vs feedforward"
     echo "  $0 \\"
     echo "    --left  feedforward_output/vggt_omega_test/predictions.npz \\"
     echo "    --right feedforward_output/lingbot_map_test/predictions.npz \\"
@@ -87,5 +96,5 @@ export PYTHONPATH="${SCRIPT_DIR}/src${PYTHONPATH:+:$PYTHONPATH}"
 
 echo "--- [run_compare_blend] Python: $PYTHON ---"
 exec "$PYTHON" -m vibephysics.feedforward.export compare \
-    --predictions "$LEFT" "$RIGHT" \
+    --inputs "$LEFT" "$RIGHT" \
     --output "$OUTPUT"

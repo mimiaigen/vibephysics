@@ -53,6 +53,8 @@ def extract_video_frames(
     extracted = sorted(output_dir.glob("frame_*.jpg"))
     if not extracted:
         raise RuntimeError(f"No frames extracted from {video_path}")
+    if fps is not None:
+        (output_dir / ".vibephysics_extract_fps").write_text(str(float(fps)))
     if verbose:
         print(f"--- [vibephysics] Extracted {len(extracted)} frames to {output_dir} ---")
     return output_dir
@@ -123,3 +125,17 @@ def prepare_output_directory(image_path: Path, output_path: Path | None = None, 
             if verbose: print(f"Warning: Could not create images symlink: {e}")
             
     return output_path
+
+
+def find_sparse_model(sparse_path: Path) -> Path | None:
+    """Return the first COLMAP sparse model directory under sparse_path."""
+    sparse_path = Path(sparse_path)
+    preferred = sparse_path / "0"
+    if (preferred / "cameras.bin").exists() or (preferred / "cameras.txt").exists():
+        return preferred
+    for subdir in sorted(sparse_path.iterdir()):
+        if subdir.is_dir() and (
+            (subdir / "cameras.bin").exists() or (subdir / "cameras.txt").exists()
+        ):
+            return subdir
+    return None

@@ -8,6 +8,13 @@ video:
   fps: 2
   quality: 2
 
-matcher: exhaustive
+matcher: sequential
 camera_model: SIMPLE_RADIAL
 verbose: true
+
+visualize:
+  save_blend: true
+  animate: true
+  animation_fps: 24
+  point_size: 0.03
+  rotation: [-90, 0, 0]

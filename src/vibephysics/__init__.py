@@ -49,13 +49,13 @@ if HAS_BPY:
 
 def __getattr__(name: str):
     if name == "mapping":
-        from . import mapping
+        import importlib
 
-        return mapping
+        return importlib.import_module(".mapping", __name__)
     if name == "feedforward":
-        from . import feedforward
+        import importlib
 
-        return feedforward
+        return importlib.import_module(".feedforward", __name__)
     if not HAS_BPY:
         raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
     if name == "setup":

@@ -5,7 +5,107 @@ import math
 import mathutils
 from pathlib import Path
 
-def create_camera_object(image, camera, collection, scale=0.1):
+from vibephysics.feedforward.common import VIDEO_EXTRACT_FPS_FILE
+from vibephysics.feedforward.visual import (
+    TRAJECTORY_RADIUS_FACTOR,
+    TRAJECTORY_RADIUS_MIN,
+    _AnimationTiming,
+    _apply_build_animation,
+    _apply_scene_scale_camera_display,
+    _configure_scene_timeline,
+    _configure_viewports_material_preview,
+    _create_playback_camera,
+    _frame_viewports_on_point_cloud,
+    _keyframe_camera_visibility,
+    create_point_cloud_object,
+)
+
+def _resolve_video_fps(frames_dir: str | Path | None, video_fps: float | None) -> float:
+    if video_fps is not None:
+        return float(video_fps)
+    if frames_dir is not None:
+        fps_file = Path(frames_dir) / VIDEO_EXTRACT_FPS_FILE
+        if fps_file.exists():
+            return float(fps_file.read_text().strip())
+    return 2.0
+
+
+def _ordered_images(recon: pycolmap.Reconstruction) -> list[tuple[int, object]]:
+    return sorted(recon.images.items(), key=lambda item: item[1].name)
+
+
+def _scene_scale_from_cameras(camera_objects: list[bpy.types.Object]) -> float:
+    if len(camera_objects) <= 1:
+        return 1.0
+    centers = np.array([obj.matrix_world.translation for obj in camera_objects], dtype=np.float64)
+    return float(max(np.linalg.norm(np.ptp(centers, axis=0)), 0.1))
+
+
+def _colmap_points_for_animation(
+    points3D: dict,
+    image_index: dict[int, int],
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    xyz, rgb, conf, frame_ids = [], [], [], []
+    for point in points3D.values():
+        track_ids = [element.image_id for element in point.track.elements if element.image_id in image_index]
+        if not track_ids:
+            continue
+        xyz.append(point.xyz)
+        rgb.append(point.color / 255.0)
+        conf.append(10.0)
+        frame_ids.append(min(image_index[iid] for iid in track_ids))
+    if not xyz:
+        return (
+            np.empty((0, 3), dtype=np.float64),
+            np.empty((0, 4), dtype=np.float32),
+            np.empty((0,), dtype=np.float32),
+            np.empty((0,), dtype=np.int32),
+        )
+    colors = np.hstack(
+        (np.asarray(rgb, dtype=np.float32), np.ones((len(rgb), 1), dtype=np.float32))
+    )
+    return (
+        np.asarray(xyz, dtype=np.float64),
+        colors,
+        np.asarray(conf, dtype=np.float32),
+        np.asarray(frame_ids, dtype=np.int32),
+    )
+
+
+def _create_camera_trajectory(
+    camera_objects: list[bpy.types.Object],
+    collection: bpy.types.Collection,
+    scene_scale: float,
+    timing: _AnimationTiming | None,
+    animate: bool,
+) -> bpy.types.Object | None:
+    if len(camera_objects) < 2:
+        return None
+    radius = max(scene_scale * TRAJECTORY_RADIUS_FACTOR, TRAJECTORY_RADIUS_MIN)
+    points = [obj.matrix_world.translation for obj in camera_objects]
+    curve_data = bpy.data.curves.new(name="CameraTrajectory", type="CURVE")
+    curve_data.dimensions = "3D"
+    curve_data.fill_mode = "FULL"
+    curve_data.bevel_depth = radius
+    curve_data.bevel_resolution = 2
+    spline = curve_data.splines.new("POLY")
+    spline.points.add(len(points) - 1)
+    for i, co in enumerate(points):
+        spline.points[i].co = (float(co[0]), float(co[1]), float(co[2]), 1.0)
+    traj_obj = bpy.data.objects.new("CameraTrajectory", curve_data)
+    mat = bpy.data.materials.new(name="CameraTrajectoryMaterial")
+    mat.use_nodes = True
+    bsdf = mat.node_tree.nodes.get("Principled BSDF")
+    if bsdf is not None:
+        bsdf.inputs["Base Color"].default_value = (0.2, 0.8, 1.0, 1.0)
+    curve_data.materials.append(mat)
+    collection.objects.link(traj_obj)
+    if animate and timing is not None:
+        _apply_build_animation(traj_obj, timing)
+    return traj_obj
+
+
+def create_camera_object(image, camera, collection, scale=0.1, scene_scale: float | None = None):
     """
     Create a Blender camera object from a Colmap image and camera.
     """
@@ -90,7 +190,10 @@ def create_camera_object(image, camera, collection, scale=0.1):
     cam_data.shift_y = (height / 2.0 - cy) / width
     
     # Set display size for the camera gizmo in viewport
-    cam_data.display_size = scale
+    if scene_scale is not None:
+        _apply_scene_scale_camera_display(cam_data, scene_scale)
+    else:
+        cam_data.display_size = scale
     
     return cam_obj
 
@@ -215,13 +318,18 @@ def create_point_cloud(points3D, collection, name="PointCloud", point_size=0.03)
     return obj
 
 def load_colmap_reconstruction(
-    input_path: str, # Path to sparse/0 folder
+    input_path: str,
     collection_name: str = "Reconstruction",
     import_cameras: bool = True,
     import_points: bool = True,
+    import_trajectory: bool = True,
     camera_scale: float = 0.1,
     point_size: float = 0.03,
-    rotation: tuple = (-90, 0, 0) # Global rotation in degrees (Euler XYZ)
+    rotation: tuple[float, float, float] = (-90, 0, 0),
+    animate: bool = True,
+    animation_fps: int = 24,
+    video_fps: float | None = None,
+    frames_dir: str | Path | None = None,
 ):
     """
     Load Colmap reconstruction output (sparse folder) into Blender.
@@ -229,57 +337,160 @@ def load_colmap_reconstruction(
     input_dir = Path(input_path)
     if not input_dir.exists():
         print(f"Error: Path {input_dir} does not exist.")
-        return
+        return None
 
     print(f"Loading Colmap reconstruction from {input_dir}...")
     recon = pycolmap.Reconstruction(input_dir)
-    
-    # Create collection
+    ordered_images = _ordered_images(recon)
+    image_index = {image_id: idx for idx, (image_id, _) in enumerate(ordered_images)}
+
+    timing = None
+    if animate and len(ordered_images) > 1:
+        timing = _AnimationTiming(
+            num_frames=len(ordered_images),
+            animation_fps=animation_fps,
+            video_fps=_resolve_video_fps(frames_dir, video_fps),
+        )
+        _configure_scene_timeline(timing)
+        print(
+            f"[vibephysics] Animation: {timing.duration_seconds:.1f}s "
+            f"(frames {timing.preview_frame}=full preview, "
+            f"{timing.timeline_start}-{timing.timeline_end} progressive @ "
+            f"{int(round(timing.animation_fps))} fps, source {timing.video_fps:g} fps)"
+        )
+
     if collection_name in bpy.data.collections:
         col = bpy.data.collections[collection_name]
     else:
         col = bpy.data.collections.new(collection_name)
         bpy.context.scene.collection.children.link(col)
-        
-    # Create a root object for the whole reconstruction to allow global manipulation
+
     root_name = f"{collection_name}_Root"
-    if root_name in bpy.data.objects:
-        root_obj = bpy.data.objects[root_name]
-    else:
+    root_obj = bpy.data.objects.get(root_name)
+    if root_obj is None:
         root_obj = bpy.data.objects.new(root_name, None)
         col.objects.link(root_obj)
-    
-    # Apply global rotation to the root
-    root_obj.rotation_mode = 'XYZ'
+    elif not root_obj.users_collection:
+        col.objects.link(root_obj)
+    root_obj.rotation_mode = "XYZ"
     root_obj.rotation_euler = [math.radians(a) for a in rotation]
 
-    # Set scene resolution from the first camera to correctly reflect aspect ratio (e.g. 9:16)
     if import_cameras and recon.cameras:
         first_cam = next(iter(recon.cameras.values()))
         bpy.context.scene.render.resolution_x = first_cam.width
         bpy.context.scene.render.resolution_y = first_cam.height
         bpy.context.scene.render.pixel_aspect_x = 1.0
         bpy.context.scene.render.pixel_aspect_y = 1.0
-        
-    if import_points:
+
+    point_obj = None
+    camera_objects: list[bpy.types.Object] = []
+    scene_scale = 1.0
+
+    if import_cameras and ordered_images:
+        print(f"Importing {len(ordered_images)} cameras...")
+        cameras_col = bpy.data.collections.new("Cameras")
+        col.children.link(cameras_col)
+        for _, image in ordered_images:
+            if image.camera_id not in recon.cameras:
+                continue
+            cam_obj = create_camera_object(
+                image,
+                recon.cameras[image.camera_id],
+                cameras_col,
+                scale=camera_scale,
+            )
+            camera_objects.append(cam_obj)
+        scene_scale = _scene_scale_from_cameras(camera_objects)
+        for cam_obj in camera_objects:
+            _apply_scene_scale_camera_display(cam_obj.data, scene_scale)
+        for idx, cam_obj in enumerate(camera_objects):
+            cam_obj.parent = root_obj
+            if timing is not None:
+                _keyframe_camera_visibility(cam_obj, timing, idx)
+        if timing is not None:
+            playback = _create_playback_camera(camera_objects, cameras_col, scene_scale, timing)
+            if playback is not None:
+                playback.parent = root_obj
+        elif camera_objects:
+            bpy.context.scene.camera = camera_objects[0]
+
+    if import_points and recon.points3D:
         print(f"Importing {len(recon.points3D)} points...")
-        pc_obj = create_point_cloud(recon.points3D, col, point_size=point_size)
-        pc_obj.parent = root_obj
-        
-    if import_cameras:
-        print(f"Importing {len(recon.images)} cameras...")
-        first_cam_obj = None
-        for img_id, image in recon.images.items():
-            if image.camera_id in recon.cameras:
-                cam = recon.cameras[image.camera_id]
-                cam_obj = create_camera_object(image, cam, col, scale=camera_scale)
-                cam_obj.parent = root_obj
-                if first_cam_obj is None:
-                    first_cam_obj = cam_obj
-        
-        # Set the first camera as active for the scene
-        if first_cam_obj:
-            bpy.context.scene.camera = first_cam_obj
-                
+        if timing is not None:
+            points, colors, conf, frame_ids = _colmap_points_for_animation(recon.points3D, image_index)
+            if len(points) > 0:
+                point_obj = create_point_cloud_object(
+                    "Points",
+                    points,
+                    colors,
+                    conf,
+                    collection=col,
+                    scale=max(point_size / 0.002, 1.0),
+                    min_confidence=0.0,
+                    frame_ids=frame_ids,
+                    recon_time_scale=timing.recon_time_scale,
+                )
+                point_obj.parent = root_obj
+        else:
+            point_obj = create_point_cloud(recon.points3D, col, point_size=point_size)
+            point_obj.parent = root_obj
+
+    if import_trajectory and timing is not None and len(camera_objects) >= 2:
+        traj = _create_camera_trajectory(
+            camera_objects,
+            col,
+            scene_scale,
+            timing,
+            animate=True,
+        )
+        if traj is not None:
+            traj.parent = root_obj
+
+    _configure_viewports_material_preview()
+    if point_obj is not None:
+        _frame_viewports_on_point_cloud(point_obj, fill=0.9)
+
     print("Done.")
+    return point_obj
+
+
+def save_reconstruction_blend(
+    sparse_path: str | Path,
+    blend_path: str | Path,
+    point_size: float = 0.03,
+    rotation: tuple[float, float, float] = (-90, 0, 0),
+    collection_name: str = "GLOMAP_Result",
+    animate: bool = True,
+    animation_fps: int = 24,
+    video_fps: float | None = None,
+    frames_dir: str | Path | None = None,
+    verbose: bool = True,
+) -> int:
+    """Load a sparse reconstruction and save a .blend file."""
+    sparse_path = Path(sparse_path)
+    blend_path = Path(blend_path)
+    has_bin = (sparse_path / "cameras.bin").exists()
+    has_txt = (sparse_path / "cameras.txt").exists()
+    if not sparse_path.exists() or not (has_bin or has_txt):
+        print(f"[ERROR] No reconstruction found at {sparse_path}")
+        return 1
+
+    if verbose:
+        print(f"--- [vibephysics] Saving Blender visualization to {blend_path} ---")
+    bpy.ops.wm.read_factory_settings(use_empty=True)
+    load_colmap_reconstruction(
+        str(sparse_path),
+        collection_name=collection_name,
+        point_size=point_size,
+        rotation=rotation,
+        animate=animate,
+        animation_fps=animation_fps,
+        video_fps=video_fps,
+        frames_dir=frames_dir,
+    )
+    blend_path.parent.mkdir(parents=True, exist_ok=True)
+    bpy.ops.wm.save_as_mainfile(filepath=str(blend_path))
+    if verbose:
+        print(f"Saved .blend to {blend_path}")
+    return 0
 

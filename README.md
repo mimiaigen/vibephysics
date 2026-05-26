@@ -31,87 +31,50 @@ pip install git+https://github.com/facebookresearch/vggt-omega.git
 
 ---
 
-## 🗺️ Sparse mapping (GLOMAP & COLMAP)
+## 🗺️ Sparse mapping
 
 ![GLOMAP Demo](assets/glomap_pointcloud_demo.gif)
 
-Structure-from-Motion: sparse point clouds and camera poses, GSplat-ready `sparse/0` layout.
+Sparse point clouds and camera poses in GSplat-ready `sparse/0/` layout. Built on `pycolmap` 4.0+ (GLOMAP global mapper is integrated into COLMAP).
 
 <details>
-<summary>GLOMAP & COLMAP usage</summary>
+<summary>Usage</summary>
 
-### GLOMAP (global mapper)
+**Python API** (video, image folder, or single image):
 
-Set `engine: glomap` in `src/vibephysics/mapping/configs/sfm.yaml`.
-
-GLOMAP is built into COLMAP 4.0+ and runs via `pycolmap.global_mapping` (included with `pip install vibephysics`). It is typically faster than incremental COLMAP on large image sets. The global pipeline uses view-graph calibration for intrinsics, which may differ slightly from incremental self-calibration.
-
-**Config:**
-```yaml
-engine: glomap
-image_path: path/to/images
-output_path: null
-matcher: exhaustive
-camera_model: SIMPLE_RADIAL
-verbose: true
-```
-
-**Command line:**
-```bash
-./run_glomap.sh --image_path path/to/images
-./run_glomap.sh --config my_sfm.yaml --image_path path/to/images
-```
-
-**Python API:**
 ```python
 from vibephysics import mapping
 
-mapping.run_sfm_from_config("src/vibephysics/mapping/configs/sfm.yaml", image_path="path/to/images")
-mapping.glomap_pipeline(image_path="path/to/images")
+# GLOMAP — fast global mapper (default)
+mapping.glomap_pipeline("test_home.mp4", output_path="mapping_output/test_home_glomap", matcher="sequential")
+
+# COLMAP — incremental mapper
+mapping.colmap_pipeline("path/to/images")
 ```
 
-GLOMAP writes COLMAP-format output under `output/.../sparse/0/`. Visualize with the [COLMAP visualization](#colmap-visualization) steps below.
+**CLI** (reads `src/vibephysics/mapping/configs/sfm.yaml`, saves animated `visualize.blend` by default):
 
----
-
-### COLMAP
-
-Set `engine: colmap` in the same `sfm.yaml` (only `engine` changes).
-
-**Command line:**
 ```bash
-./run_glomap.sh --config src/vibephysics/mapping/configs/sfm.yaml --image_path path/to/images
+./run_glomap.sh --input test_home.mp4 --output_path mapping_output/test_home_glomap
+./run_glomap.sh --input test_home.mp4 --no-blend          # sparse only
+./run_glomap.sh --input test_home.mp4 --no-animate        # static .blend
 ```
 
-**Python API:**
-```python
-from vibephysics import mapping
+Press Spacebar in Blender to play the camera path animation (same style as feedforward `.blend` files).
 
-mapping.run_sfm_from_config("src/vibephysics/mapping/configs/sfm.yaml", image_path="path/to/images")
-mapping.colmap_pipeline(image_path="path/to/images")
-```
+Set `engine: glomap` or `engine: colmap` in the YAML. Use `matcher: sequential` for videos.
 
-Output: `sparse/0/` with `cameras.bin`, `images.bin`, `points3D.bin`, etc.
+**Visualize separately** (if you used `--no-blend`):
 
-#### COLMAP visualization {#colmap-visualization}
-
-Load sparse reconstruction (COLMAP or GLOMAP) in Blender. Blender is **viewer only** — `sparse/0` on disk is ground truth.
-
-**Command line:**
 ```bash
-./run_glomap_visual.sh --sparse path/to/sparse/0 --output result.blend
+bash run_glomap_visual.sh --sparse mapping_output/test_home_glomap/sparse/0 --output result.blend
 ```
 
-**Python API:**
 ```python
-from vibephysics import mapping
-
-mapping.load_colmap_reconstruction(
-    input_path="output/mapping_output/sparse/0",
-    point_size=0.03,
-    rotation=(-90, 0, 0),
-)
+mapping.load_colmap_reconstruction("mapping_output/test_home_glomap/sparse/0", point_size=0.03, rotation=(-90, 0, 0))
 ```
+
+Output: `sparse/0/` plus `visualize.blend` (unless `--no-blend`).
 
 </details>
 
@@ -309,7 +272,7 @@ CPU-friendly physics, robots, water, annotations, sparse mapping, and dense feed
 - **🤖 Robot Simulation** – IK walking with Open Duck and Unitree Go2.
 - **💧 Water Physics** – Puddles, ripples, buoyancy.
 - **📊 Annotation Tools** – Bboxes, motion trails, point tracking.
-- **🗺️ Sparse Mapping** – COLMAP incremental and GLOMAP global SfM (via pycolmap 4.0+).
+- **🗺️ Sparse Mapping** – GLOMAP global and COLMAP incremental SfM via pycolmap 4.0+.
 - **🧠 Feedforward** – LingBot-Map and VGGT-Omega.
 - **🔧 Developer Friendly** – Pure Python, `bpy` as a module, no GUI required.
 

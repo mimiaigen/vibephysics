@@ -1,4 +1,4 @@
-"""YAML config loading for sparse SfM mapping pipelines."""
+"""YAML config for the mapping CLI."""
 
 from __future__ import annotations
 
@@ -7,103 +7,54 @@ from typing import Any
 
 import yaml
 
-from .utils import resolve_mapping_input
-
 CONFIGS_DIR = Path(__file__).resolve().parent / "configs"
 DEFAULT_SFM_CONFIG = CONFIGS_DIR / "sfm.yaml"
-
 SFM_ENGINES = ("glomap", "colmap")
 
 
-def load_yaml_config(path: str | Path) -> dict[str, Any]:
-    path = Path(path).expanduser().resolve()
-    if not path.exists():
-        raise FileNotFoundError(f"Config not found: {path}")
+def load_sfm_config(
+    config_path: str | Path,
+    image_path: str | Path | None = None,
+    output_path: str | Path | None = None,
+    save_blend: bool | None = None,
+    blend_path: str | Path | None = None,
+    point_size: float | None = None,
+    rotation: tuple[float, float, float] | None = None,
+) -> dict[str, Any]:
+    path = Path(config_path).expanduser().resolve()
     with path.open() as handle:
-        data = yaml.safe_load(handle)
-    if not isinstance(data, dict):
+        cfg = yaml.safe_load(handle)
+    if not isinstance(cfg, dict):
         raise ValueError(f"Config must be a YAML mapping: {path}")
-    return data
 
+    if image_path is not None:
+        cfg["image_path"] = image_path
+    if output_path is not None:
+        cfg["output_path"] = output_path
+    if not cfg.get("image_path"):
+        raise ValueError(f"{path}: missing required config key 'image_path'")
 
-def _require(cfg: dict[str, Any], key: str, config_path: Path | None = None) -> Any:
-    if key not in cfg or cfg[key] in (None, ""):
-        prefix = f"{config_path}: " if config_path else ""
-        raise ValueError(f"{prefix}missing required config key '{key}'")
-    return cfg[key]
-
-
-def _nested(cfg: dict[str, Any], key: str) -> dict[str, Any]:
-    value = cfg.get(key) or {}
-    if not isinstance(value, dict):
-        raise ValueError(f"Config section '{key}' must be a mapping")
-    return value
-
-
-def apply_overrides(cfg: dict[str, Any], overrides: dict[str, Any]) -> dict[str, Any]:
-    merged = dict(cfg)
-    for key, value in overrides.items():
-        if value is not None:
-            merged[key] = value
-    return merged
-
-
-def parse_sfm_config(cfg: dict[str, Any], config_path: Path | None = None) -> dict[str, Any]:
-    engine = _require(cfg, "engine", config_path)
+    engine = cfg.get("engine", "glomap")
     if engine not in SFM_ENGINES:
-        raise ValueError(f"Invalid SfM engine '{engine}'. Choose one of: {', '.join(SFM_ENGINES)}")
+        raise ValueError(f"Invalid engine '{engine}'. Choose: {', '.join(SFM_ENGINES)}")
 
-    video = _nested(cfg, "video")
+    video = cfg.get("video") or {}
+    visualize = cfg.get("visualize") or {}
+    rot = rotation if rotation is not None else visualize.get("rotation", [-90, 0, 0])
 
     return {
-        "image_path": _require(cfg, "image_path", config_path),
+        "image_path": cfg["image_path"],
         "output_path": cfg.get("output_path"),
-        "engine": engine,
-        "matcher": cfg.get("matcher", "exhaustive"),
+        "mapper": engine,
+        "matcher": cfg.get("matcher", "sequential"),
         "camera_model": cfg.get("camera_model", "SIMPLE_RADIAL"),
         "verbose": cfg.get("verbose", True),
         "video_fps": video.get("fps", 2.0),
         "video_quality": video.get("quality", 2),
+        "save_blend": save_blend if save_blend is not None else visualize.get("save_blend", True),
+        "blend_path": blend_path if blend_path is not None else visualize.get("blend_path"),
+        "point_size": point_size if point_size is not None else visualize.get("point_size", 0.03),
+        "rotation": tuple(rot),
+        "animate": visualize.get("animate", True),
+        "animation_fps": visualize.get("animation_fps", 24),
     }
-
-
-def run_sfm_from_config(
-    config_path: str | Path,
-    image_path: str | Path | None = None,
-    output_path: str | Path | None = None,
-) -> int:
-    config_path = Path(config_path)
-    cfg = apply_overrides(
-        load_yaml_config(config_path),
-        {"image_path": image_path, "output_path": output_path},
-    )
-    params = parse_sfm_config(cfg, config_path=config_path.resolve())
-    params["image_path"] = resolve_mapping_input(
-        params["image_path"],
-        video_fps=params.pop("video_fps"),
-        video_quality=params.pop("video_quality"),
-        verbose=params["verbose"],
-    )
-
-    if params["engine"] == "glomap":
-        from .glomap import glomap_pipeline
-
-        return glomap_pipeline(
-            params["image_path"],
-            params["output_path"],
-            None,
-            params["matcher"],
-            params["camera_model"],
-            params["verbose"],
-        )
-
-    from .colmap import colmap_pipeline
-
-    return colmap_pipeline(
-        params["image_path"],
-        params["output_path"],
-        None,
-        params["matcher"],
-        params["camera_model"],
-        params["verbose"],
-    )

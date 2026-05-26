@@ -25,6 +25,9 @@ ENGINE_COLLECTION_NAMES = {
     "vggt": "VGGT_Omega_Result",
 }
 
+TRAJECTORY_RADIUS_FACTOR = 0.0015
+TRAJECTORY_RADIUS_MIN = 0.0008
+
 
 class _AnimationTiming:
     """Map reconstruction frames onto a Blender timeline that matches source video duration."""
@@ -530,13 +533,13 @@ def create_camera_trajectory(
     animate: bool = False,
     timing: _AnimationTiming | None = None,
 ) -> bpy.types.Object | None:
-    """Polyline through camera centers (default trajectory radius 0.005 * scene_scale)."""
+    """Polyline through camera centers."""
     extrinsics = predictions["extrinsic"]
     if len(extrinsics) < 2:
         return None
 
     if radius is None:
-        radius = max(scene_scale * 0.005, 0.002)
+        radius = max(scene_scale * TRAJECTORY_RADIUS_FACTOR, TRAJECTORY_RADIUS_MIN)
 
     points = [
         _camera_center_blender(
@@ -919,6 +922,8 @@ def load_reconstruction(
         w2c_as_camera_pose=w2c_as_camera_pose,
         predictions=payload,
     )
+    camera_objects: list[bpy.types.Object] = []
+    traj = None
     if import_points:
         point_obj = import_point_cloud(
             payload,
@@ -931,7 +936,7 @@ def load_reconstruction(
         if point_obj is not None:
             point_obj.parent = root_obj
     if import_cameras:
-        for cam_obj in create_cameras(
+        camera_objects = create_cameras(
             payload,
             collection=col,
             global_indices=global_indices,
@@ -939,7 +944,8 @@ def load_reconstruction(
             w2c_as_camera_pose=w2c_as_camera_pose,
             animate=animate,
             timing=timing,
-        ):
+        )
+        for cam_obj in camera_objects:
             cam_obj.parent = root_obj
     if import_trajectory and import_cameras:
         traj = create_camera_trajectory(
@@ -956,6 +962,7 @@ def load_reconstruction(
     _configure_viewports_material_preview()
     if frame_viewports:
         _frame_viewports_on_point_cloud(point_obj, fill=0.9)
+
     return point_obj
 
 

@@ -12,7 +12,7 @@ if str(src_path) not in sys.path:
 
 import bpy
 import argparse
-from vibephysics import mapping
+from vibephysics.mapping.map_visual import load_colmap_reconstruction
 
 def reset_scene():
     """Clear existing objects in the scene."""
@@ -47,7 +47,7 @@ def main():
     print(f"Visualizing model from {sparse_path}...")
     reset_scene()
     
-    mapping.load_colmap_reconstruction(
+    load_colmap_reconstruction(
         str(sparse_path), 
         collection_name="GLOMAP_Result", 
         point_size=args.point_size, 

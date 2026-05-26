@@ -30,7 +30,9 @@ db_path = Path(r'{str(database_path)}')
 img_path = Path(r'{str(image_path)}')
 
 print('--- [Process] Extracting features ---')
-pycolmap.extract_features(db_path, img_path, camera_model='{camera_model}')
+reader_options = pycolmap.ImageReaderOptions()
+reader_options.camera_model = '{camera_model}'
+pycolmap.extract_features(db_path, img_path, reader_options=reader_options)
 
 print('--- [Process] Matching features ({matcher}) ---')
 if '{matcher}' == 'exhaustive':
@@ -69,6 +71,49 @@ reconstructions = pycolmap.incremental_mapping(
     database_path=r'{str(database_path)}',
     image_path=r'{str(image_path)}',
     output_path=r'{str(sparse_path)}'
+)
+
+if reconstructions:
+    print(f'--- [Process] Found {{len(reconstructions)}} models ---')
+    sys.exit(0)
+else:
+    print('--- [Process] Mapping failed ---')
+    sys.exit(1)
+"""
+    p = subprocess.run([sys.executable, "-c", mapping_code], env=env)
+    return p.returncode
+
+def run_global_mapping_stage(
+    image_path: Path,
+    database_path: Path,
+    sparse_path: Path,
+    verbose: bool = True,
+) -> int:
+    """
+    Runs COLMAP global mapper (GLOMAP) in an isolated subprocess.
+    Requires pycolmap >= 4.0.
+    """
+    if verbose: print(f"--- [vibephysics] Starting COLMAP Global Mapping (GLOMAP) ---")
+
+    env = os.environ.copy()
+    env["KMP_DUPLICATE_LIB_OK"] = "TRUE"
+
+    mapping_code = f"""
+import os
+os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
+import pycolmap
+import sys
+
+if not hasattr(pycolmap, "global_mapping"):
+    print("Error: pycolmap >= 4.0 is required for global mapping.")
+    print("Upgrade with: pip install 'pycolmap>=4.0'")
+    sys.exit(1)
+
+print('--- [Process] Running COLMAP Global Mapper (GLOMAP) ---')
+reconstructions = pycolmap.global_mapping(
+    database_path=r'{str(database_path)}',
+    image_path=r'{str(image_path)}',
+    output_path=r'{str(sparse_path)}',
 )
 
 if reconstructions:

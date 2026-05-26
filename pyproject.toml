@@ -25,7 +25,6 @@ classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
     "Intended Audience :: Science/Research",
-    "License :: OSI Approved :: Apache Software License",
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.11",
@@ -38,7 +37,7 @@ dependencies = [
     "tqdm>=4.0",
     "numpy<2.0",
     "bpy>=5.0,<5.1",
-    "pycolmap",
+    "pycolmap>=4.0,<5",
     "pyyaml>=6.0",
 ]
 

@@ -8,7 +8,7 @@
 
 ## ⚙️ Installation (macOS)
 
-Conda + `pip install vibephysics`; optional GLOMAP and feedforward backends.
+Conda + `pip install vibephysics`; optional feedforward backends.
 
 <details>
 <summary>Installation steps</summary>
@@ -18,57 +18,13 @@ Conda + `pip install vibephysics`; optional GLOMAP and feedforward backends.
 conda create -n vibephysics python=3.11
 conda activate vibephysics
 
-# 2. Install core package (includes COLMAP mapping & Blender simulation)
+# 2. Install core package (includes COLMAP/GLOMAP mapping & Blender simulation)
 pip install vibephysics
 
-# 3. (Optional) Install GLOMAP backend
-# Linux users: refer to "Linux System Dependencies" below first
-pip install git+https://github.com/shamangary/glomap.git
-
-# 4. (Optional) Install feedforward backends from GitHub
+# 3. (Optional) Install feedforward backends from GitHub
 # Or skip these — ./run_lingbot_map.sh / ./run_vggt_omega.sh auto-install on first run
 pip install git+https://github.com/robbyant/lingbot-map.git
 pip install git+https://github.com/facebookresearch/vggt-omega.git
-```
-
-</details>
-
-## 🐧 Linux (Ubuntu) System Dependencies
-
-C++ libraries required to build GLOMAP/COLMAP on Linux.
-
-<details>
-<summary>apt packages</summary>
-
-```bash
-sudo apt-get update
-sudo apt-get install -y \
-    libeigen3-dev \
-    libceres-dev \
-    libgoogle-glog-dev \
-    libboost-all-dev \
-    libsuitesparse-dev \
-    libsqlite3-dev \
-    libgflags-dev \
-    libfreeimage-dev \
-    libmetis-dev
-```
-
-</details>
-
-## ⚠️ Troubleshooting (Linker Errors)
-
-Fix Anaconda TLS/linker conflicts when installing GLOMAP on Linux.
-
-<details>
-<summary>CXXFLAGS workaround</summary>
-
-If you see `relocation R_X86_64_TPOFF32 ... can not be used when making a shared object`:
-
-```bash
-export CXXFLAGS="$CXXFLAGS -fPIC -ftls-model=global-dynamic"
-export CFLAGS="$CFLAGS -fPIC"
-pip install git+https://github.com/shamangary/glomap.git
 ```
 
 </details>
@@ -84,9 +40,11 @@ Structure-from-Motion: sparse point clouds and camera poses, GSplat-ready `spars
 <details>
 <summary>GLOMAP & COLMAP usage</summary>
 
-### GLOMAP
+### GLOMAP (global mapper)
 
 Set `engine: glomap` in `src/vibephysics/mapping/configs/sfm.yaml`.
+
+GLOMAP is built into COLMAP 4.0+ and runs via `pycolmap.global_mapping` (included with `pip install vibephysics`). It is typically faster than incremental COLMAP on large image sets. The global pipeline uses view-graph calibration for intrinsics, which may differ slightly from incremental self-calibration.
 
 **Config:**
 ```yaml
@@ -351,7 +309,7 @@ CPU-friendly physics, robots, water, annotations, sparse mapping, and dense feed
 - **🤖 Robot Simulation** – IK walking with Open Duck and Unitree Go2.
 - **💧 Water Physics** – Puddles, ripples, buoyancy.
 - **📊 Annotation Tools** – Bboxes, motion trails, point tracking.
-- **🗺️ Sparse Mapping** – COLMAP and GLOMAP.
+- **🗺️ Sparse Mapping** – COLMAP incremental and GLOMAP global SfM (via pycolmap 4.0+).
 - **🧠 Feedforward** – LingBot-Map and VGGT-Omega.
 - **🔧 Developer Friendly** – Pure Python, `bpy` as a module, no GUI required.
 

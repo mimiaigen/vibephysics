@@ -1,40 +1,9 @@
-import os
-import sys
-import subprocess
+import importlib.util
 from pathlib import Path
+
+from .colmap import run_colmap_stage, run_global_mapping_stage
 from .utils import prepare_output_directory
-from .colmap import run_colmap_stage
 
-def run_glomap_stage(
-    image_path: Path, 
-    database_path: Path, 
-    sparse_path: Path, 
-    verbose: bool = True
-) -> int:
-    """
-    Runs GLOMAP global mapper in a isolated subprocess.
-    """
-    if verbose: print(f"--- [vibephysics] Starting GLOMAP stage ---")
-    
-    env = os.environ.copy()
-    env["KMP_DUPLICATE_LIB_OK"] = "TRUE"
-
-    glomap_code = f"""
-import os
-os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
-import pyglomap
-import sys
-
-print('--- [Process] Running GLOMAP Global Mapper ---')
-status = pyglomap.run_mapper(
-    database_path=r'{str(database_path)}',
-    image_path=r'{str(image_path)}',
-    output_path=r'{str(sparse_path)}'
-)
-sys.exit(status)
-"""
-    p = subprocess.run([sys.executable, "-c", glomap_code], env=env)
-    return p.returncode
 
 def glomap_pipeline(
     image_path: str | Path,
@@ -42,54 +11,30 @@ def glomap_pipeline(
     database_path: str | Path | None = None,
     matcher: str = "exhaustive",
     camera_model: str = "PINHOLE",
-    verbose: bool = True
+    verbose: bool = True,
 ) -> int:
     """
-    Run the complete GLOMAP SfM pipeline: COLMAP Extraction/Matching + GLOMAP Global Mapping.
-    """
-    import importlib.util
-    pyglomap_spec = importlib.util.find_spec("pyglomap")
-    pycolmap_spec = importlib.util.find_spec("pycolmap")
+    Run the complete GLOMAP SfM pipeline: COLMAP extraction/matching + global mapping.
 
-    if pyglomap_spec is None or pycolmap_spec is None:
-        missing = "pyglomap" if pyglomap_spec is None else "pycolmap"
-        print(f"\n[vibephysics] '{missing}' is not installed.")
-        
-        if missing == "pyglomap":
-            print("To use GLOMAP, we need to install the backend from GitHub.")
-            print("Choice: [1] Install now (Default) [2] Cancel")
-            choice = input("Select an option (1/2): ").strip() or "1"
-            
-            if choice == "1":
-                import subprocess
-                cmd = [sys.executable, "-m", "pip", "install", "git+https://github.com/shamangary/glomap.git"]
-                print(f"Running: {' '.join(cmd)}")
-                try:
-                    subprocess.check_call(cmd)
-                    print("\n[SUCCESS] pyglomap installed! Please restart your script.")
-                    return 0
-                except Exception as ex:
-                    print(f"\n[ERROR] Installation failed: {ex}")
-                    return 1
-            else:
-                print("Installation cancelled.")
-                return 1
-        else:
-            print("Please install pycolmap: pip install pycolmap")
-            return 1
+    Global mapping is provided by COLMAP 4.0+ via pycolmap.global_mapping.
+    """
+    if importlib.util.find_spec("pycolmap") is None:
+        print("\n[ERROR] 'pycolmap' is not installed.")
+        print("Please install mapping tools with: pip install vibephysics")
+        return 1
 
     image_path = Path(image_path).absolute()
     output_path = prepare_output_directory(image_path, output_path, engine="glomap", verbose=verbose)
     sparse_path = output_path / "sparse"
-    
+
     db_path = Path(database_path).absolute() if database_path else sparse_path / "database.db"
 
-    # 1. Extraction & Matching
     status = run_colmap_stage(image_path, db_path, camera_model, matcher, verbose)
-    if status != 0: return status
+    if status != 0:
+        return status
 
-    # 2. GLOMAP
-    status = run_glomap_stage(image_path, db_path, sparse_path, verbose)
-    
-    if status == 0 and verbose: print(f"\n[SUCCESS] GLOMAP pipeline finished. Results in {output_path}")
+    status = run_global_mapping_stage(image_path, db_path, sparse_path, verbose)
+
+    if status == 0 and verbose:
+        print(f"\n[SUCCESS] GLOMAP pipeline finished. Results in {output_path}")
     return status

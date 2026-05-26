@@ -561,8 +561,10 @@ def reconstruct(
     animate: bool = True,
     animation_fps: int = 24,
     align_ground: bool = True,
-    batch_size: int | None = None,
+    max_frames: int | None = None,
+    max_frames_mode: str = "first",
     keyframe_interval: int | None = None,
+    lingbot_map_mode: str | None = None,
     window_size: int = 64,
     overlap_size: int = 16,
     overlap_keyframes: int | None = None,
@@ -602,6 +604,12 @@ def reconstruct(
 
     if verbose:
         print(f"--- [vibephysics] Engine: {engine} ({num_frames} frames) ---")
+        if engine == "lingbot_map":
+            from .lingbot_map import format_inference_plan
+
+            print(
+                f"--- [vibephysics] {format_inference_plan(num_frames, mode=lingbot_map_mode, keyframe_interval=keyframe_interval, window_size=window_size, overlap_size=overlap_size)} ---"
+            )
 
     with profiler.stage("inference", track_cuda_peak=True):
         if engine == "lingbot_map":
@@ -611,13 +619,15 @@ def reconstruct(
                 image_path=image_path,
                 model_path=Path(lingbot_map_checkpoint) if lingbot_map_checkpoint else None,
                 model_name=lingbot_map_model,
+                mode=lingbot_map_mode,
                 keyframe_interval=keyframe_interval,
                 window_size=window_size,
                 overlap_size=overlap_size,
                 overlap_keyframes=overlap_keyframes,
                 use_sdpa=use_sdpa,
                 image_size=lingbot_map_image_size,
-                max_frames=batch_size,
+                max_frames=max_frames,
+                max_frames_mode=max_frames_mode,
                 verbose=verbose,
             )
         elif engine == "vggt_omega":
@@ -630,7 +640,8 @@ def reconstruct(
                 image_resolution=vggt_omega_resolution,
                 preprocess_mode=vggt_omega_preprocess_mode,
                 enable_alignment=vggt_omega_enable_alignment,
-                batch_size=batch_size,
+                max_frames=max_frames,
+                max_frames_mode=max_frames_mode,
                 filter_depth_edges=filter_edges,
                 depth_edge_rtol=vggt_omega_depth_edge_rtol,
                 conf_percentile=vggt_omega_conf_percentile,
@@ -655,7 +666,10 @@ def reconstruct(
         with profiler.stage("ground_align"):
             align_prediction_ground(prediction)
 
+    from .common import convert_prediction_to_blender_zup
+
     with profiler.stage("save_artifacts"):
+        convert_prediction_to_blender_zup(prediction)
         prediction.metadata = dict(prediction.metadata)
         prediction.metadata["video_fps"] = source_video_fps
 
@@ -668,6 +682,8 @@ def reconstruct(
             "source_path": str(source_path),
             "image_path": str(image_path),
             "num_frames": num_frames,
+            "max_frames": max_frames,
+            "max_frames_mode": max_frames_mode,
             "vram_gb": vram_gb,
             "min_confidence": export_min_confidence,
             "conf_percentile": vggt_omega_conf_percentile if is_vggt_omega_engine(engine) else None,
@@ -711,13 +727,20 @@ def reconstruct_from_config(
     image_path: str | Path | None = None,
     output_path: str | Path | None = None,
     preprocess_mode: str | None = None,
+    max_frames: int | None = None,
+    max_frames_mode: str | None = None,
 ) -> Path:
-    from .config import apply_overrides, load_yaml_config, parse_feedforward_config
+    from .config import apply_overrides, apply_video_frame_overrides, load_yaml_config, parse_feedforward_config
 
     config_path = Path(config_path)
     cfg = apply_overrides(
         load_yaml_config(config_path),
         {"image_path": image_path, "output_path": output_path},
+    )
+    cfg = apply_video_frame_overrides(
+        cfg,
+        max_frames=max_frames,
+        max_frames_mode=max_frames_mode,
     )
     if preprocess_mode is not None:
         engine = cfg.get("engine")
@@ -759,6 +782,20 @@ def main() -> None:
     )
     parser.add_argument("--output_path", default=None, help="Override config output_path.")
     parser.add_argument(
+        "--max_frames",
+        type=int,
+        default=None,
+        metavar="N",
+        help="Use at most N frames from the input. Overrides config.",
+    )
+    parser.add_argument(
+        "--max_frames_mode",
+        choices=("spread", "first"),
+        default=None,
+        help="How to pick N frames: first=first N consecutive (default), "
+        "spread=evenly across full input.",
+    )
+    parser.add_argument(
         "--mode",
         dest="preprocess_mode",
         default=None,
@@ -772,6 +809,8 @@ def main() -> None:
             args.image_path,
             args.output_path,
             preprocess_mode=args.preprocess_mode,
+            max_frames=args.max_frames,
+            max_frames_mode=args.max_frames_mode,
         )
         sys.exit(0)
     except ValueError as exc:

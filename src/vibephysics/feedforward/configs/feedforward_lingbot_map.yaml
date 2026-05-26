@@ -8,6 +8,8 @@ verbose: true
 video:
   fps: 2              # extraction rate; saved to .vibephysics_extract_fps and reused for animation
   quality: 2
+  max_frames: null     # null = all frames; set N to limit count (both engines)
+  max_frames_mode: first   # first = first N consecutive; spread = evenly across input
 
 output:
   save_blend: scene.blend
@@ -22,10 +24,10 @@ lingbot_map:
   model: lingbot-map
   checkpoint: null
   image_size: 518       # official --image_size
-  batch_size: null      # null = all frames (official stride=1); set N to subsample
-  keyframe_interval: null  # null = 1 (or auto if streaming and >320 frames)
-  window_size: 64       # official --window_size
-  overlap_size: 16      # official --overlap_size
+  mode: auto            # auto | streaming | windowed (auto: <=320 streaming, >320 windowed)
+  keyframe_interval: null  # null = auto (1, or streaming-only ceil(n/320) if mode=streaming)
+  window_size: 64       # official --window_size (windowed mode)
+  overlap_size: 16      # official --overlap_size (windowed mode)
   overlap_keyframes: null
   use_sdpa: false       # official CUDA default (FlashInfer); auto-falls back to SDPA on Mac
   mask_sky: false

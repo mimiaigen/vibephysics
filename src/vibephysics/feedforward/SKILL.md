@@ -40,16 +40,17 @@ feedforward_output/{engine}_{timestamp}/
 All engines produce `FeedforwardPrediction` → saved as `predictions.npz`:
 
 - `world_points`, `depth`, `conf`, `extrinsic`, `intrinsic`, `image_paths`
-- OpenCV world coordinates; ground align mutates arrays in place before save
-- Metadata flags: `ground_align_applied`, `w2c_as_camera_pose` (LingBot)
+- Saved NPZ uses Blender Z-up (`world_coordinates: blender_z_up`); engines infer in OpenCV, then convert before save
+- Metadata flags: `ground_align_applied`, `w2c_as_camera_pose` (LingBot), `extrinsic_is_matrix_world`
 
 ## Pipeline
 
-1. **Engine** (`lingbot_map/` or `vggt_omega/`) — run upstream model → `FeedforwardPrediction`
-2. **Ground align** (`ground_align.py`) — if enabled in config, before any export
-3. **Save** — `predictions.npz`, optional `.blend` via `visual.py`
+1. **Engine** (`lingbot_map/` or `vggt_omega/`) — run upstream model → `FeedforwardPrediction` (OpenCV)
+2. **Ground align** (`ground_align.py`) — if enabled, mutates arrays in OpenCV
+3. **Z-up convert** (`common.convert_prediction_to_blender_zup`) — world_points + extrinsic → Blender coords
+4. **Save** — `predictions.npz`, optional `.blend` via `visual.py` (viewer only; no coord convert on Z-up NPZ)
 
-Blender scene uses the same coordinate system as the npz (no extra root rotation).
+Legacy NPZ without `world_coordinates` still get OpenCV→Blender at load time.
 
 ## Commands
 

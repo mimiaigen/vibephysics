@@ -72,15 +72,62 @@ def discover_images(image_path: Path) -> list[Path]:
 
 
 def select_skip_frames(image_paths: list[Path], batch_size: int) -> tuple[list[Path], list[int]]:
-    if batch_size <= 0:
-        raise ValueError("batch_size must be positive")
-    if len(image_paths) <= batch_size:
+    """Evenly subsample frames across the full sequence (legacy name)."""
+    return select_frames(image_paths, batch_size, mode="spread")
+
+
+def select_frames(
+    image_paths: list[Path],
+    max_frames: int,
+    *,
+    mode: str = "first",
+) -> tuple[list[Path], list[int]]:
+    """Select up to ``max_frames`` paths and their source indices."""
+    if max_frames <= 0:
+        raise ValueError("max_frames must be positive")
+    if len(image_paths) <= max_frames:
         return image_paths, list(range(len(image_paths)))
 
-    indices = np.linspace(0, len(image_paths) - 1, batch_size, dtype=int)
-    indices = sorted(set(indices.tolist()))
+    mode = str(mode).strip().lower()
+    if mode == "first":
+        indices = list(range(max_frames))
+    elif mode == "spread":
+        indices = np.linspace(0, len(image_paths) - 1, max_frames, dtype=int)
+        indices = sorted(set(indices.tolist()))
+    else:
+        raise ValueError(f"Unknown max_frames mode '{mode}'. Use 'first' or 'spread'.")
+
     selected = [image_paths[i] for i in indices]
     return selected, indices
+
+
+def limit_image_frames(
+    image_paths: list[Path],
+    max_frames: int | None,
+    *,
+    mode: str = "first",
+    verbose: bool = True,
+    engine_label: str = "feedforward",
+) -> tuple[list[Path], list[int], int]:
+    """
+    Apply unified frame limits shared by LingBot-Map and VGGT-Omega.
+
+    Returns (selected_paths, source_indices, total_input_count).
+    """
+    total = len(image_paths)
+    if max_frames is None or total <= max_frames:
+        return image_paths, list(range(total)), total
+
+    mode = str(mode).strip().lower()
+    selected, indices = select_frames(image_paths, max_frames, mode=mode)
+    if verbose:
+        mode_label = "first consecutive" if mode == "first" else "evenly spread"
+        print(
+            f"--- [vibephysics] {engine_label}: using {len(selected)}/{total} "
+            f"input frames ({mode_label}) ---",
+            flush=True,
+        )
+    return selected, indices, total
 
 
 def to_numpy(x) -> np.ndarray:
@@ -275,13 +322,95 @@ def persist_preprocessed_frames(output_path: Path, prediction) -> list[str]:
     return paths
 
 
-def _opencv_to_blender_points(points: np.ndarray) -> np.ndarray:
+WORLD_COORDS_OPENCV = "opencv"
+WORLD_COORDS_BLENDER_Z_UP = "blender_z_up"
+
+
+def opencv_world_to_blender_matrix() -> np.ndarray:
+    """OpenCV world (x right, y down, z forward) -> Blender (x, z, -y)."""
+    return np.array(
+        [
+            [1.0, 0.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0, 0.0],
+            [0.0, -1.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0, 1.0],
+        ],
+        dtype=np.float64,
+    )
+
+
+def opencv_camera_to_blender_matrix() -> np.ndarray:
+    """OpenCV camera (+Y down, +Z forward) -> Blender camera (+Y up, -Z forward)."""
+    return np.diag([1.0, -1.0, -1.0, 1.0]).astype(np.float64)
+
+
+def opencv_to_blender_points(points: np.ndarray) -> np.ndarray:
+    """OpenCV (x, y, z) -> Blender Z-up (x, z, -y)."""
     points = np.asarray(points, dtype=np.float64)
     out = np.empty_like(points)
     out[:, 0] = points[:, 0]
     out[:, 1] = points[:, 2]
     out[:, 2] = -points[:, 1]
     return out
+
+
+def _prediction_metadata(predictions) -> dict:
+    from .schema import FeedforwardPrediction
+
+    if isinstance(predictions, FeedforwardPrediction):
+        return dict(predictions.metadata)
+    meta = predictions.get("metadata") or {}
+    if isinstance(meta, np.ndarray) and meta.size:
+        meta = meta.flat[0]
+    return dict(meta) if isinstance(meta, dict) else {}
+
+
+def resolve_world_coordinates(predictions) -> str:
+    """Return ``opencv`` (legacy) or ``blender_z_up`` (canonical saved layout)."""
+    meta = _prediction_metadata(predictions)
+    coords = str(meta.get("world_coordinates", WORLD_COORDS_OPENCV)).strip().lower()
+    if coords in (WORLD_COORDS_BLENDER_Z_UP, "blender", "z_up", "z-up"):
+        return WORLD_COORDS_BLENDER_Z_UP
+    return WORLD_COORDS_OPENCV
+
+
+def is_blender_z_up(predictions) -> bool:
+    return resolve_world_coordinates(predictions) == WORLD_COORDS_BLENDER_Z_UP
+
+
+def convert_prediction_to_blender_zup(prediction) -> bool:
+    """
+    Convert ``world_points`` and ``extrinsic`` to Blender Z-up in place.
+
+    Call after ground align (still runs in OpenCV). Saved NPZ then matches Blender
+    without a second coordinate pass in ``visual.py``.
+    """
+    from .schema import FeedforwardPrediction
+
+    if not isinstance(prediction, FeedforwardPrediction):
+        raise TypeError("convert_prediction_to_blender_zup expects FeedforwardPrediction")
+    if is_blender_z_up(prediction):
+        return False
+
+    wp = prediction.world_points
+    flat = opencv_to_blender_points(wp.reshape(-1, 3))
+    prediction.world_points = flat.astype(np.float32).reshape(wp.shape)
+
+    world_b = opencv_world_to_blender_matrix()
+    cam_b = opencv_camera_to_blender_matrix()
+    w2c_as_camera_pose = bool(prediction.metadata.get("w2c_as_camera_pose"))
+    new_ext = np.empty_like(prediction.extrinsic)
+    for i, ext in enumerate(prediction.extrinsic):
+        ext4 = np.vstack([ext, [0.0, 0.0, 0.0, 1.0]])
+        pose = ext4 if w2c_as_camera_pose else np.linalg.inv(ext4)
+        matrix_world = world_b @ pose @ cam_b
+        new_ext[i] = matrix_world[:3, :4]
+    prediction.extrinsic = new_ext.astype(np.float32)
+
+    prediction.metadata = dict(prediction.metadata)
+    prediction.metadata["world_coordinates"] = WORLD_COORDS_BLENDER_Z_UP
+    prediction.metadata["extrinsic_is_matrix_world"] = True
+    return True
 
 
 def collect_colored_point_cloud(
@@ -298,6 +427,9 @@ def collect_colored_point_cloud(
         payload = predictions.to_viz_dict()
     else:
         payload = predictions
+
+    if to_blender and is_blender_z_up(predictions):
+        to_blender = False
 
     points = payload.get("world_points_from_depth", payload.get("world_points"))
     images = resolve_frame_images(payload)
@@ -319,7 +451,7 @@ def collect_colored_point_cloud(
             continue
         pts = frame_points[valid_mask]
         if to_blender:
-            pts = _opencv_to_blender_points(pts)
+            pts = opencv_to_blender_points(pts)
         point_chunks.append(pts.astype(np.float32))
         rgb = np.clip(frame_colors[valid_mask], 0.0, 1.0)
         color_chunks.append((rgb * 255.0).astype(np.uint8))

@@ -62,6 +62,9 @@ def main():
         prediction = load_prediction(predictions_path)
         if output.get("align_ground", True) and not prediction.metadata.get("ground_align_applied"):
             align_prediction_ground(prediction)
+        from vibephysics.feedforward.common import convert_prediction_to_blender_zup
+
+        convert_prediction_to_blender_zup(prediction)
         reset_scene()
         feedforward.load_reconstruction(
             prediction,

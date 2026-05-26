@@ -18,7 +18,7 @@ from ..common import (
     discover_images,
     feedforward_engine_dir,
     images_chw_to_hwc,
-    select_skip_frames,
+    limit_image_frames,
     to_numpy,
 )
 from ..schema import FeedforwardPrediction
@@ -216,10 +216,154 @@ def _load_and_preprocess_images(
     )
 
 
-def _auto_keyframe_interval(num_frames: int, mode: str) -> int:
-    if mode == "streaming" and num_frames > 320:
-        return (num_frames + 319) // 320
-    return 1
+# Official demo.py thresholds (streaming KV cache vs windowed cross-window alignment).
+STREAMING_FULL_KEYFRAME_MAX = 320
+WINDOWED_AUTO_THRESHOLD = 321
+
+
+def _is_auto_mode(mode: str | None) -> bool:
+    if mode is None:
+        return True
+    return str(mode).strip().lower() in {"", "auto", "null", "none"}
+
+
+def resolve_inference_settings(
+    num_frames: int,
+    *,
+    mode: str | None = None,
+    keyframe_interval: int | None = None,
+) -> tuple[str, int, bool]:
+    """
+    Pick LingBot-Map inference mode and keyframe interval from frame count.
+
+    Auto (mode unset or ``auto``):
+      - <=320 frames: streaming, every frame a keyframe
+      - >320 frames: windowed with cross-window alignment (keyframe_interval=1)
+
+    Explicit ``streaming`` on long clips keeps official demo behavior
+    (auto keyframe_interval = ceil(num_frames / 320)).
+    """
+    auto_mode = _is_auto_mode(mode)
+    resolved_mode = "streaming" if auto_mode else str(mode).strip().lower()
+    if resolved_mode not in {"streaming", "windowed"}:
+        raise ValueError(f"Unknown LingBot-Map mode '{mode}'. Use streaming, windowed, or auto.")
+
+    if auto_mode and num_frames >= WINDOWED_AUTO_THRESHOLD:
+        resolved_mode = "windowed"
+
+    if keyframe_interval is not None:
+        resolved_keyframe = max(int(keyframe_interval), 1)
+    elif resolved_mode == "streaming" and num_frames > STREAMING_FULL_KEYFRAME_MAX:
+        resolved_keyframe = (num_frames + STREAMING_FULL_KEYFRAME_MAX - 1) // STREAMING_FULL_KEYFRAME_MAX
+    else:
+        resolved_keyframe = 1
+
+    return resolved_mode, resolved_keyframe, auto_mode
+
+
+def format_inference_plan(
+    num_frames: int,
+    *,
+    mode: str | None = None,
+    keyframe_interval: int | None = None,
+    window_size: int = 64,
+    overlap_size: int = 16,
+) -> str:
+    resolved_mode, resolved_keyframe, auto_mode = resolve_inference_settings(
+        num_frames, mode=mode, keyframe_interval=keyframe_interval
+    )
+    auto_note = " (auto)" if auto_mode else ""
+    if resolved_mode == "windowed":
+        return (
+            f"LingBot-Map plan{auto_note}: {num_frames} frames -> "
+            f"windowed (window_size={window_size}, overlap={overlap_size}, "
+            f"keyframe_interval={resolved_keyframe})"
+        )
+    if resolved_keyframe > 1:
+        return (
+            f"LingBot-Map plan{auto_note}: {num_frames} frames -> "
+            f"streaming (keyframe_interval={resolved_keyframe}; non-keyframes skip KV cache)"
+        )
+    return f"LingBot-Map plan{auto_note}: {num_frames} frames -> streaming (every frame a keyframe)"
+
+
+def preview_input_plan(
+    input_path: str | Path,
+    *,
+    mode: str | None = None,
+    keyframe_interval: int | None = None,
+    max_frames: int | None = None,
+    max_frames_mode: str = "first",
+    video_fps: float = 2.0,
+    window_size: int = 64,
+    overlap_size: int = 16,
+) -> str:
+    """Estimate inference plan from a path before full reconstruction (for CLI preview)."""
+    from ..reconstruct import (
+        default_video_frames_dir,
+        discover_images,
+        existing_frames_in_dir,
+        looks_like_video_path,
+    )
+
+    path = Path(input_path)
+    num_frames: int | None = None
+
+    if path.is_dir():
+        try:
+            num_frames = len(discover_images(path))
+        except (ValueError, FileNotFoundError):
+            pass
+    elif path.is_file() and looks_like_video_path(path):
+        existing = existing_frames_in_dir(default_video_frames_dir(path))
+        if existing:
+            num_frames = len(existing)
+        else:
+            num_frames = _estimate_video_frame_count(path, video_fps)
+    elif path.is_file():
+        num_frames = 1
+
+    if num_frames is None:
+        return "Inference plan: frame count unknown until video frames are extracted"
+    if max_frames is not None and num_frames > max_frames:
+        num_frames = max_frames
+    suffix = ""
+    if max_frames is not None and max_frames_mode == "first":
+        suffix = " [first consecutive frames]"
+    elif max_frames is not None:
+        suffix = " [spread across full input]"
+    return format_inference_plan(
+        num_frames,
+        mode=mode,
+        keyframe_interval=keyframe_interval,
+        window_size=window_size,
+        overlap_size=overlap_size,
+    ) + suffix
+
+
+def _estimate_video_frame_count(video_path: Path, extract_fps: float) -> int | None:
+    import subprocess
+
+    try:
+        result = subprocess.run(
+            [
+                "ffprobe",
+                "-v",
+                "error",
+                "-show_entries",
+                "format=duration",
+                "-of",
+                "default=noprint_wrappers=1:nokey=1",
+                str(video_path),
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        duration = float(result.stdout.strip())
+    except (FileNotFoundError, subprocess.CalledProcessError, ValueError):
+        return None
+    return max(int(duration * max(float(extract_fps), 1e-6)), 1)
 
 
 def _flashinfer_available() -> bool:
@@ -300,6 +444,7 @@ def run_lingbot_map(
     image_size: int = 518,
     patch_size: int = 14,
     max_frames: int | None = None,
+    max_frames_mode: str = "first",
     verbose: bool = True,
 ) -> FeedforwardPrediction:
     if not ensure_dependencies(verbose):
@@ -310,17 +455,15 @@ def run_lingbot_map(
 
     image_path = Path(image_path)
     all_images = discover_images(image_path)
-    if max_frames is not None and len(all_images) > max_frames:
-        selected, indices = select_skip_frames(all_images, max_frames)
-    else:
-        selected, indices = all_images, list(range(len(all_images)))
+    input_num_frames = len(all_images)
+    selected, indices, _ = limit_image_frames(
+        all_images,
+        max_frames,
+        mode=max_frames_mode,
+        verbose=verbose,
+        engine_label="LingBot-Map",
+    )
     paths = [str(p) for p in selected]
-    if verbose and len(selected) < len(all_images):
-        print(
-            f"--- [vibephysics] LingBot-Map: using {len(selected)}/{len(all_images)} "
-            f"input frames (evenly subsampled) ---",
-            flush=True,
-        )
     if verbose:
         print(
             f"--- [vibephysics] LingBot-Map: loading {len(paths)} images "
@@ -335,10 +478,14 @@ def run_lingbot_map(
         print(f"--- [vibephysics] Preprocessed to {w}x{h} ({num_frames} frames) ---", flush=True)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    if mode is None:
-        mode = "streaming"
-    if keyframe_interval is None:
-        keyframe_interval = _auto_keyframe_interval(num_frames, mode)
+    mode, keyframe_interval, mode_auto = resolve_inference_settings(
+        num_frames, mode=mode, keyframe_interval=keyframe_interval
+    )
+    if verbose:
+        print(
+            f"--- [vibephysics] {format_inference_plan(num_frames, mode='auto' if mode_auto else mode, keyframe_interval=keyframe_interval, window_size=window_size, overlap_size=overlap_size)} ---",
+            flush=True,
+        )
 
     use_sdpa = _resolve_use_sdpa(use_sdpa, verbose=verbose)
 
@@ -386,6 +533,12 @@ def run_lingbot_map(
                 f"--- [vibephysics] Phase 1: {num_scale_frames} scale frames; "
                 f"Phase 2: frames {num_scale_frames}-{num_frames - 1} one-by-one "
                 f"(keyframe_interval={keyframe_interval}; 1 = every frame) ---",
+                flush=True,
+            )
+        else:
+            print(
+                f"--- [vibephysics] Windowed: window_size={window_size}, "
+                f"overlap_size={overlap_size}, keyframe_interval={keyframe_interval} ---",
                 flush=True,
             )
 
@@ -455,12 +608,15 @@ def run_lingbot_map(
         metadata={
             "model_name": model_name,
             "mode": mode,
+            "mode_auto_selected": mode_auto,
             "keyframe_interval": keyframe_interval,
             "window_size": window_size,
             "overlap_size": overlap_size,
+            "overlap_keyframes": overlap_keyframes,
             "num_frames": num_frames,
-            "input_num_frames": len(all_images),
+            "input_num_frames": input_num_frames,
             "selected_indices": indices,
+            "max_frames_mode": max_frames_mode,
             "use_sdpa": use_sdpa,
             "preprocess_mode": "crop",
             "image_size": image_size,

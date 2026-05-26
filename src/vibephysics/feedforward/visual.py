@@ -248,58 +248,112 @@ def create_point_cloud_object(
     return obj
 
 
-def _opencv_world_to_blender_matrix() -> np.ndarray:
-    """Map OpenCV world coords (x right, y down, z forward) to Blender (x, z, -y)."""
-    return np.array(
-        [
-            [1.0, 0.0, 0.0, 0.0],
-            [0.0, 0.0, 1.0, 0.0],
-            [0.0, -1.0, 0.0, 0.0],
-            [0.0, 0.0, 0.0, 1.0],
-        ],
-        dtype=np.float64,
+def _opencv_to_blender_points(points: np.ndarray) -> np.ndarray:
+    from .common import opencv_to_blender_points
+
+    return opencv_to_blender_points(points)
+
+
+def _w2c_to_blender_matrix_world(
+    w2c: np.ndarray,
+    *,
+    w2c_as_camera_pose: bool = False,
+    predictions: dict | None = None,
+) -> Matrix:
+    """Build Blender ``matrix_world`` from stored extrinsic (OpenCV or Z-up NPZ)."""
+    from .common import (
+        is_blender_z_up,
+        opencv_camera_to_blender_matrix,
+        opencv_world_to_blender_matrix,
     )
 
+    if predictions is not None and is_blender_z_up(predictions):
+        return Matrix(np.vstack([w2c, [0.0, 0.0, 0.0, 1.0]]).tolist())
 
-def _opencv_camera_to_blender_matrix() -> np.ndarray:
-    """OpenCV camera (+Y down, +Z forward) -> Blender camera (+Y up, -Z forward)."""
-    return np.diag([1.0, -1.0, -1.0, 1.0]).astype(np.float64)
-
-
-def _opencv_to_blender_points(points: np.ndarray) -> np.ndarray:
-    """OpenCV (x, y, z) -> Blender (x, z, -y); element-wise to avoid huge matmul warnings."""
-    points = np.asarray(points, dtype=np.float64)
-    out = np.empty_like(points)
-    out[:, 0] = points[:, 0]
-    out[:, 1] = points[:, 2]
-    out[:, 2] = -points[:, 1]
-    return out
-
-
-def _w2c_to_blender_matrix_world(w2c: np.ndarray, *, w2c_as_camera_pose: bool = False) -> Matrix:
-    """Convert OpenCV extrinsic (3x4) to Blender camera matrix_world aligned with point cloud."""
     w2c4 = np.vstack([w2c, [0.0, 0.0, 0.0, 1.0]])
-    # Some engines unproject with c2w but store w2c; camera frames must use w2c directly
-    # (not inv(w2c)) so frustums align with the point cloud.
     pose = w2c4 if w2c_as_camera_pose else np.linalg.inv(w2c4)
-    m = _opencv_world_to_blender_matrix() @ pose @ _opencv_camera_to_blender_matrix()
+    m = opencv_world_to_blender_matrix() @ pose @ opencv_camera_to_blender_matrix()
     return Matrix(m.tolist())
 
 
-def _camera_center_blender(w2c: np.ndarray, *, w2c_as_camera_pose: bool = False) -> np.ndarray:
-    m = _w2c_to_blender_matrix_world(w2c, w2c_as_camera_pose=w2c_as_camera_pose)
+def _camera_center_blender(
+    w2c: np.ndarray,
+    *,
+    w2c_as_camera_pose: bool = False,
+    predictions: dict | None = None,
+) -> np.ndarray:
+    m = _w2c_to_blender_matrix_world(
+        w2c,
+        w2c_as_camera_pose=w2c_as_camera_pose,
+        predictions=predictions,
+    )
     return np.array(m.translation, dtype=np.float64)
 
 
-def _scene_scale_from_extrinsics(extrinsics: np.ndarray, *, w2c_as_camera_pose: bool = False) -> float:
+def _scene_scale_from_extrinsics(
+    extrinsics: np.ndarray,
+    *,
+    w2c_as_camera_pose: bool = False,
+    predictions: dict | None = None,
+) -> float:
     """Scene extent from camera path in Blender space (matches point cloud coords)."""
     if len(extrinsics) <= 1:
         return 1.0
     centers = np.array(
-        [_camera_center_blender(w2c, w2c_as_camera_pose=w2c_as_camera_pose) for w2c in extrinsics],
+        [
+            _camera_center_blender(
+                w2c,
+                w2c_as_camera_pose=w2c_as_camera_pose,
+                predictions=predictions,
+            )
+            for w2c in extrinsics
+        ],
         dtype=np.float64,
     )
     return float(max(np.linalg.norm(np.ptp(centers, axis=0)), 0.1))
+
+
+def _scene_scale_from_points(
+    world_points: np.ndarray,
+    *,
+    predictions: dict | None = None,
+) -> float:
+    """Scene extent from point cloud (official GLB export uses 5th–95th percentile)."""
+    from .common import is_blender_z_up
+
+    flat = np.asarray(world_points, dtype=np.float64).reshape(-1, 3)
+    valid = np.isfinite(flat).all(axis=1)
+    pts = flat[valid]
+    if pts.shape[0] < 2:
+        return 1.0
+    if predictions is None or not is_blender_z_up(predictions):
+        pts = _opencv_to_blender_points(pts)
+    lo = np.percentile(pts, 5, axis=0)
+    hi = np.percentile(pts, 95, axis=0)
+    return float(max(np.linalg.norm(hi - lo), 0.1))
+
+
+def _resolve_scene_scale(
+    extrinsics: np.ndarray,
+    world_points: np.ndarray | None,
+    *,
+    w2c_as_camera_pose: bool = False,
+    predictions: dict | None = None,
+) -> float:
+    """Size frustums/trajectory from cameras and points (matches official viser/GLB)."""
+    cam_scale = _scene_scale_from_extrinsics(
+        extrinsics,
+        w2c_as_camera_pose=w2c_as_camera_pose,
+        predictions=predictions,
+    )
+    if world_points is None:
+        return cam_scale
+    return float(
+        max(
+            cam_scale,
+            _scene_scale_from_points(world_points, predictions=predictions),
+        )
+    )
 
 
 def _apply_build_animation(obj: bpy.types.Object, timing: _AnimationTiming) -> None:
@@ -484,7 +538,14 @@ def create_camera_trajectory(
     if radius is None:
         radius = max(scene_scale * 0.005, 0.002)
 
-    points = [_camera_center_blender(w2c, w2c_as_camera_pose=w2c_as_camera_pose) for w2c in extrinsics]
+    points = [
+        _camera_center_blender(
+            w2c,
+            w2c_as_camera_pose=w2c_as_camera_pose,
+            predictions=predictions,
+        )
+        for w2c in extrinsics
+    ]
     curve_data = bpy.data.curves.new(name="CameraTrajectory", type="CURVE")
     curve_data.dimensions = "3D"
     curve_data.fill_mode = "FULL"
@@ -568,7 +629,11 @@ def create_cameras(
     image_paths = predictions.get("image_paths")
 
     if scene_scale is None:
-        scene_scale = _scene_scale_from_extrinsics(predictions["extrinsic"], w2c_as_camera_pose=w2c_as_camera_pose)
+        scene_scale = _scene_scale_from_extrinsics(
+            predictions["extrinsic"],
+            w2c_as_camera_pose=w2c_as_camera_pose,
+            predictions=predictions,
+        )
 
     target_collection = collection
     if collection is not None:
@@ -600,7 +665,9 @@ def create_cameras(
 
         cam_obj = bpy.data.objects.new(name=cam_name, object_data=cam_data)
         cam_obj.matrix_world = _w2c_to_blender_matrix_world(
-            predictions["extrinsic"][i], w2c_as_camera_pose=w2c_as_camera_pose
+            predictions["extrinsic"][i],
+            w2c_as_camera_pose=w2c_as_camera_pose,
+            predictions=predictions,
         )
 
         if target_collection is not None:
@@ -845,7 +912,13 @@ def load_reconstruction(
     root_obj.rotation_euler = user_euler
 
     point_obj = None
-    scene_scale = _scene_scale_from_extrinsics(payload["extrinsic"], w2c_as_camera_pose=w2c_as_camera_pose)
+    world_points = payload.get("world_points_from_depth", payload.get("world_points"))
+    scene_scale = _resolve_scene_scale(
+        payload["extrinsic"],
+        world_points,
+        w2c_as_camera_pose=w2c_as_camera_pose,
+        predictions=payload,
+    )
     if import_points:
         point_obj = import_point_cloud(
             payload,

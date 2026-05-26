@@ -9,7 +9,7 @@ from pathlib import Path
 
 import numpy as np
 
-from ..common import discover_images, feedforward_engine_dir, get_vram_gb, images_chw_to_hwc, select_skip_frames
+from ..common import discover_images, feedforward_engine_dir, get_vram_gb, images_chw_to_hwc, limit_image_frames
 from ..deps import ensure_engine_dependencies, pip_install
 from ..schema import FeedforwardPrediction
 
@@ -256,7 +256,8 @@ def run_vggt_omega(
     image_resolution: int = 512,
     preprocess_mode: str = "balanced",
     enable_alignment: bool = False,
-    batch_size: int | None = None,
+    max_frames: int | None = None,
+    max_frames_mode: str = "first",
     filter_depth_edges: bool = True,
     depth_edge_rtol: float = 0.03,
     conf_percentile: float = 50.0,
@@ -278,12 +279,13 @@ def run_vggt_omega(
         )
 
     all_images = discover_images(image_path)
-    if batch_size is None:
-        batch_size = len(all_images)
-    else:
-        batch_size = min(batch_size, len(all_images))
-
-    selected, indices = select_skip_frames(all_images, batch_size)
+    selected, indices, input_num_frames = limit_image_frames(
+        all_images,
+        max_frames,
+        mode=max_frames_mode,
+        verbose=verbose,
+        engine_label="VGGT-Omega",
+    )
     str_paths = [str(p) for p in selected]
 
     if preprocess_mode not in ("balanced", "max_size"):
@@ -365,6 +367,8 @@ def run_vggt_omega(
             "preprocess_mode": preprocess_mode,
             "enable_alignment": enable_alignment,
             "selected_indices": indices,
+            "input_num_frames": input_num_frames,
+            "max_frames_mode": max_frames_mode,
             "vram_gb": get_vram_gb(),
             "input_hw": [int(h), int(w)],
             "conf_filter_mode": "percentile",

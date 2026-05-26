@@ -14,6 +14,8 @@ DEFAULT_FEEDFORWARD_CONFIG = CONFIGS_DIR / "feedforward.yaml"
 
 FEEDFORWARD_ENGINES = ("lingbot_map", "vggt_omega")
 
+MAX_FRAMES_MODES = ("spread", "first")
+
 
 def load_yaml_config(path: str | Path) -> dict[str, Any]:
     path = Path(path).expanduser().resolve()
@@ -48,6 +50,75 @@ def apply_overrides(cfg: dict[str, Any], overrides: dict[str, Any]) -> dict[str,
     return merged
 
 
+def apply_video_frame_overrides(
+    cfg: dict[str, Any],
+    *,
+    max_frames: int | None = None,
+    max_frames_mode: str | None = None,
+) -> dict[str, Any]:
+    """Apply CLI overrides to the unified ``video`` input section."""
+    if max_frames is None and max_frames_mode is None:
+        return cfg
+    video = dict(_nested(cfg, "video"))
+    if max_frames is not None:
+        video["max_frames"] = max_frames
+    if max_frames_mode is not None:
+        video["max_frames_mode"] = max_frames_mode
+    merged = dict(cfg)
+    merged["video"] = video
+    return merged
+
+
+def _optional_int(value: Any) -> int | None:
+    if value in (None, ""):
+        return None
+    return int(value)
+
+
+def _normalize_max_frames_mode(mode: Any) -> str:
+    normalized = str(mode).strip().lower()
+    if normalized not in MAX_FRAMES_MODES:
+        raise ValueError(
+            f"Unknown max_frames_mode '{mode}'. Choose one of: {', '.join(MAX_FRAMES_MODES)}"
+        )
+    return normalized
+
+
+def resolve_input_frame_limits(
+    cfg: dict[str, Any],
+    engine: str | None = None,
+) -> tuple[int | None, str]:
+    """
+    Unified frame limits for all feedforward engines.
+
+    Resolution order (first wins):
+      1. ``video.max_frames`` / ``video.max_frames_mode``
+      2. ``<engine>.max_frames`` / ``<engine>.max_frames_mode`` (legacy per-engine override)
+      3. ``<engine>.batch_size`` (legacy alias for max_frames only)
+    """
+    video = cfg.get("video") or {}
+    if not isinstance(video, dict):
+        video = {}
+
+    max_frames = _optional_int(video.get("max_frames"))
+    mode_raw = video.get("max_frames_mode")
+
+    if engine and max_frames is None:
+        section = cfg.get(engine) or {}
+        if isinstance(section, dict):
+            max_frames = _optional_int(section.get("max_frames", section.get("batch_size")))
+            if mode_raw in (None, ""):
+                mode_raw = section.get("max_frames_mode")
+
+    if max_frames is None and engine:
+        section = cfg.get(engine) or {}
+        if isinstance(section, dict):
+            max_frames = _optional_int(section.get("batch_size"))
+
+    mode = _normalize_max_frames_mode(mode_raw if mode_raw not in (None, "") else "first")
+    return max_frames, mode
+
+
 def _optional_path(value: Any) -> Any:
     if value in (None, ""):
         return None
@@ -66,12 +137,7 @@ def parse_feedforward_config(cfg: dict[str, Any], config_path: Path | None = Non
     output = _nested(cfg, "output")
     video = _nested(cfg, "video")
 
-    if engine == "lingbot_map":
-        batch_size = lingbot_map.get("batch_size")
-    elif engine == "vggt_omega":
-        batch_size = vggt_omega.get("batch_size")
-    else:
-        batch_size = None
+    max_frames, max_frames_mode = resolve_input_frame_limits(cfg, engine)
 
     return {
         "image_path": _require(cfg, "image_path", config_path),
@@ -87,8 +153,10 @@ def parse_feedforward_config(cfg: dict[str, Any], config_path: Path | None = Non
         "animate": output.get("animate", True),
         "animation_fps": output.get("animation_fps", 24),
         "align_ground": output.get("align_ground", True),
-        "batch_size": batch_size,
+        "max_frames": max_frames,
+        "max_frames_mode": max_frames_mode,
         "use_sdpa": lingbot_map.get("use_sdpa", False),
+        "lingbot_map_mode": lingbot_map.get("mode"),
         "keyframe_interval": lingbot_map.get("keyframe_interval"),
         "window_size": lingbot_map.get("window_size", 64),
         "overlap_size": lingbot_map.get("overlap_size", 16),

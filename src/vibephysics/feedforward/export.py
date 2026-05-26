@@ -65,9 +65,12 @@ def _prepare_prediction_for_blend(
     from vibephysics.feedforward.ground_align import align_prediction_ground
     from vibephysics.feedforward.schema import load_prediction
 
+    from vibephysics.feedforward.common import convert_prediction_to_blender_zup
+
     prediction = load_prediction(predictions_path)
     if align_ground and not prediction.metadata.get("ground_align_applied"):
         align_prediction_ground(prediction)
+    convert_prediction_to_blender_zup(prediction)
     return prediction
 
 

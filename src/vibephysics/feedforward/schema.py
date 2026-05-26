@@ -34,6 +34,8 @@ class FeedforwardPrediction:
         }
         if self.images is not None:
             payload["images"] = self.images
+        if self.metadata:
+            payload["metadata"] = self.metadata
         return payload
 
     @classmethod

@@ -78,6 +78,49 @@ def _orient_ground_normal(
     return normal
 
 
+def _rotation_matrix_axis_angle(axis: np.ndarray, angle: float) -> np.ndarray:
+    axis = np.asarray(axis, dtype=np.float64)
+    norm = float(np.linalg.norm(axis))
+    if norm < 1e-8 or abs(angle) < 1e-8:
+        return np.eye(3, dtype=np.float64)
+    axis = axis / norm
+    kx, ky, kz = axis
+    k = np.array([[0.0, -kz, ky], [kz, 0.0, -kx], [-ky, kx, 0.0]], dtype=np.float64)
+    return np.eye(3) + math.sin(angle) * k + (1.0 - math.cos(angle)) * (k @ k)
+
+
+def _refine_residual_plane_tilt(
+    rotation_blender: np.ndarray,
+    points: np.ndarray,
+    inlier_mask: np.ndarray,
+) -> np.ndarray:
+    """
+    Second pass after normal-to-Z: level residual dz/dx and dz/dy on the floor band.
+
+    Pass 1 makes the plane normal horizontal; drift can still leave visible tilt in
+    one orthographic view (X vs Y). Fit z = ax*x + ay*y on low-Z points and apply
+    small pitch/roll corrections.
+    """
+    aligned = (rotation_blender @ points[inlier_mask].T).T
+    if aligned.shape[0] < 100:
+        aligned = (rotation_blender @ points.T).T
+    z_cut = float(np.percentile(aligned[:, 2], 25))
+    ground = aligned[aligned[:, 2] <= z_cut]
+    if ground.shape[0] < 100:
+        ground = aligned
+
+    design = np.column_stack([ground[:, 0], ground[:, 1], np.ones(ground.shape[0])])
+    coef, _, _, _ = np.linalg.lstsq(design, ground[:, 2], rcond=None)
+    ax, ay = float(coef[0]), float(coef[1])
+    if abs(ax) < 0.005 and abs(ay) < 0.005:
+        return rotation_blender
+
+    # z ≈ ax*x + ay*y  ->  rotate about Y to fix dz/dx, then X for dz/dy.
+    ry = _rotation_matrix_axis_angle(np.array([0.0, 1.0, 0.0]), -math.atan(ax))
+    rx = _rotation_matrix_axis_angle(np.array([1.0, 0.0, 0.0]), math.atan(ay))
+    return rx @ ry @ rotation_blender
+
+
 def _flip_upside_down_rotation(
     rotation_blender: np.ndarray,
     points: np.ndarray,
@@ -115,6 +158,18 @@ def _rotation_matrix_normal_to_z(normal: np.ndarray) -> np.ndarray:
     return np.eye(3) + math.sin(angle) * k + (1.0 - math.cos(angle)) * (k @ k)
 
 
+_GROUND_ALIGN_MAX_TILT_DEG = 85.0
+
+
+def _is_reasonable_ground_rotation(rotation_blender: np.ndarray) -> bool:
+    """Reject fits that would flip the scene (~180°) from a wrong dominant plane."""
+    euler = _matrix_to_euler_xyz(rotation_blender)
+    for angle in euler[:2]:
+        if abs(math.degrees(angle)) > _GROUND_ALIGN_MAX_TILT_DEG:
+            return False
+    return True
+
+
 def _matrix_to_euler_xyz(rotation: np.ndarray) -> tuple[float, float, float]:
     """Convert rotation matrix to XYZ Euler angles in radians."""
     rot = np.asarray(rotation, dtype=np.float64)
@@ -148,6 +203,12 @@ def _collect_ground_align_points(predictions: dict | FeedforwardPrediction) -> t
     out[:, 0] = pts[:, 0]
     out[:, 1] = pts[:, 2]
     out[:, 2] = -pts[:, 1]
+
+    # Prefer lowest-Z band so RANSAC sees floor, not walls/ceiling (helps short max_frames clips).
+    z_cut = float(np.percentile(out[:, 2], 30))
+    floor_pts = out[out[:, 2] <= z_cut]
+    if floor_pts.shape[0] >= 3000:
+        out = floor_pts
 
     if out.shape[0] > _GROUND_ALIGN_MAX_POINTS:
         rng = np.random.default_rng(0)
@@ -307,10 +368,30 @@ def _apply_world_rotation_opencv(
     prediction.extrinsic = new_ext.astype(np.float32)
 
 
+def _warn_spread_frame_sampling(predictions: dict | FeedforwardPrediction) -> None:
+    """Spread subsampling mixes distant poses and often breaks floor-plane RANSAC."""
+    if isinstance(predictions, FeedforwardPrediction):
+        meta = predictions.metadata
+    else:
+        meta = predictions.get("metadata") or {}
+    if str(meta.get("max_frames_mode", "")).lower() != "spread":
+        return
+    indices = meta.get("selected_indices")
+    if not indices or len(indices) < 2:
+        return
+    span = int(max(indices) - min(indices))
+    if span > len(indices) * 3:
+        print(
+            "[vibephysics] Ground align warning: max_frames_mode=spread samples distant "
+            "poses; floor fit may look tilted in one view. Prefer max_frames_mode: first."
+        )
+
+
 def _estimate_ground_rotation_matrix_opencv(
     predictions: dict | FeedforwardPrediction,
 ) -> np.ndarray | None:
     """Estimate 3x3 ground-alignment rotation in OpenCV world coordinates."""
+    _warn_spread_frame_sampling(predictions)
     try:
         points, total_finite = _collect_ground_align_points(predictions)
     except ValueError:
@@ -323,6 +404,7 @@ def _estimate_ground_rotation_matrix_opencv(
     normal, _offset, inliers = fit
     rotation_blender = _rotation_matrix_normal_to_z(normal)
     rotation_blender = _flip_upside_down_rotation(rotation_blender, points, inliers)
+    rotation_blender = _refine_residual_plane_tilt(rotation_blender, points, inliers)
     rotation_opencv = _blender_rotation_to_opencv(rotation_blender)
     inlier_count = int(inliers.sum())
     euler = _matrix_to_euler_xyz(rotation_blender)
@@ -370,6 +452,17 @@ def align_prediction_ground(prediction: FeedforwardPrediction) -> bool:
 
     m = _opencv_world_to_blender_matrix_3x3()
     rotation_blender = m @ rotation @ m.T
+    if not _is_reasonable_ground_rotation(rotation_blender):
+        euler = _matrix_to_euler_xyz(rotation_blender)
+        print(
+            "[vibephysics] Ground align rejected: estimated rotation is too large "
+            f"(euler=({math.degrees(euler[0]):.1f}°, {math.degrees(euler[1]):.1f}°, "
+            f"{math.degrees(euler[2]):.1f}°)) — likely a wall/ceiling plane on a drifted "
+            "reconstruction. Fix poses (e.g. windowed mode for >320 frames) or disable "
+            "align_ground."
+        )
+        return False
+
     euler = _matrix_to_euler_xyz(rotation_blender)
     euler_deg = tuple(math.degrees(a) for a in euler)
     apply_world_rotation_to_prediction(prediction, rotation, euler_deg=euler_deg)

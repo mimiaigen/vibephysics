@@ -8,6 +8,8 @@ verbose: true
 video:
   fps: 2              # extraction rate; saved to .vibephysics_extract_fps and reused for animation
   quality: 2
+  max_frames: null     # null = all frames; set N to limit count (both engines)
+  max_frames_mode: first   # first = first N consecutive; spread = evenly across input
 
 output:
   save_blend: scene.blend
@@ -22,7 +24,7 @@ lingbot_map:
   model: lingbot-map
   checkpoint: null
   image_size: 518
-  batch_size: null
+  mode: auto
   keyframe_interval: null
   window_size: 64
   overlap_size: 16
@@ -34,7 +36,6 @@ vggt_omega:
   checkpoint: null             # auto-downloads checkpoint_name on first run
   checkpoint_name: vggt-omega-1b-512
   resolution: 512              # official --image-resolution
-  batch_size: null             # null = all frames (official loads every image)
   preprocess_mode: balanced    # official load_fn default
   enable_alignment: false
   conf_percentile: 50.0        # official demo conf_thres default

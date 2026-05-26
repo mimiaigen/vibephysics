@@ -2,6 +2,8 @@
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CONFIG="${CONFIG:-$SCRIPT_DIR/src/vibephysics/feedforward/configs/feedforward_vggt_omega.yaml}"
+RUN_LABEL="run_vggt_omega"
+source "$SCRIPT_DIR/feedforward_run.inc.sh"
 
 python_has() {
     "$1" -c "import $2" >/dev/null 2>&1
@@ -83,7 +85,11 @@ export KMP_DUPLICATE_LIB_OK=TRUE
 "$PYTHON" -c "from vibephysics.feedforward.vggt_omega import ensure_dependencies; import sys; sys.exit(0 if ensure_dependencies() else 1)"
 
 usage() {
-    echo "Usage: $0 [--config <yaml>] [--input <path>] [--output_path <path>] [--mode balanced|max_size]"
+    echo "Usage: $0 [--config <yaml>] [--input <path>] [--output_path <path>] [--mode balanced|max_size] [--max_frames N] [--max_frames_mode first|spread]"
+    echo ""
+    feedforward_usage_frame_args
+    echo ""
+    echo "Frame limits apply via video.max_frames in config (shared by all engines)."
     exit 1
 }
 
@@ -93,6 +99,8 @@ while [[ "$#" -gt 0 ]]; do
         --input|--image_path) INPUT="$2"; shift ;;
         --output_path) OUTPUT_PATH="$2"; shift ;;
         --mode) MODE="$2"; shift ;;
+        --max_frames) MAX_FRAMES="$2"; shift ;;
+        --max_frames_mode) MAX_FRAMES_MODE="$2"; shift ;;
         -h|--help) usage ;;
         *) echo "Unknown parameter passed: $1"; usage ;;
     esac
@@ -103,6 +111,9 @@ ARGS=(--config "$CONFIG")
 [ -n "${INPUT:-}" ] && ARGS+=(--input "$INPUT")
 [ -n "${OUTPUT_PATH:-}" ] && ARGS+=(--output_path "$OUTPUT_PATH")
 [ -n "${MODE:-}" ] && ARGS+=(--mode "$MODE")
+feedforward_append_frame_args
 
 echo "--- [run_vggt_omega] Python: $PYTHON ---"
+feedforward_print_frame_plan "$CONFIG" "${INPUT:-}"
+
 exec "$PYTHON" -m vibephysics.feedforward.reconstruct "${ARGS[@]}"

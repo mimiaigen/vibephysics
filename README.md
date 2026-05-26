@@ -4,8 +4,14 @@
 
 **A lightweight Blender physics simulation framework for realistic robot animations, rigid body physics, water dynamics, and annotation tools — all running efficiently on CPU.**
 
+---
+
+## ⚙️ Installation (macOS)
+
+Conda + `pip install vibephysics`; optional GLOMAP and feedforward backends.
+
 <details>
-<summary><strong>⚙️ Installation (macOS)</strong></summary>
+<summary>Installation steps</summary>
 
 ```bash
 # 1. Create environment
@@ -27,10 +33,12 @@ pip install git+https://github.com/facebookresearch/vggt-omega.git
 
 </details>
 
-<details>
-<summary><strong>🐧 Linux (Ubuntu) System Dependencies</strong></summary>
+## 🐧 Linux (Ubuntu) System Dependencies
 
-If you are on Linux and want to use the **GLOMAP** or **COLMAP** backends, install these C++ development libraries before building:
+C++ libraries required to build GLOMAP/COLMAP on Linux.
+
+<details>
+<summary>apt packages</summary>
 
 ```bash
 sudo apt-get update
@@ -48,10 +56,14 @@ sudo apt-get install -y \
 
 </details>
 
-<details>
-<summary><strong>⚠️ Troubleshooting (Linker Errors)</strong></summary>
+## ⚠️ Troubleshooting (Linker Errors)
 
-If you are using **Anaconda** on Linux and see an error like `relocation R_X86_64_TPOFF32 ... can not be used when making a shared object`, it is due to a conflict with the Anaconda linker. Fix it by forcing the compiler to use the global-dynamic TLS model:
+Fix Anaconda TLS/linker conflicts when installing GLOMAP on Linux.
+
+<details>
+<summary>CXXFLAGS workaround</summary>
+
+If you see `relocation R_X86_64_TPOFF32 ... can not be used when making a shared object`:
 
 ```bash
 export CXXFLAGS="$CXXFLAGS -fPIC -ftls-model=global-dynamic"
@@ -61,19 +73,16 @@ pip install git+https://github.com/shamangary/glomap.git
 
 </details>
 
-<details>
-<summary><strong>🗺️ Mapping & Reconstruction</strong></summary>
+---
 
-Convert image sequences into 3D reconstructions with sparse SfM (GLOMAP/COLMAP) or dense feedforward models.
+## 🗺️ Sparse mapping (GLOMAP & COLMAP)
 
 ![GLOMAP Demo](assets/glomap_pointcloud_demo.gif)
 
-- **GLOMAP** – Global SfM, 1–2 orders of magnitude faster than incremental COLMAP.
-- **COLMAP** – Industry-standard incremental SfM.
-- **Feedforward** – Dense reconstruction via [LingBot-Map](https://github.com/robbyant/lingbot-map) and [VGGT-Omega](https://github.com/facebookresearch/vggt-omega).
-- **GSplat ready** – GLOMAP/COLMAP outputs use standard `sparse/0` + `images/` layout for 3D Gaussian Splatting.
+Structure-from-Motion: sparse point clouds and camera poses, GSplat-ready `sparse/0` layout.
 
----
+<details>
+<summary>GLOMAP & COLMAP usage</summary>
 
 ### GLOMAP
 
@@ -103,18 +112,17 @@ mapping.run_sfm_from_config("src/vibephysics/mapping/configs/sfm.yaml", image_pa
 mapping.glomap_pipeline(image_path="path/to/images")
 ```
 
-GLOMAP writes a COLMAP-format sparse model under `output/.../sparse/0/`. Use the [COLMAP visualization](#colmap-visualization) steps below to inspect it in Blender.
+GLOMAP writes COLMAP-format output under `output/.../sparse/0/`. Visualize with the [COLMAP visualization](#colmap-visualization) steps below.
 
 ---
 
 ### COLMAP
 
-Set `engine: colmap` in `src/vibephysics/mapping/configs/sfm.yaml` (same fields as GLOMAP; only `engine` changes).
+Set `engine: colmap` in the same `sfm.yaml` (only `engine` changes).
 
 **Command line:**
 ```bash
 ./run_glomap.sh --config src/vibephysics/mapping/configs/sfm.yaml --image_path path/to/images
-# with engine: colmap in the yaml
 ```
 
 **Python API:**
@@ -125,11 +133,11 @@ mapping.run_sfm_from_config("src/vibephysics/mapping/configs/sfm.yaml", image_pa
 mapping.colmap_pipeline(image_path="path/to/images")
 ```
 
-Output layout matches standard COLMAP: `sparse/0/` with `cameras.bin`, `images.bin`, `points3D.bin`, etc.
+Output: `sparse/0/` with `cameras.bin`, `images.bin`, `points3D.bin`, etc.
 
 #### COLMAP visualization {#colmap-visualization}
 
-Load a sparse reconstruction (COLMAP or GLOMAP output) into Blender as a colored point cloud with camera frustums. Blender is a **viewer only** — the sparse folder on disk is the source of truth.
+Load sparse reconstruction (COLMAP or GLOMAP) in Blender. Blender is **viewer only** — `sparse/0` on disk is ground truth.
 
 **Command line:**
 ```bash
@@ -143,17 +151,24 @@ from vibephysics import mapping
 mapping.load_colmap_reconstruction(
     input_path="output/mapping_output/sparse/0",
     point_size=0.03,
-    rotation=(-90, 0, 0),  # optional global rotation on import
+    rotation=(-90, 0, 0),
 )
 ```
 
+</details>
+
 ---
 
-### Dense feedforward reconstruction
+## 🧠 Feedforward reconstruction
 
 ![Feedforward Comparison](assets/feedforward_comparison.gif)
 
-Install feedforward backends (Python 3.11 + `bpy`). Pre-install from GitHub (see Installation) or let run scripts auto-install on first use:
+Dense depth, poses, and world points from video or images via LingBot-Map and VGGT-Omega. `predictions.npz` is Z-up ground truth; Blender only visualizes it.
+
+<details>
+<summary>Feedforward setup & usage</summary>
+
+Install backends (Python 3.11 + `bpy`). Pre-install from GitHub (see Installation) or let run scripts auto-install on first use:
 
 ```bash
 pip install vibephysics bpy
@@ -161,7 +176,7 @@ pip install vibephysics bpy
 ./run_vggt_omega.sh --input path/to/images
 ```
 
-Per-engine configs: `src/vibephysics/feedforward/configs/`
+Configs: `src/vibephysics/feedforward/configs/`
 
 | Config | Engine | Notes |
 |--------|--------|-------|
@@ -228,82 +243,126 @@ pred = feedforward.load_prediction(output_dir / "predictions.npz")
 |--------|----------|--------|
 | **LingBot-Map** | Long video, streaming | 100–25,000+ |
 | **VGGT-Omega** | High-quality batches | 10–100 |
-| **GLOMAP/COLMAP** | Sparse SfM, GSplat | any |
 
 **Output layout:**
 ```
 feedforward_output/{engine}_{timestamp}/
-  predictions.npz          # canonical Z-up arrays (depth, conf, poses, world_points)
+  predictions.npz          # Z-up arrays (depth, conf, poses, world_points)
   reconstruct_config.json
   scene.blend              # optional viewer export
 ```
 
-`predictions.npz` is ground truth: Blender Z-up coordinates (`metadata.world_coordinates: blender_z_up`), ground-aligned when `align_ground: true`. Blender import does not re-run alignment or axis conversion on new NPZ files.
+`predictions.npz` uses Blender Z-up (`metadata.world_coordinates: blender_z_up`). Ground align runs before save when `align_ground: true`; Blender does not re-align or re-axis-convert on load.
 
 </details>
 
-<details>
-<summary><strong>🎬 Simulation Results</strong> — <code>sh run_robot.sh</code></summary>
+---
+
+## 🎬 Simulation results
 
 ![Result Demo](assets/result_demo.gif)
 
-Robot walking with rigid body physics, uneven ground, puddles, and annotation overlay.
+Robot walking with rigid body physics, uneven ground, puddles, and annotation overlay — `sh run_robot.sh`.
+
+<details>
+<summary>Run robot simulation</summary>
+
+```bash
+sh ./run_robot.sh
+sh ./run_robot.sh mounted    # POV (default)
+sh ./run_robot.sh center     # overview
+sh ./run_robot.sh following  # third-person
+```
 
 </details>
 
-<details>
-<summary><strong>📊 Annotation Tools Demo</strong> — <code>sh run_basics.sh</code></summary>
+## 📊 Annotation tools
 
 ![Annotation Demo](assets/annotation_demo.gif)
 
-Bounding boxes, motion trails, and point cloud tracking for vision datasets.
+Bounding boxes, motion trails, and point cloud tracking — `sh run_basics.sh`.
+
+<details>
+<summary>Annotation demos</summary>
+
+```bash
+sh ./run_basics.sh
+```
 
 </details>
 
-<details>
-<summary><strong>🎯 Dynamic Frustum Culling Demo</strong> — <code>sh run_basics.sh</code></summary>
+## 🎯 Frustum culling
 
 ![Frustum Demo](assets/frustum_demo.gif)
 
-Per-point frustum culling with a mounted camera; in-frustum points turn red in real time.
+Per-point frustum culling; in-frustum points turn red in real time — `sh run_basics.sh`.
+
+<details>
+<summary>Frustum options</summary>
+
+```bash
+sh ./run_forest.sh --frustum-mode highlight
+sh ./run_forest.sh --frustum-mode frustum_only
+```
 
 </details>
 
-<details>
-<summary><strong>💧 Water Simulation Demo</strong> — <code>sh run_water.sh</code></summary>
+## 💧 Water simulation
 
 ![Water Float Demo](assets/water_float_demo.gif)
 
-Water physics with buoyancy, ripples, and point cloud tracking.
+Buoyancy, ripples, and point tracking — `sh run_water.sh`.
+
+<details>
+<summary>Water demo</summary>
+
+```bash
+sh ./run_water.sh
+```
 
 </details>
 
-<details>
-<summary><strong>🐕 Go2 Simulation Demo</strong> — <code>python examples/go2/go2_waypoint_walk.py</code></summary>
+## 🐕 Go2 simulation
 
 ![Go2 Demo](assets/go2_water_sphere_demo.gif)
 
-Unitree Go2 walking with water puddles and falling debris.
+Unitree Go2 with water and debris — `python examples/go2/go2_waypoint_walk.py`.
+
+<details>
+<summary>Go2 commands</summary>
+
+```bash
+python examples/go2/go2_waypoint_walk.py
+python examples/go2/go2_waypoint_walk.py --end-frame 150 --num-spheres 50
+```
 
 </details>
 
+---
+
+## ✨ Highlights
+
+CPU-friendly physics, robots, water, annotations, sparse mapping, and dense feedforward in one package.
+
 <details>
-<summary><strong>✨ Highlights</strong></summary>
+<summary>Feature list</summary>
 
 - **🚀 No GPU Required** – Efficient on CPU-only machines; GPU optional for rendering.
 - **🤖 Robot Simulation** – IK walking with Open Duck and Unitree Go2.
 - **💧 Water Physics** – Puddles, ripples, buoyancy.
 - **📊 Annotation Tools** – Bboxes, motion trails, point tracking.
-- **🗺️ SfM Mapping** – COLMAP and GLOMAP sparse reconstruction.
-- **🧠 Feedforward** – LingBot-Map and VGGT-Omega dense reconstruction.
+- **🗺️ Sparse Mapping** – COLMAP and GLOMAP.
+- **🧠 Feedforward** – LingBot-Map and VGGT-Omega.
 - **🔧 Developer Friendly** – Pure Python, `bpy` as a module, no GUI required.
-
-Perfect for researchers, animators, and robotics engineers who need physics without dedicated GPU hardware.
 
 </details>
 
+## Requirements
+
+Python 3.11 + `bpy`; Blender 5.0 optional for viewing `.blend` files.
+
 <details>
-<summary><strong>Requirements</strong></summary>
+<summary>Details & third-party assets</summary>
 
 ### For running simulations
 - **Python 3.11** (required for `bpy`; **3.12+ not supported**)
@@ -311,107 +370,86 @@ Perfect for researchers, animators, and robotics engineers who need physics with
 
 ### For viewing results (optional)
 - **Blender 5.0** – [blender.org](https://www.blender.org/download/)
-- Only needed to open generated `.blend` files; not required to run simulations
 
 > ⚠️ PyPI `bpy` 5.0 ships cp311 wheels only.
 
 ### Third-party assets
-- **Open Duck**: [Open Duck Blender model](https://github.com/pollen-robotics/Open_Duck_Blender) (demo only; see upstream license).
-- **Unitree Go2**: [Unitree model dataset](https://huggingface.co/datasets/unitreerobotics/unitree_model) (auto-downloaded for Go2 examples).
+- **Open Duck**: [Open Duck Blender model](https://github.com/pollen-robotics/Open_Duck_Blender)
+- **Unitree Go2**: [Unitree model dataset](https://huggingface.co/datasets/unitreerobotics/unitree_model)
 
 </details>
 
+## Quick start
+
+One-liner entry points for demos and simulations.
+
 <details>
-<summary><strong>Quick Start</strong></summary>
+<summary>All quick-start commands</summary>
 
 ```bash
-# Annotation demos (bbox, trails, tracking, frustum culling)
 sh ./run_basics.sh
-
-# Open Duck robot simulation
 sh ./run_robot.sh
-sh ./run_robot.sh mounted    # POV (default)
-sh ./run_robot.sh center     # overview
-sh ./run_robot.sh following  # third-person
-
-# Unitree Go2
-python examples/go2/go2_waypoint_walk.py
-python examples/go2/go2_waypoint_walk.py --end-frame 150 --num-spheres 50
-
-# Forest walk
 sh ./run_forest.sh
-sh ./run_forest.sh --frustum-mode highlight
-sh ./run_forest.sh --no-physics
-
-# Water
 sh ./run_water.sh
+python examples/go2/go2_waypoint_walk.py
+./run_lingbot_map.sh --input test_recording.MOV
+./run_glomap.sh --image_path path/to/images
 ```
 
 </details>
 
+## Visualizing simulation results
+
+Open `output/*.blend` in Blender 5.0 and press Spacebar to play.
+
 <details>
-<summary><strong>Visualizing simulation results</strong></summary>
+<summary>Platform commands</summary>
 
-Simulations write `.blend` files under `output/`.
-
-**Download Blender 5.0** (free): [blender.org/download](https://www.blender.org/download/)
-
-**Open results:**
 ```bash
-# macOS
-open output/robot_waypoint.blend
-
-# Linux
-blender output/robot_waypoint.blend
-
-# Windows
-start output/robot_waypoint.blend
+open output/robot_waypoint.blend      # macOS
+blender output/robot_waypoint.blend   # Linux
+start output/robot_waypoint.blend    # Windows
 ```
-
-Press **Spacebar** in Blender to play the animation.
 
 </details>
 
+## Camera system
+
+Center, mounted, and following camera rigs; switch active camera in the Outliner.
+
 <details>
-<summary><strong>Camera system</strong></summary>
+<summary>Camera API & shell options</summary>
 
 | Camera type | Description | Best for |
 |-------------|-------------|----------|
-| **Center** | Cameras in a circle, looking at scene center | Overview, multi-angle |
-| **Mounted** | Cameras on an object (e.g. robot head) | First-person POV |
-| **Following** | Camera tracks a target | Third-person |
+| **Center** | Circle around scene center | Overview |
+| **Mounted** | On object (e.g. robot head) | POV |
+| **Following** | Tracks target | Third-person |
 
 ```python
 from vibephysics.camera import CameraManager
 
 cam_manager = CameraManager()
-center_rig = cam_manager.add_center_pointing('center', num_cameras=4, radius=25, height=12)
-center_rig.create(target_location=(0, 0, 0))
-
-mounted_rig = cam_manager.add_object_mounted('mounted', num_cameras=4, distance=0.15)
-mounted_rig.create(parent_object=robot_head, lens=10)
-
-follow_rig = cam_manager.add_following('following', height=12, look_angle=60)
-follow_rig.create(target=robot_armature)
-
+cam_manager.add_center_pointing('center', num_cameras=4, radius=25, height=12).create(target_location=(0, 0, 0))
+cam_manager.add_object_mounted('mounted', num_cameras=4, distance=0.15).create(parent_object=robot_head, lens=10)
+cam_manager.add_following('following', height=12, look_angle=60).create(target=robot_armature)
 cam_manager.activate_rig('mounted', camera_index=0)
 ```
 
-**Shell:**
 ```bash
-sh run_robot.sh mounted
-sh run_robot.sh center
-sh run_robot.sh following
+sh run_robot.sh mounted | center | following
 ```
 
-**Switch cameras in Blender:** all rigs exist in every `.blend`; use the green camera icon in the Outliner or `Ctrl+Numpad 0` on the selected camera.
+Use the green camera icon in the Outliner or `Ctrl+Numpad 0` to switch cameras in Blender.
 
 </details>
 
-<details>
-<summary><strong>Setup module</strong></summary>
+## Setup module
 
-Scene initialization, import/export, and viewport helpers:
+Import/export assets and initialize simulation scenes.
+
+<details>
+<summary>Setup API & formats</summary>
 
 ```python
 from vibephysics import setup
@@ -419,29 +457,20 @@ from vibephysics import setup
 setup.init_simulation(start_frame=1, end_frame=250)
 setup.load_asset('robot.glb')
 setup.save_blend('output/scene.blend')
-
-from vibephysics.setup import importer, exporter
-objects = importer.load_glb('model.glb', transform={'scale': 0.5})
-exporter.export_fbx('output.fbx', selected_only=True)
 ```
 
 | Import | Export |
 |--------|--------|
-| GLB/GLTF | Blend |
-| FBX | GLB/GLTF |
-| PLY | FBX |
-| OBJ | OBJ |
-| STL | PLY |
-| DAE | STL |
-| USD/USDA/USDC | USD |
-| Blend (append) | |
+| GLB/GLTF, FBX, PLY, OBJ, STL, DAE, USD, Blend | Blend, GLB, FBX, OBJ, PLY, STL, USD |
 
 </details>
 
-<details>
-<summary><strong>Gaussian Splatting (3DGS) — BETA</strong></summary>
+## Gaussian Splatting (3DGS) — BETA
 
-3D Gaussian Splatting viewer support (under development):
+Viewer for 3D Gaussian splats (under development).
+
+<details>
+<summary>3DGS viewer</summary>
 
 ```bash
 sh run_3dgs_viewer.sh
@@ -449,18 +478,18 @@ sh run_3dgs_viewer.sh
 
 </details>
 
+## License
+
+© 2025 MIMI AI LTD. Free for academic use; commercial license available.
+
 <details>
-<summary><strong>License</strong></summary>
+<summary>License & citation</summary>
 
 **© 2025 MIMI AI LTD, UK. All rights reserved.**
 
-### Academic & student use (free)
-Free for students, academic research, and education.
+- **Academic / student use:** free  
+- **Commercial:** tsunyi@mimiaigen.com  
 
-### Commercial use
-Contact: **tsunyi@mimiaigen.com**
-
-### Citation
 ```
 @misc{VibePhysics,
   author = {Tsun-Yi Yang},

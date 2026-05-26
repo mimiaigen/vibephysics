@@ -22,9 +22,10 @@ conda activate vibephysics
 pip install vibephysics
 
 # 3. (Optional) Install feedforward backends from GitHub
-# Or skip these — ./run_lingbot_map.sh / ./run_vggt_omega.sh auto-install on first run
+# Or skip these — feedforward run scripts auto-install on first run
 pip install git+https://github.com/robbyant/lingbot-map.git
 pip install git+https://github.com/facebookresearch/vggt-omega.git
+pip install "mapanything @ git+https://github.com/facebookresearch/map-anything.git"
 ```
 
 </details>
@@ -84,7 +85,7 @@ Output: `sparse/0/` plus `visualize.blend` (unless `--no-blend`).
 
 ![Feedforward Comparison](assets/feedforward_comparison.gif)
 
-Dense depth, poses, and world points from video or images via LingBot-Map and VGGT-Omega. `predictions.npz` is Z-up ground truth; Blender only visualizes it.
+Dense depth, poses, and world points from video or images via LingBot-Map, VGGT-Omega, VGG-TTT, and Map-Anything. `predictions.npz` is Z-up ground truth; Blender only visualizes it.
 
 <details>
 <summary>Feedforward setup & usage</summary>
@@ -95,6 +96,7 @@ Install backends (Python 3.11 + `bpy`). Pre-install from GitHub (see Installatio
 pip install vibephysics bpy
 ./run_lingbot_map.sh --input test_recording.MOV
 ./run_vggt_omega.sh --input path/to/images
+./run_map_anything.sh --input test_recording.MOV --model vggt
 ```
 
 Configs: `src/vibephysics/feedforward/configs/`
@@ -104,10 +106,12 @@ Configs: `src/vibephysics/feedforward/configs/`
 | `feedforward.yaml` | `lingbot_map` (default) | Generic template |
 | `feedforward_lingbot_map.yaml` | `lingbot_map` | Demo defaults (`min_confidence: 1.5`) |
 | `feedforward_vggt_omega.yaml` | `vggt_omega` | Requires [gated HF access](https://huggingface.co/facebook/VGGT-Omega) |
+| `feedforward_vgg_ttt.yaml` | `vgg_ttt` | NVIDIA VGG-TTT defaults |
+| `feedforward_map_anything.yaml` | `map_anything` | Unified adapter for `facebookresearch/map-anything` model keys |
 
 **Config (`feedforward.yaml`):**
 ```yaml
-engine: lingbot_map       # lingbot_map | vggt_omega
+engine: lingbot_map       # lingbot_map | vggt_omega | vgg_ttt | map_anything
 image_path: path/to/images
 output_path: null
 
@@ -134,6 +138,15 @@ vggt_omega:
   checkpoint_name: vggt-omega-1b-512
   resolution: 512
   conf_percentile: 50.0
+
+map_anything:
+  model: vggt              # model_factory key, see table below
+  model_kwargs: null       # null = VibePhysics defaults for selected model
+  install_all: false
+  resolution: 518
+  norm_type: identity
+  patch_size: 14
+  resize_mode: fixed_mapping
 ```
 
 **Input:** folder, single image, or video (`.mov`/`.mp4`). Videos extract frames at `video.fps` into `output/<video_stem>/` and reuse cached frames on reruns.
@@ -142,7 +155,33 @@ vggt_omega:
 ```bash
 ./run_lingbot_map.sh --input test_recording.MOV
 ./run_vggt_omega.sh --input path/to/images
+./run_map_anything.sh --input test_recording.MOV --model mapanything
+./run_map_anything.sh --input test_recording.MOV --model mast3r --max_frames 20
 ```
+
+**Map-Anything model keys:**
+
+`run_map_anything.sh` uses the Map-Anything unified loader and converts outputs into the same `FeedforwardPrediction` format as LingBot-Map and VGGT-Omega.
+
+| Model key | Default preprocessing | Notes |
+|-----------|-----------------------|-------|
+| `mapanything` | `resolution: 518`, `norm_type: dinov2`, `patch_size: 14` | Official `facebook/map-anything` checkpoint via `MapAnything.from_pretrained()` |
+| `mapanything_apache` | `518`, `dinov2`, `14` | Apache-licensed `facebook/map-anything-apache` checkpoint |
+| `mapanything_ablations` | `518`, `dinov2`, `14` | Map-Anything ablation model key when available in the installed package |
+| `vggt` | `518`, `identity`, `14` | Default VibePhysics Map-Anything backend |
+| `moge` | `518`, `identity`, `14` | MoGe wrapper defaults to `Ruicheng/moge-vitl` |
+| `pi3` | `518`, `identity`, `14` | Pi3 wrapper |
+| `pi3x` | `518`, `identity`, `14` | Pi3x wrapper; auto-installs the `pi3` extra when needed |
+| `dust3r` | `512`, `dust3r`, `16` | Downloads the official DUSt3R checkpoint if no `ckpt_path` is supplied |
+| `mast3r` | `512`, `dust3r`, `16` | Downloads the official MASt3R checkpoint if no `ckpt_path` is supplied |
+| `must3r` | `512`, `dust3r`, `16` | Downloads official MUSt3R checkpoints if paths are not supplied |
+| `modular_dust3r` | `512`, `dust3r`, `16` | Modular DUSt3R key when available in the installed package |
+| `pow3r` | `512`, `dust3r`, `16` | Requires `model_kwargs.ckpt_path` for the Pow3R checkpoint |
+| `pow3r_ba` | `512`, `dust3r`, `16` | Pow3R with bundle adjustment; requires `model_kwargs.ckpt_path` |
+| `anycalib` | `518`, `dinov2`, `14` | AnyCalib wrapper; auto-installs the `anycalib` extra when needed |
+| `da3` | `504`, `dinov2`, `14` | Depth Anything 3 wrapper; auto-installs `depth-anything-3` extra when needed |
+
+For model-specific arguments, set `map_anything.model_kwargs` in YAML. The run script auto-installs the selected model extra with `numpy<2` pinned for `bpy` compatibility; use `--install-all` to install all Map-Anything extras or `--no-install` / `VIBEPHYSICS_NO_AUTO_INSTALL=1` if you manage dependencies manually.
 
 See [Time-sync comparison](#-time-sync-comparison-glomap-vs-feedforward) for side-by-side `.blend` export (e.g. GLOMAP vs LingBot-Map).
 
@@ -155,12 +194,20 @@ output_dir = feedforward.reconstruct_from_config(
     image_path="test_recording.MOV",
 )
 pred = feedforward.load_prediction(output_dir / "predictions.npz")
+
+map_output_dir = feedforward.reconstruct_from_config(
+    "src/vibephysics/feedforward/configs/feedforward_map_anything.yaml",
+    image_path="test_recording.MOV",
+    map_anything_model="vggt",
+)
 ```
 
 | Engine | Best for | Frames |
 |--------|----------|--------|
 | **LingBot-Map** | Long video, streaming | 100–25,000+ |
 | **VGGT-Omega** | High-quality batches | 10–100 |
+| **VGG-TTT** | Test-time training experiments | Small batches |
+| **Map-Anything** | Trying many feedforward models behind one interface | Model-dependent |
 
 **Output layout:**
 ```
@@ -202,7 +249,7 @@ Side-by-side `.blend` with a **shared timeline** — scrub once, both reconstruc
 ```
 
 Each side can be:
-- `predictions.npz` (LingBot-Map, VGGT-Omega, …)
+- `predictions.npz` (LingBot-Map, VGGT-Omega, VGG-TTT, Map-Anything, ...)
 - `sparse/0/` folder from GLOMAP/COLMAP mapping
 
 **3. View in Blender**
@@ -331,7 +378,7 @@ CPU-friendly physics, robots, water, annotations, sparse mapping, and dense feed
 - **💧 Water Physics** – Puddles, ripples, buoyancy.
 - **📊 Annotation Tools** – Bboxes, motion trails, point tracking.
 - **🗺️ Sparse Mapping** – GLOMAP global and COLMAP incremental SfM via pycolmap 4.0+.
-- **🧠 Feedforward** – LingBot-Map and VGGT-Omega.
+- **🧠 Feedforward** – LingBot-Map, VGGT-Omega, VGG-TTT, and Map-Anything.
 - **🔧 Developer Friendly** – Pure Python, `bpy` as a module, no GUI required.
 
 </details>
@@ -372,6 +419,7 @@ sh ./run_forest.sh
 sh ./run_water.sh
 python examples/go2/go2_waypoint_walk.py
 ./run_lingbot_map.sh --input test_recording.MOV
+./run_map_anything.sh --input test_recording.MOV --model vggt
 ./run_glomap.sh --image_path path/to/images
 ```
 

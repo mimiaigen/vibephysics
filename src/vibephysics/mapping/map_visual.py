@@ -7,7 +7,6 @@ from pathlib import Path
 
 from vibephysics.feedforward.common import VIDEO_EXTRACT_FPS_FILE
 from vibephysics.feedforward.visual import (
-    POINT_RADIUS_FACTOR,
     TRAJECTORY_RADIUS_FACTOR,
     TRAJECTORY_RADIUS_MIN,
     _AnimationTiming,
@@ -426,7 +425,7 @@ def load_colmap_reconstruction(
                     colors,
                     conf,
                     collection=col,
-                    scale=max(point_size / POINT_RADIUS_FACTOR, 1.0),
+                    scale=point_size,
                     min_confidence=0.0,
                     frame_ids=frame_ids,
                     recon_time_scale=timing.recon_time_scale,

@@ -568,7 +568,7 @@ def reconstruct(
     save_blend: str | Path | None = "scene.blend",
     min_confidence: float = 0.5,
     filter_edges: bool = True,
-    point_scale: float = 1.0,
+    point_scale: float = 0.01,
     animate: bool = True,
     animation_fps: int = 24,
     align_ground: bool = True,
@@ -803,6 +803,7 @@ def reconstruct_from_config(
     preprocess_mode: str | None = None,
     max_frames: int | None = None,
     max_frames_mode: str | None = None,
+    point_scale: float | None = None,
     map_anything_model: str | None = None,
     map_anything_install_all: bool = False,
 ) -> Path:
@@ -818,6 +819,11 @@ def reconstruct_from_config(
         max_frames=max_frames,
         max_frames_mode=max_frames_mode,
     )
+    if point_scale is not None:
+        output = cfg.setdefault("output", {})
+        if not isinstance(output, dict):
+            raise ValueError("Config section 'output' must be a mapping")
+        output["point_scale"] = float(point_scale)
     if map_anything_model is not None:
         if cfg.get("engine") != "map_anything":
             raise ValueError("--model is only supported when engine is 'map_anything'")
@@ -896,6 +902,13 @@ def main() -> None:
         "spread=evenly across full input.",
     )
     parser.add_argument(
+        "--point_scale",
+        "--point-scale",
+        type=float,
+        default=None,
+        help="Override output.point_scale as an absolute point radius in the saved .blend.",
+    )
+    parser.add_argument(
         "--mode",
         dest="preprocess_mode",
         default=None,
@@ -923,6 +936,7 @@ def main() -> None:
             preprocess_mode=args.preprocess_mode,
             max_frames=args.max_frames,
             max_frames_mode=args.max_frames_mode,
+            point_scale=args.point_scale,
             map_anything_model=args.map_anything_model,
             map_anything_install_all=args.map_anything_install_all,
         )

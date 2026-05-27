@@ -28,7 +28,7 @@ ENGINE_COLLECTION_NAMES = {
 
 TRAJECTORY_RADIUS_FACTOR = 0.0015
 TRAJECTORY_RADIUS_MIN = 0.0008
-POINT_RADIUS_FACTOR = 0.01
+DEFAULT_POINT_RADIUS = 0.01
 
 
 class _AnimationTiming:
@@ -118,7 +118,7 @@ def get_or_create_point_material(name: str = "FeedforwardPointMaterial") -> bpy.
 def add_point_cloud_geo_nodes(
     obj,
     mat,
-    scale: float = 1.0,
+    scale: float = DEFAULT_POINT_RADIUS,
     *,
     min_confidence: float = 0.5,
     animate_frames: bool = False,
@@ -149,7 +149,7 @@ def add_point_cloud_geo_nodes(
     mesh_to_points = node_group.nodes.new("GeometryNodeMeshToPoints")
     math_node = node_group.nodes.new("ShaderNodeMath")
     math_node.operation = "MULTIPLY"
-    math_node.inputs[1].default_value = POINT_RADIUS_FACTOR
+    math_node.inputs[1].default_value = 1.0
     named_attr = node_group.nodes.new("GeometryNodeInputNamedAttribute")
     named_attr.inputs["Name"].default_value = "conf"
     named_attr.data_type = "FLOAT"
@@ -219,7 +219,7 @@ def create_point_cloud_object(
     colors: np.ndarray,
     confs: np.ndarray,
     collection=None,
-    scale: float = 1.0,
+    scale: float = DEFAULT_POINT_RADIUS,
     min_confidence: float = 0.5,
     frame_ids: np.ndarray | None = None,
     recon_time_scale: float = 1.0,
@@ -584,7 +584,7 @@ def import_point_cloud(
     predictions: dict,
     collection=None,
     min_confidence: float = 0.5,
-    point_scale: float = 1.0,
+    point_scale: float = DEFAULT_POINT_RADIUS,
     animate: bool = False,
     timing: _AnimationTiming | None = None,
 ) -> bpy.types.Object | None:
@@ -850,7 +850,7 @@ def load_reconstruction(
     predictions: dict | FeedforwardPrediction,
     collection_name: str | None = None,
     min_confidence: float = 0.5,
-    point_scale: float = 1.0,
+    point_scale: float = DEFAULT_POINT_RADIUS,
     import_cameras: bool = True,
     import_trajectory: bool = True,
     import_points: bool = True,

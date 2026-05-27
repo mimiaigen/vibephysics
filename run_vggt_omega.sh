@@ -85,7 +85,7 @@ export KMP_DUPLICATE_LIB_OK=TRUE
 "$PYTHON" -c "from vibephysics.feedforward.vggt_omega import ensure_dependencies; import sys; sys.exit(0 if ensure_dependencies() else 1)"
 
 usage() {
-    echo "Usage: $0 [--config <yaml>] [--input <path>] [--output_path <path>] [--mode balanced|max_size] [--max_frames N] [--max_frames_mode first|spread]"
+    echo "Usage: $0 [--config <yaml>] [--input <path>] [--output_path <path>] [--mode balanced|max_size] [--point_scale SIZE] [--max_frames N] [--max_frames_mode first|spread]"
     echo ""
     feedforward_usage_frame_args
     echo ""
@@ -99,6 +99,7 @@ while [[ "$#" -gt 0 ]]; do
         --input|--image_path) INPUT="$2"; shift ;;
         --output_path) OUTPUT_PATH="$2"; shift ;;
         --mode) MODE="$2"; shift ;;
+        --point_scale|--point-scale) POINT_SCALE="$2"; shift ;;
         --max_frames) MAX_FRAMES="$2"; shift ;;
         --max_frames_mode) MAX_FRAMES_MODE="$2"; shift ;;
         -h|--help) usage ;;

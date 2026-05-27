@@ -151,7 +151,7 @@ def parse_feedforward_config(cfg: dict[str, Any], config_path: Path | None = Non
         "save_blend": output.get("save_blend", "scene.blend"),
         "min_confidence": output.get("min_confidence", 0.5),
         "filter_edges": output.get("filter_edges", True),
-        "point_scale": output.get("point_scale", 1.0),
+        "point_scale": output.get("point_scale", 0.01),
         "animate": output.get("animate", True),
         "animation_fps": output.get("animation_fps", 24),
         "align_ground": output.get("align_ground", True),

@@ -45,8 +45,8 @@ def _blend_load_settings(predictions_path: Path, args: argparse.Namespace) -> di
         min_confidence = defaults.get("min_confidence", 0.5)
 
     point_scale = args.point_scale
-    if point_scale == 1.0 and defaults.get("point_scale") is not None:
-        point_scale = float(defaults["point_scale"])
+    if point_scale is None:
+        point_scale = float(defaults.get("point_scale", 0.01))
 
     return {
         "min_confidence": float(min_confidence),
@@ -208,7 +208,13 @@ def main() -> None:
     single.add_argument("--predictions", type=Path, required=True, help="Path to predictions.npz")
     single.add_argument("--output", type=Path, required=True, help="Output .blend path")
     single.add_argument("--min_confidence", type=float, default=None)
-    single.add_argument("--point_scale", type=float, default=1.0)
+    single.add_argument(
+        "--point_scale",
+        "--point-scale",
+        type=float,
+        default=None,
+        help="Absolute point radius for feedforward points. Defaults to reconstruct_config.json or 0.01.",
+    )
     single.add_argument("--animate", action=argparse.BooleanOptionalAction, default=True)
     single.add_argument("--align-ground", action=argparse.BooleanOptionalAction, default=True)
     single.add_argument("--animation_fps", type=int, default=24)
@@ -229,7 +235,13 @@ def main() -> None:
         help="Left/right paths: predictions.npz and/or COLMAP sparse/0 folder",
     )
     compare.add_argument("--output", type=Path, required=True, help="Output .blend path")
-    compare.add_argument("--point_scale", type=float, default=1.0)
+    compare.add_argument(
+        "--point_scale",
+        "--point-scale",
+        type=float,
+        default=None,
+        help="Absolute point radius for feedforward points. Defaults to reconstruct_config.json or 0.01.",
+    )
     compare.add_argument("--point-size", type=float, default=0.03, dest="point_size")
     compare.add_argument("--animate", action=argparse.BooleanOptionalAction, default=True)
     compare.add_argument("--align-ground", action=argparse.BooleanOptionalAction, default=True)

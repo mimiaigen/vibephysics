@@ -96,7 +96,10 @@ Install backends (Python 3.11 + `bpy`). Pre-install from GitHub (see Installatio
 pip install vibephysics bpy
 ./run_lingbot_map.sh --input test_recording.MOV
 ./run_vggt_omega.sh --input path/to/images
+./run_vggt_omega.sh --input path/to/images --point_scale 0.03
+./run_vgg_ttt.sh --input path/to/images --point_scale 0.03
 ./run_map_anything.sh --input test_recording.MOV --model vggt
+./run_map_anything.sh --input test_recording.MOV --point_scale 0.03
 ```
 
 Configs: `src/vibephysics/feedforward/configs/`
@@ -123,6 +126,7 @@ video:
 output:
   save_blend: scene.blend
   min_confidence: 0.5
+  point_scale: 0.01       # absolute point radius in Blender units
   align_ground: true
   animate: true
   animation_fps: 24
@@ -157,6 +161,7 @@ map_anything:
 ./run_vggt_omega.sh --input path/to/images
 ./run_map_anything.sh --input test_recording.MOV --model mapanything
 ./run_map_anything.sh --input test_recording.MOV --model mast3r --max_frames 20
+./run_lingbot_map.sh --input test_recording.MOV --point_scale 0.03
 ```
 
 **Map-Anything model keys:**

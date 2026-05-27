@@ -6,6 +6,7 @@ feedforward_usage_frame_args() {
     echo "  --max_frames_mode MODE  first (default) | spread"
     echo "                        first  = first N consecutive frames (default)"
     echo "                        spread = evenly across full input"
+    echo "  --point_scale SIZE      Absolute point radius in the saved .blend (default from YAML)"
 }
 
 feedforward_parse_frame_args() {
@@ -22,6 +23,7 @@ feedforward_parse_frame_args() {
 feedforward_append_frame_args() {
     [ -n "${MAX_FRAMES:-}" ] && ARGS+=(--max_frames "$MAX_FRAMES")
     [ -n "${MAX_FRAMES_MODE:-}" ] && ARGS+=(--max_frames_mode "$MAX_FRAMES_MODE")
+    [ -n "${POINT_SCALE:-}" ] && ARGS+=(--point_scale "$POINT_SCALE")
 }
 
 feedforward_print_frame_plan() {

@@ -114,7 +114,7 @@ export PYTHONPATH="${SCRIPT_DIR}/src${PYTHONPATH:+:$PYTHONPATH}"
 export KMP_DUPLICATE_LIB_OK=TRUE
 
 usage() {
-    echo "Usage: $0 [--config <yaml>] [--input <path>] [--output_path <path>] [--model <factory-key>] [--install-all] [--no-install] [--mode fixed_mapping|longest_side|square|fixed_size] [--max_frames N] [--max_frames_mode first|spread]"
+    echo "Usage: $0 [--config <yaml>] [--input <path>] [--output_path <path>] [--model <factory-key>] [--install-all] [--no-install] [--mode fixed_mapping|longest_side|square|fixed_size] [--point_scale SIZE] [--max_frames N] [--max_frames_mode first|spread]"
     echo ""
     feedforward_usage_frame_args
     echo ""
@@ -133,6 +133,7 @@ while [[ "$#" -gt 0 ]]; do
         --install-all|--install_all|--map-anything-install-all|--map_anything_install_all) INSTALL_ALL=1 ;;
         --no-install|--no_install) export VIBEPHYSICS_NO_AUTO_INSTALL=1 ;;
         --mode) MODE="$2"; shift ;;
+        --point_scale|--point-scale) POINT_SCALE="$2"; shift ;;
         --max_frames) MAX_FRAMES="$2"; shift ;;
         --max_frames_mode) MAX_FRAMES_MODE="$2"; shift ;;
         -h|--help) usage ;;

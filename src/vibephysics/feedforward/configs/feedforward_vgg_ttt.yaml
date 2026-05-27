@@ -15,7 +15,7 @@ output:
   save_blend: scene.blend
   min_confidence: 0.5          # ignored for vgg_ttt; see vgg_ttt.conf_percentile
   filter_edges: true
-  point_scale: 1.0
+  point_scale: 0.01
   animate: true
   animation_fps: 24
   align_ground: true

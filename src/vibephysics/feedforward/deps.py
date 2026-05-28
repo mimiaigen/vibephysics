@@ -61,16 +61,122 @@ _ENGINE_GIT: dict[str, str] = {
     "map_anything": MAP_ANYTHING_GIT,
 }
 
+_TORCH_IMPORTS = {"torch", "torchvision"}
+_TORCH_INDEX_ENV = "VIBEPHYSICS_TORCH_INDEX_URL"
+
 
 def _has_module(name: str) -> bool:
     return importlib.util.find_spec(name) is not None
 
 
-def pip_install(spec: str, *, verbose: bool = True, extra_specs: list[str] | None = None) -> None:
+def pip_install(
+    spec: str,
+    *,
+    verbose: bool = True,
+    extra_specs: list[str] | None = None,
+    index_url: str | None = None,
+) -> None:
     specs = [spec, *(extra_specs or [])]
     if verbose:
-        print(f"--- [vibephysics] Installing {' '.join(specs)} ---")
-    subprocess.check_call([sys.executable, "-m", "pip", "install", *specs])
+        source = f" --index-url {index_url}" if index_url else ""
+        print(f"--- [vibephysics] Installing{source} {' '.join(specs)} ---")
+    cmd = [sys.executable, "-m", "pip", "install"]
+    if index_url:
+        cmd.extend(["--index-url", index_url])
+    cmd.extend(specs)
+    subprocess.check_call(cmd)
+
+
+def _nvidia_driver_version() -> str | None:
+    try:
+        result = subprocess.run(
+            [
+                "nvidia-smi",
+                "--query-gpu=driver_version",
+                "--format=csv,noheader",
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=3,
+        )
+    except Exception:
+        return None
+    return result.stdout.strip().splitlines()[0].strip() or None
+
+
+def _driver_major(version: str | None) -> int | None:
+    if not version:
+        return None
+    try:
+        return int(version.split(".", 1)[0])
+    except ValueError:
+        return None
+
+
+def _torch_index_url() -> str | None:
+    override = os.environ.get(_TORCH_INDEX_ENV)
+    if override:
+        return override.strip() or None
+    if not sys.platform.startswith("linux"):
+        return None
+
+    major = _driver_major(_nvidia_driver_version())
+    if major is None:
+        return None
+
+    # Pick the newest common PyTorch CUDA wheel family supported by the driver.
+    # Users can override with VIBEPHYSICS_TORCH_INDEX_URL for unusual clusters.
+    if major >= 570:
+        return "https://download.pytorch.org/whl/cu128"
+    if major >= 550:
+        return "https://download.pytorch.org/whl/cu124"
+    if major >= 530:
+        return "https://download.pytorch.org/whl/cu121"
+    return "https://download.pytorch.org/whl/cpu"
+
+
+def _ensure_torch_dependencies(engine: str, *, auto_install: bool, verbose: bool) -> bool:
+    deps = _PYPI_DEPS[engine]
+    needs_torch = any(import_name == "torch" for import_name, _ in deps)
+    if not needs_torch:
+        return True
+
+    specs: list[str] = []
+    if not _has_module("torch"):
+        specs.append("torch")
+    if any(import_name == "torchvision" for import_name, _ in deps) and not _has_module("torchvision"):
+        specs.append("torchvision")
+
+    if not specs:
+        return True
+
+    if not auto_install:
+        if verbose:
+            print(
+                "[vibephysics] Missing PyTorch dependency; auto-install disabled. "
+                "Install torch/torchvision for your device first."
+            )
+        return False
+
+    index_url = _torch_index_url()
+    if verbose and sys.platform.startswith("linux") and index_url:
+        print(
+            f"--- [vibephysics] Linux PyTorch install source: {index_url} "
+            f"(override with {_TORCH_INDEX_ENV}) ---"
+        )
+    try:
+        pip_install(specs[0], verbose=verbose, extra_specs=specs[1:], index_url=index_url)
+    except subprocess.CalledProcessError:
+        if verbose:
+            print("[vibephysics] Failed to install PyTorch dependencies.")
+            if index_url:
+                print(
+                    "[vibephysics] Try setting "
+                    f"{_TORCH_INDEX_ENV}=https://download.pytorch.org/whl/<cpu|cu121|cu124|cu128>"
+                )
+        return False
+    return all(_has_module(import_name) for import_name in ("torch", *specs[1:]))
 
 
 def ensure_engine_dependencies(engine: str, *, verbose: bool = True) -> bool:
@@ -85,7 +191,12 @@ def ensure_engine_dependencies(engine: str, *, verbose: bool = True) -> bool:
     }
     install_constraints = ["numpy<2"] if engine in {"map_anything", "vgg_ttt"} else None
 
+    if not _ensure_torch_dependencies(engine, auto_install=auto_install, verbose=verbose):
+        return False
+
     for import_name, pip_spec in _PYPI_DEPS[engine]:
+        if import_name in _TORCH_IMPORTS:
+            continue
         if _has_module(import_name):
             continue
         if not auto_install:

@@ -43,6 +43,7 @@ Thumbs.db
 
 # Video
 *.mov
+*.MOV
 *.mp4
 
 # Virtual environments

@@ -575,6 +575,7 @@ def reconstruct(
     max_frames: int | None = None,
     max_frames_mode: str = "first",
     keyframe_interval: int | None = None,
+    lingbot_map_max_streaming_keyframes: int | None = None,
     lingbot_map_mode: str | None = None,
     window_size: int = 64,
     overlap_size: int = 16,
@@ -634,7 +635,7 @@ def reconstruct(
             from .lingbot_map import format_inference_plan
 
             print(
-                f"--- [vibephysics] {format_inference_plan(num_frames, mode=lingbot_map_mode, keyframe_interval=keyframe_interval, window_size=window_size, overlap_size=overlap_size)} ---"
+                f"--- [vibephysics] {format_inference_plan(num_frames, mode=lingbot_map_mode, keyframe_interval=keyframe_interval, max_streaming_keyframes=lingbot_map_max_streaming_keyframes, vram_gb=vram_gb, window_size=window_size, overlap_size=overlap_size)} ---"
             )
 
     with profiler.stage("inference", track_cuda_peak=True):
@@ -647,6 +648,7 @@ def reconstruct(
                 model_name=lingbot_map_model,
                 mode=lingbot_map_mode,
                 keyframe_interval=keyframe_interval,
+                max_streaming_keyframes=lingbot_map_max_streaming_keyframes,
                 window_size=window_size,
                 overlap_size=overlap_size,
                 overlap_keyframes=overlap_keyframes,

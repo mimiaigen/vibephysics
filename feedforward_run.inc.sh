@@ -40,6 +40,7 @@ try:
         resolve_input_frame_limits,
         apply_video_frame_overrides,
     )
+    from vibephysics.feedforward.common import get_vram_gb
     from vibephysics.feedforward.lingbot_map import preview_input_plan
     cfg = load_yaml_config('${config_path}')
     cli_max = '${MAX_FRAMES:-}'
@@ -57,6 +58,8 @@ try:
         '${input_path}',
         mode=lm.get('mode') if engine == 'lingbot_map' else None,
         keyframe_interval=lm.get('keyframe_interval') if engine == 'lingbot_map' else None,
+        max_streaming_keyframes=lm.get('max_streaming_keyframes') if engine == 'lingbot_map' else None,
+        vram_gb=get_vram_gb() if engine == 'lingbot_map' else None,
         max_frames=mf,
         max_frames_mode=mode,
         video_fps=video.get('fps', 2),

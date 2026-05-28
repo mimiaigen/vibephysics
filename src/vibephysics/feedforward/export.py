@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -200,6 +201,373 @@ def export_compare_blend(args: argparse.Namespace) -> None:
     )
 
 
+def export_plotly(args: argparse.Namespace) -> None:
+    """Export a sampled interactive Plotly point cloud from predictions.npz."""
+    import numpy as np
+    import plotly.graph_objects as go
+    from PIL import Image
+
+    defaults = _load_output_defaults(args.predictions)
+    min_confidence = args.min_confidence
+    if min_confidence is None:
+        min_confidence = float(defaults.get("min_confidence", 0.5))
+    video_fps = args.video_fps
+    if video_fps is None:
+        video_fps = float(defaults.get("video_fps") or 2.0)
+
+    rng = np.random.default_rng(args.seed)
+    with np.load(args.predictions, allow_pickle=True) as data:
+        world_points = data["world_points"]
+        confidence = data["conf"]
+        extrinsic = data["extrinsic"]
+        metadata = data["metadata"][0] if "metadata" in data.files and len(data["metadata"]) else {}
+
+    num_frames, height, width = confidence.shape
+    flat_points = world_points.reshape(-1, 3)
+    flat_conf = confidence.reshape(-1)
+    total_points = flat_conf.size
+
+    sampled_chunks: list[np.ndarray] = []
+    chunk_size = min(2_000_000, total_points)
+    for _ in range(args.sample_rounds):
+        idx = rng.integers(0, total_points, size=chunk_size, endpoint=False)
+        pts = flat_points[idx]
+        conf = flat_conf[idx]
+        mask = (conf >= min_confidence) & np.isfinite(conf) & np.isfinite(pts).all(axis=1)
+        if not np.any(mask):
+            continue
+        sampled_chunks.append(idx[mask])
+        if sum(len(chunk) for chunk in sampled_chunks) >= args.max_points:
+            break
+    if not sampled_chunks:
+        raise ValueError(f"No finite points found at confidence >= {min_confidence:g}")
+
+    sampled_idx = np.concatenate(sampled_chunks)[: args.max_points]
+    points = flat_points[sampled_idx].astype(np.float32)
+    conf_values = flat_conf[sampled_idx].astype(np.float32)
+
+    frames_dir = args.frames_dir
+    if frames_dir is None:
+        frames_dir = Path(metadata.get("preprocessed_frames_dir") or (args.predictions.parent / "frames"))
+    frame_paths = sorted(frames_dir.glob("frame_*.jpg"))
+    marker_color = conf_values
+    colorbar = {"title": "confidence"}
+    colorscale = "Viridis"
+    if len(frame_paths) >= num_frames:
+        frame_idx = sampled_idx // (height * width)
+        rem = sampled_idx % (height * width)
+        yy = rem // width
+        xx = rem % width
+        rgb_values = np.empty((len(sampled_idx), 3), dtype=np.uint8)
+        for frame in np.unique(frame_idx):
+            image = Image.open(frame_paths[int(frame)]).convert("RGB")
+            if image.size != (width, height):
+                image = image.resize((width, height), Image.Resampling.BICUBIC)
+            rgb = np.asarray(image, dtype=np.uint8)
+            selected = frame_idx == frame
+            rgb_values[selected] = rgb[yy[selected], xx[selected]]
+        marker_color = [f"rgb({r},{g},{b})" for r, g, b in rgb_values]
+        colorbar = None
+        colorscale = None
+
+    figure_data = [
+        go.Scatter3d(
+            x=points[:, 0],
+            y=points[:, 1],
+            z=points[:, 2],
+            mode="markers",
+            marker={
+                "size": args.point_size,
+                "color": marker_color,
+                "opacity": args.opacity,
+                "colorbar": colorbar,
+                "colorscale": colorscale,
+            },
+            text=[f"conf={value:.2f}" for value in conf_values],
+            hovertemplate="x=%{x:.3f}<br>y=%{y:.3f}<br>z=%{z:.3f}<br>%{text}<extra></extra>",
+            name="Point cloud",
+        )
+    ]
+
+    trajectory_js = ""
+    if args.trajectory:
+        trajectory = extrinsic[:, :3, 3].astype(np.float32)
+        trajectory = trajectory[np.isfinite(trajectory).all(axis=1)]
+        tx, ty, tz = trajectory[:, 0], trajectory[:, 1], trajectory[:, 2]
+        figure_data.extend(
+            [
+                go.Scatter3d(
+                    x=tx,
+                    y=ty,
+                    z=tz,
+                    mode="lines+markers",
+                    line={"color": "red", "width": 5},
+                    marker={"color": "red", "size": 3},
+                    name="Camera trajectory",
+                ),
+                go.Scatter3d(
+                    x=[tx[0]],
+                    y=[ty[0]],
+                    z=[tz[0]],
+                    mode="lines+markers",
+                    line={"color": "yellow", "width": 8},
+                    marker={"color": "yellow", "size": 5},
+                    name="Visited trajectory",
+                    hoverinfo="skip",
+                ),
+                go.Scatter3d(
+                    x=[tx[0]],
+                    y=[ty[0]],
+                    z=[tz[0]],
+                    mode="markers",
+                    marker={"color": "yellow", "size": 8, "line": {"color": "red", "width": 3}},
+                    text=["frame=0"],
+                    name="Current frame",
+                    hovertemplate="current %{text}<br>x=%{x:.3f}<br>y=%{y:.3f}<br>z=%{z:.3f}<extra></extra>",
+                ),
+            ]
+        )
+        trajectory_js = _plotly_trajectory_controls_script(
+            tx.tolist(),
+            ty.tolist(),
+            tz.tolist(),
+            [
+                os.path.relpath(path, args.output.parent).replace(os.sep, "/")
+                for path in frame_paths[: len(trajectory)]
+            ],
+            base_duration_ms=max(int(1000 / max(video_fps, 1e-6)), 1),
+        )
+
+    fig = go.Figure(data=figure_data)
+
+    layout = {
+        "title": f"Point cloud: {len(points):,} sampled points (conf >= {min_confidence:g})",
+        "scene": {"xaxis_title": "X", "yaxis_title": "Y", "zaxis_title": "Z", "aspectmode": "data"},
+        "margin": {"l": 0, "r": 0, "b": 0, "t": 45},
+        "template": "plotly_dark",
+    }
+    fig.update_layout(**layout)
+
+    args.output.parent.mkdir(parents=True, exist_ok=True)
+    fig.write_html(
+        args.output,
+        include_plotlyjs="cdn",
+        full_html=True,
+        post_script=trajectory_js or None,
+    )
+    print(f"[vibephysics] Saved Plotly point cloud to {args.output}")
+
+
+def _plotly_trajectory_controls_script(
+    x: list[float],
+    y: list[float],
+    z: list[float],
+    frame_urls: list[str],
+    *,
+    base_duration_ms: int,
+) -> str:
+    payload = {
+        "x": x,
+        "y": y,
+        "z": z,
+        "frameUrls": frame_urls,
+        "baseDurationMs": base_duration_ms,
+    }
+    data_json = json.dumps(payload)
+    return f"""
+(function() {{
+  const plot = document.getElementById('{{plot_id}}');
+  const data = {data_json};
+  const trajX = data.x;
+  const trajY = data.y;
+  const trajZ = data.z;
+  const frameUrls = data.frameUrls || [];
+  const n = trajX.length;
+  let frame = 0;
+  let progress = 0;
+  let timer = null;
+  let playing = false;
+  let playStartedAt = 0;
+  let playStartProgress = 0;
+  let pendingRender = null;
+  let renderScheduled = false;
+
+  const controls = document.createElement('div');
+  controls.style.cssText = [
+    'position:absolute',
+    'z-index:10',
+    'left:16px',
+    'top:12px',
+    'display:flex',
+    'gap:8px',
+    'align-items:center',
+    'background:rgba(0,0,0,0.65)',
+    'color:white',
+    'padding:8px 10px',
+    'border-radius:6px',
+    'font:13px sans-serif'
+  ].join(';');
+  controls.innerHTML = `
+    <button id="vp-play-pause" type="button">Play</button>
+    <label>Speed
+      <select id="vp-speed">
+        <option value="1">1x</option>
+        <option value="2">2x</option>
+        <option value="4">4x</option>
+        <option value="8">8x</option>
+        <option value="16">16x</option>
+      </select>
+    </label>
+    <label>Frame
+      <input id="vp-frame" type="range" min="0" max="${{Math.max(n - 1, 0)}}" value="0" step="1" style="width:220px">
+    </label>
+    <span id="vp-frame-label">0.00/${{Math.max(n - 1, 0)}}</span>
+  `;
+  plot.parentElement.style.position = 'relative';
+  plot.parentElement.appendChild(controls);
+
+  const framePanel = document.createElement('div');
+  framePanel.style.cssText = [
+    'position:absolute',
+    'z-index:9',
+    'left:16px',
+    'top:62px',
+    'width:320px',
+    'background:rgba(0,0,0,0.65)',
+    'color:white',
+    'padding:8px',
+    'border-radius:6px',
+    'font:13px sans-serif'
+  ].join(';');
+  framePanel.innerHTML = `
+    <div style="margin-bottom:6px">Source frame</div>
+    <img id="vp-frame-image" alt="source frame" style="display:block;width:100%;height:auto;border:1px solid rgba(255,255,255,0.35);border-radius:4px;background:#111">
+  `;
+  plot.parentElement.appendChild(framePanel);
+
+  const playPause = controls.querySelector('#vp-play-pause');
+  const speedSelect = controls.querySelector('#vp-speed');
+  const frameSlider = controls.querySelector('#vp-frame');
+  const frameLabel = controls.querySelector('#vp-frame-label');
+  const frameImage = framePanel.querySelector('#vp-frame-image');
+
+  function speedMultiplier() {{
+    return Math.max(Number(speedSelect.value || 1), 1);
+  }}
+
+  function interpolateAt(value) {{
+    const clamped = Math.max(0, Math.min(Number(value), n - 1));
+    const lo = Math.floor(clamped);
+    const hi = Math.min(lo + 1, n - 1);
+    const t = clamped - lo;
+    return {{
+      progress: clamped,
+      frame: lo,
+      x: trajX[lo] + (trajX[hi] - trajX[lo]) * t,
+      y: trajY[lo] + (trajY[hi] - trajY[lo]) * t,
+      z: trajZ[lo] + (trajZ[hi] - trajZ[lo]) * t
+    }};
+  }}
+
+  function renderProgressNow(nextProgress) {{
+    const pos = interpolateAt(nextProgress);
+    progress = pos.progress;
+    frame = pos.frame;
+    const visitedX = trajX.slice(0, frame + 1);
+    const visitedY = trajY.slice(0, frame + 1);
+    const visitedZ = trajZ.slice(0, frame + 1);
+    if (progress > frame || frame === 0) {{
+      visitedX.push(pos.x);
+      visitedY.push(pos.y);
+      visitedZ.push(pos.z);
+    }}
+    Plotly.restyle(plot, {{
+      x: [visitedX, [pos.x]],
+      y: [visitedY, [pos.y]],
+      z: [visitedZ, [pos.z]],
+      text: [null, ['frame=' + progress.toFixed(2)]]
+    }}, [2, 3]);
+    frameSlider.value = String(frame);
+    frameLabel.textContent = progress.toFixed(2) + '/' + (n - 1);
+    if (frameUrls.length) {{
+      const imageFrame = Math.max(0, Math.min(Math.round(progress), frameUrls.length - 1));
+      if (frameImage.getAttribute('src') !== frameUrls[imageFrame]) {{
+        frameImage.setAttribute('src', frameUrls[imageFrame]);
+      }}
+    }}
+  }}
+
+  function renderProgress(nextProgress) {{
+    pendingRender = nextProgress;
+    if (renderScheduled) return;
+    renderScheduled = true;
+    requestAnimationFrame(function() {{
+      renderScheduled = false;
+      renderProgressNow(pendingRender);
+    }});
+  }}
+
+  function stop() {{
+    if (timer !== null) {{
+      clearTimeout(timer);
+      timer = null;
+    }}
+    playing = false;
+    playPause.textContent = 'Play';
+  }}
+
+  function tick() {{
+    if (!playing) return;
+    const elapsed = performance.now() - playStartedAt;
+    const advancedFrames = (elapsed / data.baseDurationMs) * speedMultiplier();
+    const nextProgress = Math.min(playStartProgress + advancedFrames, n - 1);
+    if (nextProgress !== progress) {{
+      renderProgress(nextProgress);
+    }}
+    if (progress >= n - 1) {{
+      stop();
+      return;
+    }}
+    timer = setTimeout(tick, 16);
+  }}
+
+  function start() {{
+    stop();
+    playing = true;
+    playPause.textContent = 'Pause';
+    playStartedAt = performance.now();
+    playStartProgress = progress;
+    tick();
+  }}
+
+  playPause.addEventListener('click', function() {{
+    if (playing) {{
+      stop();
+    }} else {{
+      start();
+    }}
+  }});
+  speedSelect.addEventListener('change', function() {{
+    if (playing) {{
+      playStartedAt = performance.now();
+      playStartProgress = progress;
+      tick();
+    }}
+  }});
+  frameSlider.addEventListener('input', function() {{
+    stop();
+    const value = Number(frameSlider.value);
+    frame = Math.max(0, Math.min(value, n - 1));
+    progress = frame;
+    frameLabel.textContent = frame.toFixed(2) + '/' + (n - 1);
+    renderProgress(value);
+  }});
+
+  renderProgressNow(0);
+}})();
+"""
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Export feedforward predictions to Blender .blend files.")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -254,6 +622,19 @@ def main() -> None:
         help="Compare viewport layout: side-by-side (left-right) or stacked (top-down)",
     )
 
+    plotly = sub.add_parser("plotly", help="Export predictions.npz to an interactive Plotly HTML point cloud")
+    plotly.add_argument("--predictions", type=Path, required=True, help="Path to predictions.npz")
+    plotly.add_argument("--output", type=Path, required=True, help="Output .html path")
+    plotly.add_argument("--min_confidence", "--min-confidence", type=float, default=None)
+    plotly.add_argument("--max-points", type=int, default=200_000, help="Maximum sampled points to embed")
+    plotly.add_argument("--point-size", type=float, default=1.2)
+    plotly.add_argument("--opacity", type=float, default=0.85)
+    plotly.add_argument("--seed", type=int, default=42)
+    plotly.add_argument("--sample-rounds", type=int, default=80)
+    plotly.add_argument("--frames-dir", type=Path, default=None, help="Optional frame directory for RGB coloring")
+    plotly.add_argument("--video-fps", type=float, default=None, help="Trajectory animation fps")
+    plotly.add_argument("--trajectory", action=argparse.BooleanOptionalAction, default=True)
+
     args = parser.parse_args(_script_argv())
 
     if args.command == "blend":
@@ -269,11 +650,15 @@ def main() -> None:
             if not path.exists():
                 parser.error(f"Input not found: {path}")
         export_compare_blend(args)
+    elif args.command == "plotly":
+        if not args.predictions.is_file():
+            parser.error(f"Predictions file not found: {args.predictions}")
+        export_plotly(args)
 
 
 if __name__ == "__main__":
     try:
         main()
     except Exception as exc:
-        print(f"[ERROR] Blend export failed: {exc}", file=sys.stderr)
+        print(f"[ERROR] Feedforward export failed: {exc}", file=sys.stderr)
         sys.exit(1)

@@ -224,6 +224,22 @@ feedforward_output/{engine}_{timestamp}/
 
 `predictions.npz` uses Blender Z-up (`metadata.world_coordinates: blender_z_up`). Ground align runs before save when `align_ground: true`; Blender does not re-align or re-axis-convert on load.
 
+**Plotly HTML point cloud:**
+
+```bash
+python -m vibephysics.feedforward.export plotly \
+  --predictions output/feedforward_output/lingbot_map_20260528_144552/predictions.npz \
+  --output output/feedforward_output/lingbot_map_20260528_144552/pointcloud_plotly.html \
+  --max-points 200000 \
+  --trajectory
+```
+
+The HTML viewer samples dense points from `predictions.npz`, colors them from saved frames when available, draws the camera trajectory as red dots connected by a red line, and includes Play/Pause buttons (`1x` to `16x`) plus a frame slider. Install Plotly if needed:
+
+```bash
+pip install plotly
+```
+
 </details>
 
 ---

@@ -81,6 +81,7 @@ fi
 export PYTHONPATH="${SCRIPT_DIR}/src${PYTHONPATH:+:$PYTHONPATH}"
 export KMP_DUPLICATE_LIB_OK=TRUE
 export TQDM_DISABLE=0
+export PYTORCH_CUDA_ALLOC_CONF="${PYTORCH_CUDA_ALLOC_CONF:-expandable_segments:True}"
 
 "$PYTHON" -c "from vibephysics.feedforward.lingbot_map import ensure_dependencies; import sys; sys.exit(0 if ensure_dependencies() else 1)"
 
@@ -91,8 +92,8 @@ usage() {
     echo ""
     echo "Frame limits apply via video.max_frames in config (shared by all engines)."
     echo "LingBot inference mode auto-adapts (lingbot_map.mode):"
-    echo "  <=320 frames  -> streaming, every frame a keyframe"
-    echo "  >320 frames   -> windowed with cross-window alignment"
+    echo "  low VRAM / long clips -> windowed with smaller windows"
+    echo "  otherwise             -> streaming with VRAM-limited keyframes"
     exit 1
 }
 

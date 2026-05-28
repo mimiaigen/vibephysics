@@ -20,6 +20,7 @@ from ..common import (
     feedforward_engine_dir,
     get_vram_gb,
     limit_image_frames,
+    resolve_torch_device,
     to_numpy,
 )
 from ..deps import ensure_engine_dependencies, pip_install
@@ -546,7 +547,8 @@ def run_map_anything(
     rgb = _views_to_rgb(views, norm_type)
     h, w = rgb.shape[1:3]
 
-    device = "cuda" if torch.cuda.is_available() else "cpu"
+    device_info = resolve_torch_device(verbose=verbose)
+    device = device_info.device
     if device == "cpu" and verbose:
         print("--- [vibephysics] Warning: Map-Anything factory models may be slow on CPU ---", flush=True)
 
@@ -617,6 +619,7 @@ def run_map_anything(
             "selected_indices": indices,
             "input_num_frames": input_num_frames,
             "max_frames_mode": max_frames_mode,
+            "inference_device": device,
             "vram_gb": get_vram_gb(),
             "input_hw": [int(h), int(w)],
             "w2c_as_camera_pose": False,

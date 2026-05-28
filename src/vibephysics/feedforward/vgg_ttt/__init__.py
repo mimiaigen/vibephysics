@@ -20,6 +20,7 @@ from ..common import (
     get_vram_gb,
     images_chw_to_hwc,
     limit_image_frames,
+    resolve_torch_device,
 )
 from ..deps import ensure_engine_dependencies
 from ..schema import FeedforwardPrediction
@@ -72,14 +73,6 @@ def is_available() -> bool:
 
 def ensure_dependencies(verbose: bool = True) -> bool:
     return ensure_engine_dependencies("vgg_ttt", verbose=verbose)
-
-
-def _resolve_inference_device() -> str:
-    import torch
-
-    if torch.cuda.is_available():
-        return "cuda"
-    return "cpu"
 
 
 @contextlib.contextmanager
@@ -189,7 +182,7 @@ def run_vgg_ttt(
             f"(size={image_size}, mode={preprocess_mode}) ---"
         )
 
-    device = _resolve_inference_device()
+    device = resolve_torch_device(verbose=verbose).device
     if device == "cpu" and verbose:
         print(
             "--- [vibephysics] Warning: no CUDA GPU; running official model.infer() on CPU "

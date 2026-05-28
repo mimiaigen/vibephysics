@@ -160,6 +160,7 @@ def parse_feedforward_config(cfg: dict[str, Any], config_path: Path | None = Non
         "use_sdpa": lingbot_map.get("use_sdpa", False),
         "lingbot_map_mode": lingbot_map.get("mode"),
         "keyframe_interval": lingbot_map.get("keyframe_interval"),
+        "lingbot_map_max_streaming_keyframes": lingbot_map.get("max_streaming_keyframes"),
         "window_size": lingbot_map.get("window_size", 64),
         "overlap_size": lingbot_map.get("overlap_size", 16),
         "overlap_keyframes": lingbot_map.get("overlap_keyframes"),

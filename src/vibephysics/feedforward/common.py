@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import os
+import subprocess
+import warnings
+from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
@@ -203,14 +206,164 @@ def c2w_to_w2c(extrinsic_c2w: np.ndarray) -> np.ndarray:
 
 def get_vram_gb() -> float | None:
     try:
-        import torch
-
-        if torch.cuda.is_available():
-            free, total = torch.cuda.mem_get_info()
-            return total / (1024**3)
+        info = resolve_torch_device(verbose=False)
+        if info.device_type == "cuda" and info.cuda_total_memory_gb is not None:
+            return info.cuda_total_memory_gb
     except Exception:
         pass
     return None
+
+
+@dataclass(frozen=True)
+class TorchDeviceInfo:
+    device_type: str
+    torch_version: str
+    torch_cuda_version: str | None
+    cuda_available: bool
+    cuda_device_name: str | None = None
+    cuda_capability: tuple[int, int] | None = None
+    cuda_total_memory_gb: float | None = None
+    cuda_warning: str | None = None
+    nvidia_driver_version: str | None = None
+    nvidia_gpu_name: str | None = None
+    requested_device: str = "auto"
+
+    @property
+    def device(self) -> str:
+        return self.device_type
+
+
+def _nvidia_smi_info() -> tuple[str | None, str | None]:
+    try:
+        result = subprocess.run(
+            [
+                "nvidia-smi",
+                "--query-gpu=driver_version,name",
+                "--format=csv,noheader",
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=3,
+        )
+    except Exception:
+        return None, None
+    first = result.stdout.strip().splitlines()[0] if result.stdout.strip() else ""
+    if not first:
+        return None, None
+    parts = [part.strip() for part in first.split(",", 1)]
+    if len(parts) == 1:
+        return parts[0] or None, None
+    return parts[0] or None, parts[1] or None
+
+
+def resolve_torch_device(*, verbose: bool = True) -> TorchDeviceInfo:
+    """
+    Resolve the inference device for feedforward engines.
+
+    By default this uses CUDA when PyTorch can initialize it, otherwise CPU.
+    Set VIBEPHYSICS_DEVICE=cpu or VIBEPHYSICS_DEVICE=cuda to override.
+    """
+    import torch
+
+    requested = os.environ.get("VIBEPHYSICS_DEVICE", "auto").strip().lower() or "auto"
+    if requested not in {"auto", "cuda", "cpu"}:
+        raise ValueError("VIBEPHYSICS_DEVICE must be one of: auto, cuda, cpu")
+
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        cuda_available = bool(torch.cuda.is_available())
+    cuda_warning = str(caught[-1].message) if caught else None
+
+    driver_version, gpu_name = _nvidia_smi_info()
+    cuda_device_name = None
+    cuda_capability = None
+    cuda_total_memory_gb = None
+    if cuda_available:
+        cuda_device_name = torch.cuda.get_device_name(0)
+        cuda_capability = torch.cuda.get_device_capability(0)
+        _, total = torch.cuda.mem_get_info(0)
+        cuda_total_memory_gb = total / (1024**3)
+        gpu_name = gpu_name or cuda_device_name
+
+    if requested == "cuda" and not cuda_available:
+        details = _format_cuda_unavailable_reason(
+            torch_cuda_version=torch.version.cuda,
+            cuda_warning=cuda_warning,
+            nvidia_driver_version=driver_version,
+            nvidia_gpu_name=gpu_name,
+        )
+        raise RuntimeError(f"VIBEPHYSICS_DEVICE=cuda was requested, but CUDA is unavailable. {details}")
+
+    device_type = "cuda" if requested in {"auto", "cuda"} and cuda_available else "cpu"
+    info = TorchDeviceInfo(
+        device_type=device_type,
+        torch_version=torch.__version__,
+        torch_cuda_version=torch.version.cuda,
+        cuda_available=cuda_available,
+        cuda_device_name=cuda_device_name,
+        cuda_capability=cuda_capability,
+        cuda_total_memory_gb=cuda_total_memory_gb,
+        cuda_warning=cuda_warning,
+        nvidia_driver_version=driver_version,
+        nvidia_gpu_name=gpu_name,
+        requested_device=requested,
+    )
+    if verbose:
+        print(format_torch_device_info(info), flush=True)
+    return info
+
+
+def _format_cuda_unavailable_reason(
+    *,
+    torch_cuda_version: str | None,
+    cuda_warning: str | None,
+    nvidia_driver_version: str | None,
+    nvidia_gpu_name: str | None,
+) -> str:
+    parts = []
+    if nvidia_gpu_name:
+        parts.append(f"NVIDIA GPU detected: {nvidia_gpu_name}")
+    if nvidia_driver_version:
+        parts.append(f"driver={nvidia_driver_version}")
+    if torch_cuda_version:
+        parts.append(f"torch CUDA build={torch_cuda_version}")
+    if cuda_warning:
+        parts.append(cuda_warning)
+    if not parts:
+        parts.append("No CUDA-capable PyTorch device was detected.")
+    return " ".join(parts)
+
+
+def format_torch_device_info(info: TorchDeviceInfo) -> str:
+    if info.device_type == "cuda":
+        memory = (
+            f", {info.cuda_total_memory_gb:.1f} GB VRAM"
+            if info.cuda_total_memory_gb is not None
+            else ""
+        )
+        capability = (
+            f", capability {info.cuda_capability[0]}.{info.cuda_capability[1]}"
+            if info.cuda_capability is not None
+            else ""
+        )
+        return (
+            f"--- [vibephysics] Torch device: cuda "
+            f"({info.cuda_device_name or info.nvidia_gpu_name or 'GPU'}{memory}{capability}; "
+            f"torch {info.torch_version}, CUDA {info.torch_cuda_version or 'n/a'}) ---"
+        )
+
+    reason = _format_cuda_unavailable_reason(
+        torch_cuda_version=info.torch_cuda_version,
+        cuda_warning=info.cuda_warning,
+        nvidia_driver_version=info.nvidia_driver_version,
+        nvidia_gpu_name=info.nvidia_gpu_name,
+    )
+    if info.requested_device == "cpu":
+        return f"--- [vibephysics] Torch device: cpu (forced by VIBEPHYSICS_DEVICE=cpu) ---"
+    if info.nvidia_gpu_name or info.nvidia_driver_version or info.cuda_warning:
+        return f"--- [vibephysics] Torch device: cpu; CUDA unavailable. {reason} ---"
+    return f"--- [vibephysics] Torch device: cpu (torch {info.torch_version}) ---"
 
 
 def images_chw_to_hwc(images: np.ndarray) -> np.ndarray:

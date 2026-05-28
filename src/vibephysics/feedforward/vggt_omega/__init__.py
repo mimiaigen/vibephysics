@@ -9,7 +9,14 @@ from pathlib import Path
 
 import numpy as np
 
-from ..common import discover_images, feedforward_engine_dir, get_vram_gb, images_chw_to_hwc, limit_image_frames
+from ..common import (
+    discover_images,
+    feedforward_engine_dir,
+    get_vram_gb,
+    images_chw_to_hwc,
+    limit_image_frames,
+    resolve_torch_device,
+)
 from ..deps import ensure_engine_dependencies, pip_install
 from ..schema import FeedforwardPrediction
 
@@ -297,7 +304,8 @@ def run_vggt_omega(
             f"(resolution={image_resolution}, mode={preprocess_mode}) ---"
         )
 
-    device = "cuda" if torch.cuda.is_available() else "cpu"
+    device_info = resolve_torch_device(verbose=verbose)
+    device = device_info.device
     if device == "cpu" and verbose:
         print("--- [vibephysics] Warning: VGGT-Omega expects CUDA; running on CPU ---")
 
@@ -369,6 +377,7 @@ def run_vggt_omega(
             "selected_indices": indices,
             "input_num_frames": input_num_frames,
             "max_frames_mode": max_frames_mode,
+            "inference_device": device,
             "vram_gb": get_vram_gb(),
             "input_hw": [int(h), int(w)],
             "conf_filter_mode": "percentile",

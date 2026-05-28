@@ -17,8 +17,10 @@ from ..common import (
     c2w_to_w2c,
     discover_images,
     feedforward_engine_dir,
+    get_vram_gb,
     images_chw_to_hwc,
     limit_image_frames,
+    resolve_torch_device,
     to_numpy,
 )
 from ..schema import FeedforwardPrediction
@@ -129,6 +131,7 @@ def _load_model(args, device):
         if unexpected:
             print(f"  Unexpected keys: {len(unexpected)}")
         print("  Checkpoint loaded.")
+        del state_dict, ckpt
 
     return model.to(device).eval()
 
@@ -219,6 +222,7 @@ def _load_and_preprocess_images(
 # Official demo.py thresholds (streaming KV cache vs windowed cross-window alignment).
 STREAMING_FULL_KEYFRAME_MAX = 320
 WINDOWED_AUTO_THRESHOLD = 321
+DEFAULT_STREAMING_KEYFRAME_BUDGET = 320
 
 
 def _is_auto_mode(mode: str | None) -> bool:
@@ -232,33 +236,106 @@ def resolve_inference_settings(
     *,
     mode: str | None = None,
     keyframe_interval: int | None = None,
+    max_streaming_keyframes: int | None = None,
+    vram_gb: float | None = None,
 ) -> tuple[str, int, bool]:
     """
     Pick LingBot-Map inference mode and keyframe interval from frame count.
 
     Auto (mode unset or ``auto``):
-      - <=320 frames: streaming, every frame a keyframe
+      - streaming while the retained keyframe cache fits the detected GPU
       - >320 frames: windowed with cross-window alignment (keyframe_interval=1)
 
     Explicit ``streaming`` on long clips keeps official demo behavior
-    (auto keyframe_interval = ceil(num_frames / 320)).
+    (auto keyframe_interval = ceil(num_frames / keyframe budget)).
     """
     auto_mode = _is_auto_mode(mode)
     resolved_mode = "streaming" if auto_mode else str(mode).strip().lower()
     if resolved_mode not in {"streaming", "windowed"}:
         raise ValueError(f"Unknown LingBot-Map mode '{mode}'. Use streaming, windowed, or auto.")
 
-    if auto_mode and num_frames >= WINDOWED_AUTO_THRESHOLD:
+    budget = _resolve_streaming_keyframe_budget(
+        max_streaming_keyframes=max_streaming_keyframes,
+        vram_gb=vram_gb,
+    )
+    low_vram_streaming_over_budget = (
+        vram_gb is not None and vram_gb <= 16.5 and num_frames > budget
+    )
+    if auto_mode and (num_frames >= WINDOWED_AUTO_THRESHOLD or low_vram_streaming_over_budget):
         resolved_mode = "windowed"
 
     if keyframe_interval is not None:
         resolved_keyframe = max(int(keyframe_interval), 1)
-    elif resolved_mode == "streaming" and num_frames > STREAMING_FULL_KEYFRAME_MAX:
-        resolved_keyframe = (num_frames + STREAMING_FULL_KEYFRAME_MAX - 1) // STREAMING_FULL_KEYFRAME_MAX
+    elif resolved_mode == "streaming":
+        resolved_keyframe = max((num_frames + budget - 1) // budget, 1)
     else:
         resolved_keyframe = 1
 
     return resolved_mode, resolved_keyframe, auto_mode
+
+
+def _resolve_streaming_keyframe_budget(
+    *,
+    max_streaming_keyframes: int | None = None,
+    vram_gb: float | None = None,
+) -> int:
+    """
+    Limit LingBot streaming keyframes to keep the retained CUDA KV cache bounded.
+
+    The official demo uses 320, which is too high for ~16 GB GPUs at 518px.
+    Explicit config/env values win; otherwise scale conservatively by total VRAM.
+    """
+    if max_streaming_keyframes is not None:
+        return max(int(max_streaming_keyframes), 1)
+
+    import os
+
+    env_value = os.environ.get("VIBEPHYSICS_LINGBOT_MAX_STREAMING_KEYFRAMES")
+    if env_value not in (None, ""):
+        return max(int(env_value), 1)
+
+    if vram_gb is None:
+        return DEFAULT_STREAMING_KEYFRAME_BUDGET
+    if vram_gb <= 16.5:
+        return 32
+    if vram_gb <= 24:
+        return 48
+    if vram_gb <= 32:
+        return 64
+    if vram_gb <= 48:
+        return 128
+    return DEFAULT_STREAMING_KEYFRAME_BUDGET
+
+
+def _resolve_window_params(
+    *,
+    window_size: int,
+    overlap_size: int,
+    auto_mode: bool,
+    vram_gb: float | None = None,
+) -> tuple[int, int]:
+    import os
+
+    env_window = os.environ.get("VIBEPHYSICS_LINGBOT_WINDOW_SIZE")
+    env_overlap = os.environ.get("VIBEPHYSICS_LINGBOT_OVERLAP_SIZE")
+    if env_window not in (None, ""):
+        window_size = int(env_window)
+    elif auto_mode and vram_gb is not None:
+        if vram_gb <= 16.5:
+            window_size = min(window_size, 24)
+        elif vram_gb <= 24:
+            window_size = min(window_size, 32)
+        elif vram_gb <= 32:
+            window_size = min(window_size, 48)
+
+    if env_overlap not in (None, ""):
+        overlap_size = int(env_overlap)
+    elif auto_mode and vram_gb is not None and vram_gb <= 24:
+        overlap_size = min(overlap_size, max(window_size // 4, 1))
+
+    window_size = max(int(window_size), 2)
+    overlap_size = max(min(int(overlap_size), window_size - 1), 0)
+    return window_size, overlap_size
 
 
 def format_inference_plan(
@@ -266,13 +343,25 @@ def format_inference_plan(
     *,
     mode: str | None = None,
     keyframe_interval: int | None = None,
+    max_streaming_keyframes: int | None = None,
+    vram_gb: float | None = None,
     window_size: int = 64,
     overlap_size: int = 16,
 ) -> str:
     resolved_mode, resolved_keyframe, auto_mode = resolve_inference_settings(
-        num_frames, mode=mode, keyframe_interval=keyframe_interval
+        num_frames,
+        mode=mode,
+        keyframe_interval=keyframe_interval,
+        max_streaming_keyframes=max_streaming_keyframes,
+        vram_gb=vram_gb,
     )
     auto_note = " (auto)" if auto_mode else ""
+    window_size, overlap_size = _resolve_window_params(
+        window_size=window_size,
+        overlap_size=overlap_size,
+        auto_mode=auto_mode,
+        vram_gb=vram_gb,
+    )
     if resolved_mode == "windowed":
         return (
             f"LingBot-Map plan{auto_note}: {num_frames} frames -> "
@@ -280,9 +369,11 @@ def format_inference_plan(
             f"keyframe_interval={resolved_keyframe})"
         )
     if resolved_keyframe > 1:
+        budget = (num_frames + resolved_keyframe - 1) // resolved_keyframe
         return (
             f"LingBot-Map plan{auto_note}: {num_frames} frames -> "
-            f"streaming (keyframe_interval={resolved_keyframe}; non-keyframes skip KV cache)"
+            f"streaming (keyframe_interval={resolved_keyframe}; "
+            f"retains ~{budget} keyframes; non-keyframes skip KV cache)"
         )
     return f"LingBot-Map plan{auto_note}: {num_frames} frames -> streaming (every frame a keyframe)"
 
@@ -292,6 +383,8 @@ def preview_input_plan(
     *,
     mode: str | None = None,
     keyframe_interval: int | None = None,
+    max_streaming_keyframes: int | None = None,
+    vram_gb: float | None = None,
     max_frames: int | None = None,
     max_frames_mode: str = "first",
     video_fps: float = 2.0,
@@ -336,6 +429,8 @@ def preview_input_plan(
         num_frames,
         mode=mode,
         keyframe_interval=keyframe_interval,
+        max_streaming_keyframes=max_streaming_keyframes,
+        vram_gb=vram_gb,
         window_size=window_size,
         overlap_size=overlap_size,
     ) + suffix
@@ -387,8 +482,8 @@ def _resolve_use_sdpa(use_sdpa: bool, *, verbose: bool) -> bool:
 def _inference_dtype(device) -> "torch.dtype":
     import torch
 
-    if torch.cuda.is_available():
-        cap = torch.cuda.get_device_capability()
+    if device.type == "cuda":
+        cap = torch.cuda.get_device_capability(device)
         return torch.bfloat16 if cap[0] >= 8 else torch.float16
     return torch.float32
 
@@ -396,12 +491,24 @@ def _inference_dtype(device) -> "torch.dtype":
 def _forced_tqdm(*args, **kwargs):
     from tqdm import tqdm as std_tqdm
 
+    desc = str(kwargs.get("desc", args[0] if args else ""))
+    unit = "windows" if "window" in desc.lower() else "frames"
     kwargs.setdefault("file", sys.stderr)
     kwargs["disable"] = False
     kwargs.setdefault("mininterval", 1.0)
     kwargs.setdefault("dynamic_ncols", True)
-    kwargs.setdefault("bar_format", "{desc}: {n_fmt}/{total_fmt} frames [{elapsed}<{remaining}]")
+    kwargs.setdefault("unit", unit)
+    kwargs.setdefault("bar_format", "{desc}: {n_fmt}/{total_fmt} {unit} [{elapsed}<{remaining}]")
     return std_tqdm(*args, **kwargs)
+
+
+def _estimate_window_count(num_frames: int, window_size: int, overlap_size: int) -> int:
+    if num_frames <= 0:
+        return 0
+    if num_frames <= window_size:
+        return 1
+    stride = max(window_size - overlap_size, 1)
+    return ((num_frames - window_size + stride - 1) // stride) + 1
 
 
 @contextlib.contextmanager
@@ -435,6 +542,7 @@ def run_lingbot_map(
     model_name: str = DEFAULT_LINGBOT_MAP_MODEL,
     mode: str | None = None,
     keyframe_interval: int | None = None,
+    max_streaming_keyframes: int | None = None,
     window_size: int = 64,
     overlap_size: int = 16,
     overlap_keyframes: int | None = None,
@@ -477,13 +585,25 @@ def run_lingbot_map(
     if verbose:
         print(f"--- [vibephysics] Preprocessed to {w}x{h} ({num_frames} frames) ---", flush=True)
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device_info = resolve_torch_device(verbose=verbose)
+    device = torch.device(device_info.device)
     mode, keyframe_interval, mode_auto = resolve_inference_settings(
-        num_frames, mode=mode, keyframe_interval=keyframe_interval
+        num_frames,
+        mode=mode,
+        keyframe_interval=keyframe_interval,
+        max_streaming_keyframes=max_streaming_keyframes,
+        vram_gb=device_info.cuda_total_memory_gb,
     )
+    if mode == "windowed":
+        window_size, overlap_size = _resolve_window_params(
+            window_size=window_size,
+            overlap_size=overlap_size,
+            auto_mode=mode_auto,
+            vram_gb=device_info.cuda_total_memory_gb,
+        )
     if verbose:
         print(
-            f"--- [vibephysics] {format_inference_plan(num_frames, mode='auto' if mode_auto else mode, keyframe_interval=keyframe_interval, window_size=window_size, overlap_size=overlap_size)} ---",
+            f"--- [vibephysics] {format_inference_plan(num_frames, mode='auto' if mode_auto else mode, keyframe_interval=keyframe_interval, max_streaming_keyframes=max_streaming_keyframes, vram_gb=device_info.cuda_total_memory_gb, window_size=window_size, overlap_size=overlap_size)} ---",
             flush=True,
         )
 
@@ -523,6 +643,7 @@ def run_lingbot_map(
 
     if device.type == "cuda":
         images = images.to(device)
+        torch.cuda.empty_cache()
 
     output_device = torch.device("cpu")
     if verbose:
@@ -536,15 +657,18 @@ def run_lingbot_map(
                 flush=True,
             )
         else:
+            num_windows = _estimate_window_count(num_frames, window_size, overlap_size)
             print(
-                f"--- [vibephysics] Windowed: window_size={window_size}, "
-                f"overlap_size={overlap_size}, keyframe_interval={keyframe_interval} ---",
+                f"--- [vibephysics] Windowed: {num_frames} source frames -> "
+                f"{num_windows} overlapping windows "
+                f"(window_size={window_size}, overlap_size={overlap_size}, "
+                f"keyframe_interval={keyframe_interval}) ---",
                 flush=True,
             )
 
     with _lingbot_map_progress(verbose):
         with torch.no_grad():
-            if torch.cuda.is_available() and dtype != torch.float32:
+            if device.type == "cuda" and dtype != torch.float32:
                 autocast_ctx = torch.amp.autocast("cuda", dtype=dtype)
             else:
                 from contextlib import nullcontext
@@ -610,6 +734,7 @@ def run_lingbot_map(
             "mode": mode,
             "mode_auto_selected": mode_auto,
             "keyframe_interval": keyframe_interval,
+            "max_streaming_keyframes": max_streaming_keyframes,
             "window_size": window_size,
             "overlap_size": overlap_size,
             "overlap_keyframes": overlap_keyframes,
@@ -618,6 +743,8 @@ def run_lingbot_map(
             "selected_indices": indices,
             "max_frames_mode": max_frames_mode,
             "use_sdpa": use_sdpa,
+            "inference_device": device_info.device,
+            "vram_gb": get_vram_gb(),
             "preprocess_mode": "crop",
             "image_size": image_size,
             "input_hw": [int(h), int(w)],

@@ -26,6 +26,7 @@ lingbot_map:
   image_size: 518
   mode: auto
   keyframe_interval: null
+  max_streaming_keyframes: null
   window_size: 64
   overlap_size: 16
   overlap_keyframes: null

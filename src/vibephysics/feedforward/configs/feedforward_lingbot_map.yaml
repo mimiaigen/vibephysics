@@ -24,10 +24,11 @@ lingbot_map:
   model: lingbot-map
   checkpoint: null
   image_size: 518       # official --image_size
-  mode: auto            # auto | streaming | windowed (auto: <=320 streaming, >320 windowed)
-  keyframe_interval: null  # null = auto (1, or streaming-only ceil(n/320) if mode=streaming)
-  window_size: 64       # official --window_size (windowed mode)
-  overlap_size: 16      # official --overlap_size (windowed mode)
+  mode: auto            # auto | streaming | windowed
+  keyframe_interval: null  # null = auto; >1 skips KV cache on non-keyframes
+  max_streaming_keyframes: null  # null = auto by VRAM; lower this to reduce CUDA memory
+  window_size: 64       # windowed mode; auto may lower this on small GPUs
+  overlap_size: 16      # windowed mode; auto may lower this on small GPUs
   overlap_keyframes: null
   use_sdpa: false       # official CUDA default (FlashInfer); auto-falls back to SDPA on Mac
   mask_sky: false

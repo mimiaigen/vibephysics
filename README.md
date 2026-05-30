@@ -31,7 +31,7 @@ conda activate vibephysics
 pip install vibephysics
 
 # 3. (Optional) Install feedforward backends from GitHub
-# Or skip these — feedforward run scripts auto-install on first run
+# Or skip these — run_feedforward.sh auto-installs on first run
 pip install git+https://github.com/robbyant/lingbot-map.git
 pip install git+https://github.com/facebookresearch/vggt-omega.git
 pip install "mapanything @ git+https://github.com/facebookresearch/map-anything.git"
@@ -94,21 +94,20 @@ Output: `sparse/0/` plus `visualize.blend` (unless `--no-blend`).
 
 ![Feedforward Comparison](assets/feedforward_comparison.gif)
 
-Dense depth, poses, and world points from video or images via LingBot-Map, VGGT-Omega, VGG-TTT, and Map-Anything. `predictions.npz` is Z-up ground truth; Blender only visualizes it.
+Dense depth, poses, and world points from video or images via LingBot-Map, VGGT-Omega, VGG-TTT, Map-Anything, and R3/R3-Long. `predictions.npz` is Z-up ground truth; Blender only visualizes it.
 
 <details>
 <summary>Feedforward setup & usage</summary>
 
-Install backends (Python 3.11 + `bpy`). Pre-install from GitHub (see Installation) or let run scripts auto-install on first use:
+Install backends (Python 3.11 + `bpy`). Pre-install from GitHub (see Installation) or let `run_feedforward.sh` auto-install on first use:
 
 ```bash
 pip install vibephysics bpy
-./run_lingbot_map.sh --input test_recording.MOV
-./run_vggt_omega.sh --input path/to/images
-./run_vggt_omega.sh --input path/to/images --point_scale 0.03
-./run_vgg_ttt.sh --input path/to/images --point_scale 0.03
-./run_map_anything.sh --input test_recording.MOV --model vggt
-./run_map_anything.sh --input test_recording.MOV --point_scale 0.03
+./run_feedforward.sh --method lingbot_map --input test_recording.MOV
+./run_feedforward.sh --method vggt_omega --input path/to/images --point_scale 0.03
+./run_feedforward.sh --method r3_long --input test_recording.MOV --max_frames 4
+./run_feedforward.sh --method da3 --input path/to/images
+./run_feedforward.sh --method mapanything --input test_recording.MOV
 ```
 
 Configs: `src/vibephysics/feedforward/configs/`
@@ -120,10 +119,11 @@ Configs: `src/vibephysics/feedforward/configs/`
 | `feedforward_vggt_omega.yaml` | `vggt_omega` | Requires [gated HF access](https://huggingface.co/facebook/VGGT-Omega) |
 | `feedforward_vgg_ttt.yaml` | `vgg_ttt` | NVIDIA VGG-TTT defaults |
 | `feedforward_map_anything.yaml` | `map_anything` | Unified adapter for `facebookresearch/map-anything` model keys |
+| `feedforward_r3.yaml` | `r3` | R3/R3-Long defaults (`r3_long` checkpoint by default) |
 
 **Config (`feedforward.yaml`):**
 ```yaml
-engine: lingbot_map       # lingbot_map | vggt_omega | vgg_ttt | map_anything
+engine: lingbot_map       # lingbot_map | vggt_omega | vgg_ttt | map_anything | r3
 image_path: path/to/images
 output_path: null
 
@@ -166,16 +166,19 @@ map_anything:
 
 **Command line:**
 ```bash
-./run_lingbot_map.sh --input test_recording.MOV
-./run_vggt_omega.sh --input path/to/images
-./run_map_anything.sh --input test_recording.MOV --model mapanything
-./run_map_anything.sh --input test_recording.MOV --model mast3r --max_frames 20
-./run_lingbot_map.sh --input test_recording.MOV --point_scale 0.03
+./run_feedforward.sh --method lingbot_map --input test_recording.MOV
+./run_feedforward.sh --method vggt_omega --input path/to/images
+./run_feedforward.sh --method r3_long --input test_recording.MOV --max_frames 4
+./run_feedforward.sh --method mapanything --input test_recording.MOV
+./run_feedforward.sh --method mast3r --input test_recording.MOV --max_frames 20
+./run_feedforward.sh --method da3 --input path/to/images
 ```
+
+`run_feedforward.sh` routes direct engines (`lingbot_map`, `vggt_omega`, `vgg_ttt`, `r3`, `r3_long`) and Map-Anything factory model keys (`da3`, `mapanything`, `vggt`, `mast3r`, `pi3`, etc.) through one CLI. Unknown method names are treated as Map-Anything model keys so new factory methods can be tried without changing the script.
 
 **Map-Anything model keys:**
 
-`run_map_anything.sh` uses the Map-Anything unified loader and converts outputs into the same `FeedforwardPrediction` format as LingBot-Map and VGGT-Omega.
+`run_feedforward.sh --method <map-anything-key>` uses the Map-Anything unified loader and converts outputs into the same `FeedforwardPrediction` format as LingBot-Map and VGGT-Omega.
 
 | Model key | Default preprocessing | Notes |
 |-----------|-----------------------|-------|
@@ -266,7 +269,7 @@ Side-by-side `.blend` with a **shared timeline** — scrub once, both reconstruc
 
 ```bash
 ./run_glomap.sh --input test_home.mp4 --output_path mapping_output/test_home_glomap
-./run_lingbot_map.sh --input test_home.mp4 --output_path feedforward_output/lingbot_map_test_home
+./run_feedforward.sh --method lingbot_map --input test_home.mp4 --output_path feedforward_output/lingbot_map_test_home
 ```
 
 **2. Combine into one compare `.blend`**
@@ -448,8 +451,8 @@ sh ./run_robot.sh
 sh ./run_forest.sh
 sh ./run_water.sh
 python examples/go2/go2_waypoint_walk.py
-./run_lingbot_map.sh --input test_recording.MOV
-./run_map_anything.sh --input test_recording.MOV --model vggt
+./run_feedforward.sh --method lingbot_map --input test_recording.MOV
+./run_feedforward.sh --method vggt --input test_recording.MOV
 ./run_glomap.sh --image_path path/to/images
 ```
 

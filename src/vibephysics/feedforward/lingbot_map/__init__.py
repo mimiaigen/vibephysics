@@ -556,7 +556,10 @@ def run_lingbot_map(
     verbose: bool = True,
 ) -> FeedforwardPrediction:
     if not ensure_dependencies(verbose):
-        raise RuntimeError("LingBot-Map not ready. Run: ./run_lingbot_map.sh (deps auto-install on first run)")
+        raise RuntimeError(
+            "LingBot-Map not ready. Run: ./run_feedforward.sh --method lingbot_map "
+            "(deps auto-install on first run)"
+        )
 
     import torch
     from lingbot_map.utils.geometry import unproject_depth_map_to_point_map

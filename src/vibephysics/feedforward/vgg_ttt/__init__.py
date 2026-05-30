@@ -157,7 +157,10 @@ def run_vgg_ttt(
     verbose: bool = True,
 ) -> FeedforwardPrediction:
     if not ensure_dependencies(verbose):
-        raise RuntimeError("VGG-T³ not installed. Run: ./run_vgg_ttt.sh (deps auto-install on first run)")
+        raise RuntimeError(
+            "VGG-T³ not installed. Run: ./run_feedforward.sh --method vgg_ttt "
+            "(deps auto-install on first run)"
+        )
 
     import torch
     from vggttt.nets.vggt.img import load_and_preprocess_images

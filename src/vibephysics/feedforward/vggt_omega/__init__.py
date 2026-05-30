@@ -271,7 +271,10 @@ def run_vggt_omega(
     verbose: bool = True,
 ) -> FeedforwardPrediction:
     if not ensure_dependencies(verbose):
-        raise RuntimeError("VGGT-Omega not installed. Run: ./run_vggt_omega.sh (deps auto-install on first run)")
+        raise RuntimeError(
+            "VGGT-Omega not installed. Run: ./run_feedforward.sh --method vggt_omega "
+            "(deps auto-install on first run)"
+        )
 
     import torch
     from vggt_omega.models import VGGTOmega

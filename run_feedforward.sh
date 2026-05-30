@@ -1,0 +1,328 @@
+#!/bin/bash
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+RUN_LABEL="run_feedforward"
+source "$SCRIPT_DIR/feedforward_run.inc.sh"
+
+usage() {
+    echo "Usage: $0 --method <method> --input <path> [common feedforward args]"
+    echo ""
+    echo "Examples:"
+    echo "  $0 --method vggt_omega --input path/to/images"
+    echo "  $0 --method lingbot_map --input test_recording.MOV --max_frames 50"
+    echo "  $0 --method r3_long --input path/to/video.MOV"
+    echo "  $0 --method da3 --input path/to/images"
+    echo "  $0 --method mapanything --input path/to/images"
+    echo ""
+    echo "Direct engines:"
+    echo "  lingbot_map, vggt_omega, vgg_ttt, r3, r3_long, map_anything"
+    echo ""
+    echo "Map-Anything factory methods (known examples; unknown methods route here too):"
+    echo "  mapanything, mapanything_apache, mapanything_ablations, vggt, moge,"
+    echo "  pi3, pi3x, dust3r, mast3r, must3r, modular_dust3r, pow3r, pow3r_ba,"
+    echo "  anycalib, da3"
+    echo ""
+    echo "Common args are forwarded, including:"
+    echo "  --input/--image_path, --output_path, --point_scale, --max_frames,"
+    echo "  --max_frames_mode, --mode, --config, --no-install, --install-all"
+    exit 1
+}
+
+METHOD=""
+CONFIG="${CONFIG:-}"
+INPUT=""
+MAP_MODEL=""
+MAP_MODEL_SET=0
+INSTALL_ALL=0
+ARGS=()
+
+while [[ "$#" -gt 0 ]]; do
+    case "$1" in
+        --method|-m)
+            METHOD="$2"
+            shift
+            ;;
+        --config)
+            CONFIG="$2"
+            shift
+            ;;
+        --input|--image_path)
+            INPUT="$2"
+            ARGS+=("$1" "$2")
+            shift
+            ;;
+        --model)
+            MAP_MODEL="$2"
+            MAP_MODEL_SET=1
+            ARGS+=("$1" "$2")
+            shift
+            ;;
+        --install-all|--install_all|--map-anything-install-all|--map_anything_install_all)
+            INSTALL_ALL=1
+            ;;
+        --no-install|--no_install)
+            export VIBEPHYSICS_NO_AUTO_INSTALL=1
+            ;;
+        -h|--help)
+            usage
+            ;;
+        *)
+            ARGS+=("$1")
+            ;;
+    esac
+    shift
+done
+
+if [ -z "$METHOD" ]; then
+    echo "Error: --method is required." >&2
+    usage
+fi
+
+normalize_method() {
+    printf '%s' "$1" | tr '[:upper:]-' '[:lower:]_'
+}
+
+python_has() {
+    "$1" -c "import $2" >/dev/null 2>&1
+}
+
+python_can_run() {
+    "$1" - <<'PY' >/dev/null 2>&1
+import sys
+try:
+    import yaml  # noqa: F401
+    import numpy as np
+    if int(np.__version__.split(".", 1)[0]) >= 2:
+        raise RuntimeError(f"bpy requires numpy<2, found numpy {np.__version__}")
+    import bpy  # noqa: F401
+except Exception:
+    sys.exit(1)
+PY
+}
+
+collect_python_candidates() {
+    local seen="|"
+    local candidate
+
+    add_candidate() {
+        candidate="$1"
+        [ -z "$candidate" ] && return
+        [ ! -x "$candidate" ] && return
+        case "$seen" in *"|$candidate|"*) return ;; esac
+        seen="${seen}${candidate}|"
+        printf '%s\n' "$candidate"
+    }
+
+    add_candidate "${VIBEPHYSICS_PYTHON:-}"
+    add_candidate "${PYTHON:-}"
+    add_candidate "${CONDA_PREFIX:+$CONDA_PREFIX/bin/python}"
+
+    shopt -s nullglob
+    for candidate in \
+        "$HOME/anaconda3/envs/"*/bin/python \
+        "$HOME/miniconda3/envs/"*/bin/python \
+        "/opt/homebrew/anaconda3/envs/"*/bin/python \
+        "/opt/homebrew/Caskroom/miniconda/base/envs/"*/bin/python; do
+        add_candidate "$candidate"
+    done
+    shopt -u nullglob
+
+    add_candidate "$(command -v python3.11 2>/dev/null)"
+    add_candidate "$(command -v python 2>/dev/null)"
+    add_candidate "$(command -v python3 2>/dev/null)"
+}
+
+diagnose_python() {
+    local py="$1"
+    local missing=()
+    python_has "$py" yaml || missing+=("pyyaml")
+    if ! "$py" - <<'PY' >/dev/null 2>&1
+import sys
+try:
+    import numpy as np
+    if int(np.__version__.split(".", 1)[0]) >= 2:
+        raise RuntimeError
+except Exception:
+    sys.exit(1)
+PY
+    then
+        missing+=("numpy<2")
+    fi
+    if ! "$py" - <<'PY' >/dev/null 2>&1
+import sys
+try:
+    import bpy  # noqa: F401
+except Exception:
+    sys.exit(1)
+PY
+    then
+        missing+=("bpy")
+    fi
+    if ((${#missing[@]})); then
+        echo "  $py (Python $($py -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")' 2>/dev/null || echo '?')) — missing: ${missing[*]}"
+    fi
+}
+
+resolve_python() {
+    while IFS= read -r candidate; do
+        if python_can_run "$candidate"; then
+            PYTHON="$candidate"
+            return 0
+        fi
+    done < <(collect_python_candidates)
+    return 1
+}
+
+make_r3_config() {
+    local model="$1"
+    local source_config="${CONFIG:-$SCRIPT_DIR/src/vibephysics/feedforward/configs/feedforward_r3.yaml}"
+    local tmp_config
+    tmp_config="$(mktemp "${TMPDIR:-/tmp}/vibephysics_r3_${model}.XXXXXX.yaml")"
+    "$PYTHON" - "$source_config" "$tmp_config" "$model" <<'PY'
+import sys
+from pathlib import Path
+
+import yaml
+
+src = Path(sys.argv[1])
+dst = Path(sys.argv[2])
+model = sys.argv[3]
+
+cfg = yaml.safe_load(src.read_text())
+if not isinstance(cfg, dict):
+    raise SystemExit(f"Config is not a YAML mapping: {src}")
+cfg["engine"] = "r3"
+section = cfg.setdefault("r3", {})
+if not isinstance(section, dict):
+    raise SystemExit("Config section 'r3' must be a mapping")
+section["model"] = model
+dst.write_text(yaml.safe_dump(cfg, sort_keys=False))
+PY
+    printf '%s' "$tmp_config"
+}
+
+METHOD_NORM="$(normalize_method "$METHOD")"
+ENGINE=""
+DEFAULT_CONFIG=""
+R3_MODEL=""
+
+case "$METHOD_NORM" in
+    lingbot|lingbot_map)
+        ENGINE="lingbot_map"
+        DEFAULT_CONFIG="$SCRIPT_DIR/src/vibephysics/feedforward/configs/feedforward_lingbot_map.yaml"
+        ;;
+    vggt_omega|vggtomega)
+        ENGINE="vggt_omega"
+        DEFAULT_CONFIG="$SCRIPT_DIR/src/vibephysics/feedforward/configs/feedforward_vggt_omega.yaml"
+        ;;
+    vgg_ttt|vggttt)
+        ENGINE="vgg_ttt"
+        DEFAULT_CONFIG="$SCRIPT_DIR/src/vibephysics/feedforward/configs/feedforward_vgg_ttt.yaml"
+        ;;
+    r3)
+        ENGINE="r3"
+        DEFAULT_CONFIG="$SCRIPT_DIR/src/vibephysics/feedforward/configs/feedforward_r3.yaml"
+        R3_MODEL="r3"
+        ;;
+    r3_long|r3long)
+        ENGINE="r3"
+        DEFAULT_CONFIG="$SCRIPT_DIR/src/vibephysics/feedforward/configs/feedforward_r3.yaml"
+        R3_MODEL="r3_long"
+        ;;
+    map_anything|mapanything_engine)
+        ENGINE="map_anything"
+        DEFAULT_CONFIG="$SCRIPT_DIR/src/vibephysics/feedforward/configs/feedforward_map_anything.yaml"
+        ;;
+    *)
+        # Treat remaining methods as Map-Anything factory keys. This keeps the
+        # unified CLI forward-compatible when Map-Anything adds new model names.
+        ENGINE="map_anything"
+        DEFAULT_CONFIG="$SCRIPT_DIR/src/vibephysics/feedforward/configs/feedforward_map_anything.yaml"
+        if [ "$MAP_MODEL_SET" -eq 0 ]; then
+            MAP_MODEL="$METHOD_NORM"
+        fi
+        ;;
+esac
+
+if ! resolve_python; then
+    echo "Error: no Python with vibephysics + bpy found." >&2
+    echo "PyPI bpy 5.0 requires Python 3.11 (not 3.12+)." >&2
+    echo "Checked:" >&2
+    while IFS= read -r candidate; do diagnose_python "$candidate"; done < <(collect_python_candidates)
+    echo "" >&2
+    echo "Fix options:" >&2
+    echo '  conda create -n vibephysics python=3.11 && conda activate vibephysics' >&2
+    echo '  pip install "numpy<2" vibephysics bpy' >&2
+    echo "Or set VIBEPHYSICS_PYTHON=/path/to/python" >&2
+    exit 1
+fi
+
+export PYTHONPATH="${SCRIPT_DIR}/src${PYTHONPATH:+:$PYTHONPATH}"
+export KMP_DUPLICATE_LIB_OK=TRUE
+export TQDM_DISABLE="${TQDM_DISABLE:-0}"
+export PYTORCH_CUDA_ALLOC_CONF="${PYTORCH_CUDA_ALLOC_CONF:-expandable_segments:True}"
+export TORCHDYNAMO_DISABLE="${TORCHDYNAMO_DISABLE:-1}"
+
+[ -z "$CONFIG" ] && CONFIG="$DEFAULT_CONFIG"
+
+TMP_CONFIG=""
+if [ "$ENGINE" = "r3" ] && [ -n "$R3_MODEL" ]; then
+    TMP_CONFIG="$(make_r3_config "$R3_MODEL")"
+    trap 'rm -f "$TMP_CONFIG"' EXIT
+    CONFIG="$TMP_CONFIG"
+fi
+
+if ! "$PYTHON" - "$ENGINE" "$CONFIG" "$MAP_MODEL" "$INSTALL_ALL" <<'PY'
+import sys
+from pathlib import Path
+
+engine, config_path, map_model, install_all_raw = sys.argv[1:5]
+install_all = install_all_raw == "1"
+
+if engine == "lingbot_map":
+    from vibephysics.feedforward.lingbot_map import ensure_dependencies
+
+    ok = ensure_dependencies()
+elif engine == "vggt_omega":
+    from vibephysics.feedforward.vggt_omega import ensure_dependencies
+
+    ok = ensure_dependencies()
+elif engine == "vgg_ttt":
+    from vibephysics.feedforward.vgg_ttt import ensure_dependencies
+
+    ok = ensure_dependencies()
+elif engine == "r3":
+    from vibephysics.feedforward.r3 import ensure_dependencies
+
+    ok = ensure_dependencies()
+elif engine == "map_anything":
+    from vibephysics.feedforward.config import load_yaml_config
+    from vibephysics.feedforward.map_anything import ensure_dependencies
+
+    cfg = load_yaml_config(Path(config_path))
+    model = map_model or (cfg.get("map_anything") or {}).get("model") or "vggt"
+    ok = ensure_dependencies(model_name=model, install_all=install_all)
+else:
+    raise SystemExit(f"Unknown feedforward engine: {engine}")
+
+raise SystemExit(0 if ok else 1)
+PY
+then
+    echo "--- [run_feedforward] Dependencies unavailable for method '$METHOD'. ---" >&2
+    exit 1
+fi
+
+RECON_ARGS=(--config "$CONFIG")
+RECON_ARGS+=("${ARGS[@]}")
+if [ "$ENGINE" = "map_anything" ]; then
+    if [ "$MAP_MODEL_SET" -eq 0 ] && [ -n "$MAP_MODEL" ]; then
+        RECON_ARGS+=(--model "$MAP_MODEL")
+    fi
+    [ "$INSTALL_ALL" -eq 1 ] && RECON_ARGS+=(--map-anything-install-all)
+fi
+
+echo "--- [run_feedforward] Method: $METHOD_NORM (engine=$ENGINE) ---"
+echo "--- [run_feedforward] Python: $PYTHON ---"
+feedforward_print_frame_plan "$CONFIG" "${INPUT:-}"
+
+"$PYTHON" -m vibephysics.feedforward.reconstruct "${RECON_ARGS[@]}"

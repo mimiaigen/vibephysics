@@ -56,10 +56,9 @@ Legacy NPZ without `world_coordinates` still get OpenCV→Blender at load time.
 ## Commands
 
 ```bash
-./run_lingbot_map.sh --input path/to/video.MOV
-./run_vggt_omega.sh --input path/to/images
-./run_r3.sh --input path/to/video.MOV
-./run_reconstruct.sh --config src/vibephysics/feedforward/configs/feedforward.yaml --input ...
+./run_feedforward.sh --method lingbot_map --input path/to/video.MOV
+./run_feedforward.sh --method r3_long --input path/to/video.MOV
+./run_feedforward.sh --method da3 --input path/to/images
 ./run_compare_blend.sh --left a/predictions.npz --right b/predictions.npz
 
 python -m vibephysics.feedforward.reconstruct --config ... --input ...

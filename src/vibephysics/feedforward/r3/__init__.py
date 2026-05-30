@@ -396,7 +396,10 @@ def run_r3(
         reason = macos_experimental_reason()
         if reason is not None:
             raise RuntimeError(f"R3 experimental macOS dependency setup failed. {reason}")
-        raise RuntimeError("R3 not installed. Run: ./run_r3.sh (deps auto-install on first run)")
+        raise RuntimeError(
+            "R3 not installed. Run: ./run_feedforward.sh --method r3_long "
+            "(deps auto-install on first run)"
+        )
 
     import torch
     from omegaconf import OmegaConf

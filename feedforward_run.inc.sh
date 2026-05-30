@@ -1,5 +1,5 @@
-# Shared CLI args for feedforward run scripts (lingbot_map, vggt_omega, reconstruct).
-# Source from run_*.sh:  source "$SCRIPT_DIR/feedforward_run.inc.sh"
+# Shared CLI helpers for the unified feedforward runner.
+# Source from run_feedforward.sh:  source "$SCRIPT_DIR/feedforward_run.inc.sh"
 
 feedforward_usage_frame_args() {
     echo "  --max_frames N          Use at most N frames (see --max_frames_mode)"

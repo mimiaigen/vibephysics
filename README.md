@@ -8,15 +8,15 @@
 
 ## Changelog
 
-- **2026-05-30** — Added R3 / R3-Long feedforward reconstruction support via [KevinXu02/R3](https://github.com/KevinXu02/R3), using `r3_long` by default with online/streaming inference presets.
-- **2026-05-30** — Added experimental MacBook support path for R3 by skipping the upstream `xformers` install and trying MPS/CPU fallback; Linux + NVIDIA CUDA remains the supported R3 path.
-- **2026-05-29** — Added Map-Anything integration, exposing multiple feedforward model keys through one `map_anything` adapter and shared `FeedforwardPrediction` output.
-- **2026-05-29** — Added VGG-TTT feedforward support for NVIDIA test-time training reconstruction experiments.
-- **2026-05-28** — Added VGGT-Omega feedforward support with Hugging Face checkpoint download and percentile-based point confidence filtering.
-- **2026-05-28** — Improved LingBot-Map long-video handling with automatic streaming/windowed mode selection and VRAM-aware keyframe/window settings.
+- **2026-05-30** — Added [R3 / R3-Long](https://github.com/KevinXu02/R3) feedforward reconstruction support, using `r3_long` by default with online/streaming inference presets.
+- **2026-05-30** — Added experimental MacBook support path for [R3](https://github.com/KevinXu02/R3) by skipping the upstream `xformers` install and trying MPS/CPU fallback; Linux + NVIDIA CUDA remains the supported R3 path.
+- **2026-05-29** — Added [Map-Anything](https://github.com/facebookresearch/map-anything) integration, exposing multiple feedforward model keys through one `map_anything` adapter and shared `FeedforwardPrediction` output.
+- **2026-05-29** — Added [VGG-TTT](https://github.com/nv-dvl/vgg-ttt) feedforward support for NVIDIA test-time training reconstruction experiments.
+- **2026-05-28** — Added [VGGT-Omega](https://github.com/facebookresearch/vggt-omega) feedforward support with Hugging Face checkpoint download and percentile-based point confidence filtering.
+- **2026-05-28** — Improved [LingBot-Map](https://github.com/robbyant/lingbot-map) long-video handling with automatic streaming/windowed mode selection and VRAM-aware keyframe/window settings.
 - **2026-05-28** — Standardized feedforward outputs to `predictions.npz` in Blender Z-up coordinates, so `.blend`, Plotly, and comparison exports read the same canonical data.
 - **2026-05-27** — Added Plotly HTML point-cloud export with camera trajectory playback for inspecting reconstructions outside Blender.
-- **2026-05-27** — Added GLOMAP sparse mapping pipeline and Blender visualization for COLMAP/GLOMAP reconstructions.
+- **2026-05-27** — Added [GLOMAP](https://github.com/colmap/glomap) sparse mapping pipeline and Blender visualization for [COLMAP](https://github.com/colmap/colmap) / GLOMAP reconstructions.
 
 ---
 

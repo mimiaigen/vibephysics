@@ -12,7 +12,7 @@ from .common import DEFAULT_LINGBOT_MAP_MODEL, DEFAULT_VIDEO_FPS
 CONFIGS_DIR = Path(__file__).resolve().parent / "configs"
 DEFAULT_FEEDFORWARD_CONFIG = CONFIGS_DIR / "feedforward.yaml"
 
-FEEDFORWARD_ENGINES = ("lingbot_map", "vggt_omega", "vgg_ttt", "map_anything")
+FEEDFORWARD_ENGINES = ("lingbot_map", "vggt_omega", "vgg_ttt", "map_anything", "r3")
 
 MAX_FRAMES_MODES = ("spread", "first")
 
@@ -136,6 +136,7 @@ def parse_feedforward_config(cfg: dict[str, Any], config_path: Path | None = Non
     vggt_omega = _nested(cfg, "vggt_omega")
     vgg_ttt = _nested(cfg, "vgg_ttt")
     map_anything = _nested(cfg, "map_anything")
+    r3 = _nested(cfg, "r3")
     output = _nested(cfg, "output")
     video = _nested(cfg, "video")
 
@@ -190,4 +191,12 @@ def parse_feedforward_config(cfg: dict[str, Any], config_path: Path | None = Non
         "map_anything_patch_size": map_anything.get("patch_size"),
         "map_anything_resize_mode": map_anything.get("resize_mode", "fixed_mapping"),
         "map_anything_size": map_anything.get("size"),
+        "r3_checkpoint": _optional_path(r3.get("checkpoint")),
+        "r3_model": r3.get("model", "r3_long"),
+        "r3_config_name": r3.get("config_name", "r3-large"),
+        "r3_mode": r3.get("mode", "local"),
+        "r3_image_size": r3.get("image_size", 504),
+        "r3_kv_backend": r3.get("kv_backend", "dense"),
+        "r3_rel_pose_method": r3.get("rel_pose_method", "greedy"),
+        "r3_metric_model_name": r3.get("metric_model_name", "depth-anything/DA3METRIC-LARGE"),
     }

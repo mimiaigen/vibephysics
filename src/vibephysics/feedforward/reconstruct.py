@@ -28,6 +28,7 @@ from .common import (
     discover_images,
     get_vram_gb,
     is_lingbot_map_engine,
+    is_r3_engine,
     is_vgg_ttt_engine,
     is_vggt_omega_engine,
     persist_preprocessed_frames,
@@ -477,6 +478,7 @@ _INSTALL_HINTS = {
     "vggt_omega": "pip install vibephysics (deps auto-install on first run; HF access required)",
     "vgg_ttt": "pip install vibephysics (deps auto-install on first run)",
     "map_anything": "pip install vibephysics (deps auto-install on first run)",
+    "r3": "pip install vibephysics (deps auto-install on first run; CUDA + xformers required)",
 }
 
 
@@ -548,6 +550,10 @@ def _engine_available(engine: str) -> bool:
         from .map_anything import is_available
 
         return is_available()
+    if engine == "r3":
+        from .r3 import is_available
+
+        return is_available()
     return False
 
 
@@ -607,6 +613,14 @@ def reconstruct(
     map_anything_patch_size: int | None = None,
     map_anything_resize_mode: str = "fixed_mapping",
     map_anything_size: int | tuple[int, int] | None = None,
+    r3_checkpoint: str | Path | None = None,
+    r3_model: str | None = None,
+    r3_config_name: str = "r3-large",
+    r3_mode: str | None = "local",
+    r3_image_size: int = 504,
+    r3_kv_backend: str = "dense",
+    r3_rel_pose_method: str = "greedy",
+    r3_metric_model_name: str = "depth-anything/DA3METRIC-LARGE",
     video_fps: float | None = None,
     video_quality: int = 2,
     verbose: bool = True,
@@ -709,12 +723,31 @@ def reconstruct(
                 max_frames_mode=max_frames_mode,
                 verbose=verbose,
             )
+        elif engine == "r3":
+            from .r3 import run_r3
+
+            prediction = run_r3(
+                image_path=image_path,
+                checkpoint=r3_checkpoint,
+                model_name=r3_model,
+                config_name=r3_config_name,
+                mode=r3_mode,
+                image_size=r3_image_size,
+                kv_backend=r3_kv_backend,
+                rel_pose_method=r3_rel_pose_method,
+                metric_model_name=r3_metric_model_name,
+                max_frames=max_frames,
+                max_frames_mode=max_frames_mode,
+                verbose=verbose,
+            )
         else:
             raise ValueError(f"Unknown engine: {engine}")
 
     export_min_confidence = min_confidence
     if export_min_confidence == 0.5 and is_lingbot_map_engine(prediction.engine):
         export_min_confidence = 1.5
+    elif export_min_confidence == 0.5 and is_r3_engine(prediction.engine):
+        export_min_confidence = 1.0
     elif is_vggt_omega_engine(prediction.engine):
         export_min_confidence = resolve_confidence_threshold(
             prediction,

@@ -7,7 +7,7 @@ import os
 import subprocess
 import sys
 
-from .common import LINGBOT_MAP_GIT, MAP_ANYTHING_GIT, VGGT_OMEGA_GIT, VGG_TTT_GIT
+from .common import LINGBOT_MAP_GIT, MAP_ANYTHING_GIT, R3_GIT, VGGT_OMEGA_GIT, VGG_TTT_GIT
 
 # (import_name, pip_spec)
 _PYPI_DEPS: dict[str, list[tuple[str, str]]] = {
@@ -45,6 +45,19 @@ _PYPI_DEPS: dict[str, list[tuple[str, str]]] = {
         ("hydra", "hydra-core"),
         ("omegaconf", "omegaconf"),
     ],
+    "r3": [
+        ("torch", "torch"),
+        ("torchvision", "torchvision"),
+        ("cv2", "opencv-python"),
+        ("PIL", "pillow"),
+        ("einops", "einops"),
+        ("scipy", "scipy"),
+        ("imageio", "imageio"),
+        ("safetensors", "safetensors"),
+        ("omegaconf", "omegaconf"),
+        ("addict", "addict"),
+        ("huggingface_hub", "huggingface_hub"),
+    ],
 }
 
 _ENGINE_MODULES: dict[str, str] = {
@@ -52,6 +65,7 @@ _ENGINE_MODULES: dict[str, str] = {
     "vggt_omega": "vggt_omega",
     "vgg_ttt": "vggttt",
     "map_anything": "mapanything",
+    "r3": "R3",
 }
 
 _ENGINE_GIT: dict[str, str] = {
@@ -59,6 +73,7 @@ _ENGINE_GIT: dict[str, str] = {
     "vggt_omega": VGGT_OMEGA_GIT,
     "vgg_ttt": VGG_TTT_GIT,
     "map_anything": MAP_ANYTHING_GIT,
+    "r3": R3_GIT,
 }
 
 _TORCH_IMPORTS = {"torch", "torchvision"}
@@ -189,7 +204,7 @@ def ensure_engine_dependencies(engine: str, *, verbose: bool = True) -> bool:
         "true",
         "yes",
     }
-    install_constraints = ["numpy<2"] if engine in {"map_anything", "vgg_ttt"} else None
+    install_constraints = ["numpy<2"] if engine in {"map_anything", "vgg_ttt", "r3"} else None
 
     if not _ensure_torch_dependencies(engine, auto_install=auto_install, verbose=verbose):
         return False

@@ -8,6 +8,7 @@ Dense reconstruction from video, image folders, or single images. Each engine ru
 feedforward/
   lingbot_map/__init__.py   # LingBot-Map only (pip package + checkpoint, → FeedforwardPrediction)
   vggt_omega/__init__.py    # VGGT-Omega only (pip package + checkpoint, → FeedforwardPrediction)
+  r3/__init__.py            # R3 relative-regression (pip package + HF checkpoint, → FeedforwardPrediction)
 
   schema.py                 # FeedforwardPrediction + predictions.npz I/O
   reconstruct.py            # orchestrator, video→frames I/O, CLI, run profiling
@@ -57,6 +58,7 @@ Legacy NPZ without `world_coordinates` still get OpenCV→Blender at load time.
 ```bash
 ./run_lingbot_map.sh --input path/to/video.MOV
 ./run_vggt_omega.sh --input path/to/images
+./run_r3.sh --input path/to/video.MOV
 ./run_reconstruct.sh --config src/vibephysics/feedforward/configs/feedforward.yaml --input ...
 ./run_compare_blend.sh --left a/predictions.npz --right b/predictions.npz
 

@@ -1,0 +1,72 @@
+# R3 demo config (R3: 3D Reconstruction via Relative Regression)
+# image_path accepts: folder of images, single image, or video (.mov, .mp4, ...)
+engine: r3
+image_path: path/to/images
+output_path: null
+verbose: true
+
+video:
+  fps: 2              # extraction rate; saved to .vibephysics_extract_fps and reused for animation
+  quality: 2
+  max_frames: null     # null = all frames; set N to limit count (all engines)
+  max_frames_mode: first   # first = first N consecutive; spread = evenly across input
+
+output:
+  save_blend: scene.blend
+  min_confidence: 1.0   # R3 depth_conf is softplus-space (>~1)
+  filter_edges: true
+  point_scale: 0.01
+  animate: true
+  animation_fps: 24
+  align_ground: true
+
+r3:
+  checkpoint: null              # null = auto-download from HuggingFace (KevinXu02/R3)
+  model: r3_long                # r3 | r3_long; r3_long is the vibephysics default
+  config_name: r3-large         # config stem packaged with R3
+  mode: local                   # test | local | long | strided (aliases: short, sampled, sparse)
+  image_size: 504               # official demo --size
+  kv_backend: dense             # dense | paged (paged needs flashinfer, CUDA)
+  rel_pose_method: greedy       # greedy | pgo
+  metric_model_name: depth-anything/DA3METRIC-LARGE  # used only by long/strided (metric scale)
+
+lingbot_map:
+  model: lingbot-map
+  checkpoint: null
+  image_size: 518
+  mode: auto
+  keyframe_interval: null
+  max_streaming_keyframes: null
+  window_size: 64
+  overlap_size: 16
+  overlap_keyframes: null
+  use_sdpa: false
+  mask_sky: false
+
+vggt_omega:
+  checkpoint: null
+  checkpoint_name: vggt-omega-1b-512
+  resolution: 512
+  preprocess_mode: balanced
+  enable_alignment: false
+  conf_percentile: 50.0
+  depth_edge_rtol: 0.03
+
+vgg_ttt:
+  model_id: nvidia/vgg-ttt
+  preprocess_mode: crop
+  image_size: 518
+  conf_percentile: 50.0
+  depth_edge_rtol: 0.03
+  num_ttt_steps: 1
+  memory_efficient_inference: false
+
+map_anything:
+  model: vggt
+  model_kwargs: null
+  install_all: false
+  resolution: 518
+  norm_type: identity
+  patch_size: 14
+  resize_mode: fixed_mapping
+  size: null

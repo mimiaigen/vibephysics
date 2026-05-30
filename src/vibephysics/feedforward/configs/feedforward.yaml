@@ -60,3 +60,13 @@ map_anything:
   patch_size: 14
   resize_mode: fixed_mapping   # fixed_mapping | longest_side | square | fixed_size
   size: null                   # required for longest_side/square/fixed_size
+
+r3:
+  checkpoint: null             # null = auto-download from HuggingFace (KevinXu02/R3)
+  model: r3_long               # r3 | r3_long; r3_long is the vibephysics default
+  config_name: r3-large
+  mode: local                  # test | local | long | strided
+  image_size: 504
+  kv_backend: dense            # dense | paged (paged needs flashinfer)
+  rel_pose_method: greedy      # greedy | pgo
+  metric_model_name: depth-anything/DA3METRIC-LARGE

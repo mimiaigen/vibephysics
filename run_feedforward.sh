@@ -82,6 +82,18 @@ normalize_method() {
     printf '%s' "$1" | tr '[:upper:]-' '[:lower:]_'
 }
 
+args_have_max_frames() {
+    local arg
+    for arg in "${ARGS[@]}"; do
+        case "$arg" in
+            --max_frames|--max-frames)
+                return 0
+                ;;
+        esac
+    done
+    return 1
+}
+
 python_has() {
     "$1" -c "import $2" >/dev/null 2>&1
 }
@@ -323,6 +335,19 @@ fi
 
 echo "--- [run_feedforward] Method: $METHOD_NORM (engine=$ENGINE) ---"
 echo "--- [run_feedforward] Python: $PYTHON ---"
+if [ "$(uname -s)" = "Darwin" ] && [ "$ENGINE" = "r3" ]; then
+    if [ "$R3_MODEL" = "r3_long" ] && ! args_have_max_frames; then
+        echo "--- [run_feedforward] Warning: r3_long on Mac/MPS can be killed by memory pressure on longer clips. Use --max_frames N or --method r3 for the smaller checkpoint. ---"
+    fi
+fi
 feedforward_print_frame_plan "$CONFIG" "${INPUT:-}"
 
 "$PYTHON" -m vibephysics.feedforward.reconstruct "${RECON_ARGS[@]}"
+status=$?
+if [ "$status" -eq 137 ] || [ "$status" -eq 9 ]; then
+    echo "--- [run_feedforward] Process was killed by the OS (SIGKILL), usually memory pressure. ---" >&2
+    if [ "$ENGINE" = "r3" ]; then
+        echo "--- [run_feedforward] For R3 on Mac/MPS, retry with: --method r3 --max_frames 4 (or another small N). r3_long is best on Linux + CUDA. ---" >&2
+    fi
+fi
+exit "$status"

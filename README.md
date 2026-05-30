@@ -8,7 +8,7 @@
 
 ## Changelog
 
-- **2026-05-30** — Added [R3 / R3-Long](https://github.com/KevinXu02/R3) feedforward support, defaulting to `r3_long` online/streaming inference with an experimental MacBook MPS/CPU path.
+- **2026-05-30** — Added [R3 / R3-Long](https://github.com/KevinXu02/R3) feedforward support and unified all feedforward methods under `run_feedforward.sh`.
 - **2026-05-29** — Added [Map-Anything](https://github.com/facebookresearch/map-anything) and [VGG-TTT](https://github.com/nv-dvl/vgg-ttt) feedforward adapters behind the shared `FeedforwardPrediction` output.
 - **2026-05-28** — Added [VGGT-Omega](https://github.com/facebookresearch/vggt-omega), improved [LingBot-Map](https://github.com/robbyant/lingbot-map) long-video handling, and standardized feedforward outputs to Blender Z-up `predictions.npz`.
 - **2026-05-27** — Added [GLOMAP](https://github.com/colmap/glomap) / [COLMAP](https://github.com/colmap/colmap) sparse mapping visualization and Plotly HTML point-cloud export.
@@ -163,16 +163,6 @@ map_anything:
 ```
 
 **Input:** folder, single image, or video (`.mov`/`.mp4`). Videos extract frames at `video.fps` into `output/<video_stem>/` and reuse cached frames on reruns.
-
-**Command line:**
-```bash
-./run_feedforward.sh --method lingbot_map --input test_recording.MOV
-./run_feedforward.sh --method vggt_omega --input path/to/images
-./run_feedforward.sh --method r3_long --input test_recording.MOV --max_frames 4
-./run_feedforward.sh --method mapanything --input test_recording.MOV
-./run_feedforward.sh --method mast3r --input test_recording.MOV --max_frames 20
-./run_feedforward.sh --method da3 --input path/to/images
-```
 
 `run_feedforward.sh` routes direct engines (`lingbot_map`, `vggt_omega`, `vgg_ttt`, `r3`, `r3_long`) and Map-Anything factory model keys (`da3`, `mapanything`, `vggt`, `mast3r`, `pi3`, etc.) through one CLI. Unknown method names are treated as Map-Anything model keys so new factory methods can be tried without changing the script.
 

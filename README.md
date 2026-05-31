@@ -108,28 +108,55 @@ Install backends (Python 3.11 + `bpy`). Pre-install from GitHub (see Installatio
 pip install vibephysics bpy
 
 # compact (default): npz has points/colors/poses only, ~4k sampled pts/frame — small, for viz/API/blend/html
-./run_feedforward.sh --method lingbot_map --input test_recording.MOV
+./run_feedforward.sh \
+  --method lingbot_map \
+  --input test_recording.MOV
 
 # non-compact: npz keeps full per-pixel depth, conf, world_points — large, for custom dense processing
-./run_feedforward.sh --method lingbot_map --input test_recording.MOV --random_points_per_frame 0
+./run_feedforward.sh \
+  --method lingbot_map \
+  --input test_recording.MOV \
+  --random_points_per_frame 0
 
 # --compact + no sampling: compact schema but all confident points (still no depth arrays)
-./run_feedforward.sh --method lingbot_map --input test_recording.MOV --random_points_per_frame 0 --compact
+./run_feedforward.sh \
+  --method lingbot_map \
+  --input test_recording.MOV \
+  --random_points_per_frame 0 \
+  --compact
 
 # --blend only: open in Blender; skip HTML if you don't need a browser view
-./run_feedforward.sh --method lingbot_map --input test_recording.MOV --blend
+./run_feedforward.sh \
+  --method lingbot_map \
+  --input test_recording.MOV \
+  --blend
 
 # --html only: browser QA/share; skip blend if you're not in Blender yet
-./run_feedforward.sh --method lingbot_map --input test_recording.MOV --html
+./run_feedforward.sh \
+  --method lingbot_map \
+  --input test_recording.MOV \
+  --html
 
 # other engines
-./run_feedforward.sh --method r3 --input test_recording.MOV --max_frames 4
-./run_feedforward.sh --method da3 --input path/to/images
+./run_feedforward.sh \
+  --method r3 \
+  --input test_recording.MOV \
+  --max_frames 4
+
+./run_feedforward.sh \
+  --method da3 \
+  --input path/to/images
 
 # everything at once (npz + blend + html + preprocessed frames)
-./run_feedforward.sh --method r3_long --input test_recording.MOV \
-  --max_frames 24 --random_points_per_frame 4000 --total_random_points 200000 \
-  --blend --html --frames
+./run_feedforward.sh \
+  --method r3_long \
+  --input test_recording.MOV \
+  --max_frames 24 \
+  --random_points_per_frame 4000 \
+  --total_random_points 200000 \
+  --blend \
+  --html \
+  --frames
 ```
 
 Configs: `src/vibephysics/feedforward/configs/`

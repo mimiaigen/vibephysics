@@ -4,13 +4,13 @@
 
 **A lightweight framework for turning real-world videos and images into 3D maps, Blender scenes, and physical simulations — bridging feedforward reconstruction, sparse mapping, robotics, and physics in one CPU-friendly workflow.**
 
-**Current release:** [v0.3.5 on PyPI](https://pypi.org/project/vibephysics/0.3.5/)
+**Current release:** [v0.3.6 on PyPI](https://pypi.org/project/vibephysics/0.3.6/)
 
 ---
 
 ## Changelog
 
-- **Unreleased** — [DVLT](https://github.com/nv-tlabs/dvlt) feedforward (`--method dvlt`); `.vibephysics/feedforward/` weight caches; Plotly trajectory aligned with saved poses; feedforward `SKILL.md` for agents.
+- **v0.3.6** (2026-05-31) — PyPI; [DVLT](https://github.com/nv-tlabs/dvlt) feedforward (`--method dvlt`); `.vibephysics/feedforward/` weight caches; Plotly trajectory aligned with saved poses; feedforward `SKILL.md` for agents; GPU dependency fixes.
 - **v0.3.5** (2026-05-31) — PyPI; feedforward stage timing/RSS; compact NPZ defaults (`min_confidence`, per-frame/global sampling); Plotly frame-balanced sampling; R3 Mac/MPS kill warning.
 - **2026-05-30** — [R3](https://github.com/KevinXu02/R3) / R3-Long; unified `run_feedforward.sh` + `feedforward.yaml`; opt-in `--blend` / `--html` / `--frames`.
 - **2026-05-29** — [Map-Anything](https://github.com/facebookresearch/map-anything), [VGG-TTT](https://github.com/nv-dvl/vgg-ttt).
@@ -21,7 +21,7 @@
 
 ## ⚙️ Installation (macOS)
 
-Conda + `pip install vibephysics` (latest: **0.3.5**); optional feedforward backends.
+Conda + `pip install vibephysics` (latest: **0.3.6**); optional feedforward backends.
 
 <details>
 <summary>Installation steps</summary>
@@ -32,7 +32,7 @@ conda create -n vibephysics python=3.11
 conda activate vibephysics
 
 # 2. Install core package (includes COLMAP/GLOMAP mapping & Blender simulation)
-pip install "vibephysics>=0.3.5"
+pip install "vibephysics>=0.3.6"
 
 # 3. (Optional) Install feedforward backends from GitHub
 # Or skip these — run_feedforward.sh auto-installs on first run

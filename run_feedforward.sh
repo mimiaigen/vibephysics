@@ -218,7 +218,7 @@ make_runtime_config() {
     local source_config="${CONFIG:-$DEFAULT_CONFIG}"
     local tmp_config
     tmp_config="$(mktemp "${TMPDIR:-/tmp}/vibephysics_feedforward.XXXXXX.yaml")"
-    "$PYTHON" - "$source_config" "$tmp_config" "$r3_model" "$BLEND" "$HTML" "$FRAMES" "$RANDOM_POINTS_PER_FRAME" "$TOTAL_RANDOM_POINTS" "$COMPACT" <<'PY'
+    "$PYTHON" - "$source_config" "$tmp_config" "$ENGINE" "$r3_model" "$BLEND" "$HTML" "$FRAMES" "$RANDOM_POINTS_PER_FRAME" "$TOTAL_RANDOM_POINTS" "$COMPACT" <<'PY'
 import sys
 from pathlib import Path
 
@@ -226,13 +226,14 @@ import yaml
 
 src = Path(sys.argv[1])
 dst = Path(sys.argv[2])
-r3_model = sys.argv[3]
-blend = sys.argv[4] == "1"
-html = sys.argv[5] == "1"
-frames = sys.argv[6] == "1"
-random_points_per_frame = sys.argv[7]
-total_random_points = sys.argv[8]
-compact = sys.argv[9] == "1"
+engine = sys.argv[3]
+r3_model = sys.argv[4]
+blend = sys.argv[5] == "1"
+html = sys.argv[6] == "1"
+frames = sys.argv[7] == "1"
+random_points_per_frame = sys.argv[8]
+total_random_points = sys.argv[9]
+compact = sys.argv[10] == "1"
 
 cfg = yaml.safe_load(src.read_text())
 if not isinstance(cfg, dict):
@@ -240,6 +241,7 @@ if not isinstance(cfg, dict):
 output = cfg.setdefault("output", {})
 if not isinstance(output, dict):
     raise SystemExit("Config section 'output' must be a mapping")
+cfg["engine"] = engine
 output["save_blend"] = "scene.blend" if blend else None
 output["save_html"] = "visual.html" if html else None
 output["save_frames"] = frames
@@ -248,7 +250,6 @@ output["total_random_points"] = None if total_random_points.lower() in {"", "non
 output["compact"] = compact
 
 if r3_model:
-    cfg["engine"] = "r3"
     section = cfg.setdefault("r3", {})
     if not isinstance(section, dict):
         raise SystemExit("Config section 'r3' must be a mapping")
@@ -260,41 +261,34 @@ PY
 
 METHOD_NORM="$(normalize_method "$METHOD")"
 ENGINE=""
-DEFAULT_CONFIG=""
+DEFAULT_CONFIG="$SCRIPT_DIR/src/vibephysics/feedforward/configs/feedforward.yaml"
 R3_MODEL=""
 
 case "$METHOD_NORM" in
     lingbot|lingbot_map)
         ENGINE="lingbot_map"
-        DEFAULT_CONFIG="$SCRIPT_DIR/src/vibephysics/feedforward/configs/feedforward_lingbot_map.yaml"
         ;;
     vggt_omega|vggtomega)
         ENGINE="vggt_omega"
-        DEFAULT_CONFIG="$SCRIPT_DIR/src/vibephysics/feedforward/configs/feedforward_vggt_omega.yaml"
         ;;
     vgg_ttt|vggttt)
         ENGINE="vgg_ttt"
-        DEFAULT_CONFIG="$SCRIPT_DIR/src/vibephysics/feedforward/configs/feedforward_vgg_ttt.yaml"
         ;;
     r3)
         ENGINE="r3"
-        DEFAULT_CONFIG="$SCRIPT_DIR/src/vibephysics/feedforward/configs/feedforward_r3.yaml"
         R3_MODEL="r3"
         ;;
     r3_long|r3long)
         ENGINE="r3"
-        DEFAULT_CONFIG="$SCRIPT_DIR/src/vibephysics/feedforward/configs/feedforward_r3.yaml"
         R3_MODEL="r3_long"
         ;;
     map_anything|mapanything_engine)
         ENGINE="map_anything"
-        DEFAULT_CONFIG="$SCRIPT_DIR/src/vibephysics/feedforward/configs/feedforward_map_anything.yaml"
         ;;
     *)
         # Treat remaining methods as Map-Anything factory keys. This keeps the
         # unified CLI forward-compatible when Map-Anything adds new model names.
         ENGINE="map_anything"
-        DEFAULT_CONFIG="$SCRIPT_DIR/src/vibephysics/feedforward/configs/feedforward_map_anything.yaml"
         if [ "$MAP_MODEL_SET" -eq 0 ]; then
             MAP_MODEL="$METHOD_NORM"
         fi

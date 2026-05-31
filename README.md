@@ -146,14 +146,7 @@ pip install vibephysics bpy
 
 Configs: `src/vibephysics/feedforward/configs/`
 
-| Config | Engine | Notes |
-|--------|--------|-------|
-| `feedforward.yaml` | `lingbot_map` (default) | Generic template |
-| `feedforward_lingbot_map.yaml` | `lingbot_map` | LingBot-Map defaults |
-| `feedforward_vggt_omega.yaml` | `vggt_omega` | Requires [gated HF access](https://huggingface.co/facebook/VGGT-Omega) |
-| `feedforward_vgg_ttt.yaml` | `vgg_ttt` | NVIDIA VGG-TTT defaults |
-| `feedforward_map_anything.yaml` | `map_anything` | Unified adapter for `facebookresearch/map-anything` model keys |
-| `feedforward_r3.yaml` | `r3` | R3/R3-Long defaults (`r3_long` checkpoint by default) |
+`feedforward.yaml` is the single feedforward config. It includes sections for all engines; `run_feedforward.sh --method ...` selects the active engine and patches runtime output flags.
 
 **Config (`feedforward.yaml`):**
 ```yaml
@@ -238,13 +231,13 @@ See [Time-sync comparison](#-time-sync-comparison-glomap-vs-feedforward) for sid
 from vibephysics import feedforward
 
 output_dir = feedforward.reconstruct_from_config(
-    "src/vibephysics/feedforward/configs/feedforward_lingbot_map.yaml",
+    "src/vibephysics/feedforward/configs/feedforward.yaml",
     image_path="test_recording.MOV",
 )
 pred = feedforward.load_prediction(output_dir / "predictions.npz")
 
 map_output_dir = feedforward.reconstruct_from_config(
-    "src/vibephysics/feedforward/configs/feedforward_map_anything.yaml",
+    "src/vibephysics/feedforward/configs/feedforward.yaml",
     image_path="test_recording.MOV",
     map_anything_model="vggt",
 )

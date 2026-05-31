@@ -107,10 +107,12 @@ Install backends (Python 3.11 + `bpy`). Pre-install from GitHub (see Installatio
 ```bash
 pip install vibephysics bpy
 
-# compact ~4k/frame + preprocessed RGB frames folder
+# compact ~4k/frame + first N frames from video + preprocessed RGB folder
 ./run_feedforward.sh \
   --method lingbot_map \
   --input test_recording.MOV \
+  --max_frames 12 \
+  --max_frames_mode first \
   --random_points_per_frame 4000 \
   --frames
 
@@ -147,11 +149,12 @@ pip install vibephysics bpy
   --total_random_points 120000 \
   --html
 
-# r3 on Mac/MPS: few input frames, small cloud, save preprocessed frames
+# r3 on Mac/MPS: first 4 frames only, small cloud, save preprocessed frames
 ./run_feedforward.sh \
   --method r3 \
   --input test_recording.MOV \
   --max_frames 4 \
+  --max_frames_mode first \
   --random_points_per_frame 2000 \
   --frames
 
@@ -161,12 +164,13 @@ pip install vibephysics bpy
   --random_points_per_frame 6000 \
   --blend
 
-# r3_long: custom output dir, larger cap, blend + html (no --frames here)
+# r3_long: custom output dir, first 24 frames, blend + html
 ./run_feedforward.sh \
   --method r3_long \
   --input test_recording.MOV \
   --output_path output/r3_long_demo \
   --max_frames 24 \
+  --max_frames_mode first \
   --random_points_per_frame 4000 \
   --total_random_points 200000 \
   --blend \

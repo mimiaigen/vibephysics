@@ -106,18 +106,41 @@ Install backends (Python 3.11 + `bpy`). Pre-install from GitHub (see Installatio
 
 ```bash
 pip install vibephysics bpy
+```
 
-# Quick examples
+**Quick runs — pick an output goal** (same `--method` / `--input` for all three; only export flags change):
+
+**1. Compact `predictions.npz` only (default)** — smallest, fastest finish. You get a sampled colored point cloud plus camera poses (~4000 points/frame after confidence filtering). Use this when you will load results in Python, pipe into another tool, or decide later whether you need Blender or a browser viewer.
+
+```bash
 ./run_feedforward.sh --method lingbot_map --input test_recording.MOV
-./run_feedforward.sh --method vggt_omega --input path/to/images --point_scale 0.03
-./run_feedforward.sh --method r3_long --input test_recording.MOV --max_frames 4
-./run_feedforward.sh --method da3 --input path/to/images
-./run_feedforward.sh --method mapanything --input test_recording.MOV --random_points_per_frame 4000 --total_random_points 200000
-./run_feedforward.sh --method lingbot_map --input test_recording.MOV --blend
-./run_feedforward.sh --method vggt_omega --input path/to/images --html
-./run_feedforward.sh --method r3 --input test_recording.MOV --frames
+# writes: predictions.npz, reconstruct_config.json
+```
 
-# Full example with common flags
+**2. `--blend` only** — open the reconstruction directly in Blender for annotation, physics, or comparison with GLOMAP. Skip `--html` when you do not need a shareable browser view (HTML export adds wall time and a large `visual.html`).
+
+```bash
+./run_feedforward.sh --method lingbot_map --input test_recording.MOV --blend
+# writes: predictions.npz + scene.blend (animated point cloud + cameras)
+```
+
+**3. `--html` only** — inspect or demo the cloud in a browser with Play/Pause and a trajectory overlay, without building a `.blend`. Skip `--blend` when you are not entering the Blender workflow yet (no `bpy` scene build).
+
+```bash
+./run_feedforward.sh --method lingbot_map --input test_recording.MOV --html
+# writes: predictions.npz + visual.html
+```
+
+**Dense NPZ (optional):** drop per-frame sampling when you need full per-pixel `depth` / `world_points` for custom code — files are much larger. `--compact` still saves points+poses only if you disable sampling but want a small NPZ.
+
+```bash
+./run_feedforward.sh --method vggt_omega --input path/to/images --random_points_per_frame 0
+```
+
+Other engines: `./run_feedforward.sh --method r3 --input test_recording.MOV --max_frames 4` (Mac/MPS memory), `./run_feedforward.sh --method da3 --input path/to/images` (Map-Anything model key).
+
+```bash
+# Full example — all exports (use when you want NPZ + Blender + HTML + preprocessed frames in one run)
 # --method: choose a direct engine or Map-Anything model key
 # --input: video, image folder, or single image
 # --output_path: output directory; omit for timestamped feedforward_output/

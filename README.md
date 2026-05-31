@@ -104,44 +104,66 @@ Feedforward 3D reconstruction from video or images via LingBot-Map, VGGT-Omega, 
 <details>
 <summary>Feedforward setup & usage</summary>
 
-Install backends (Python 3.11 + `bpy`). Pre-install from GitHub (see Installation) or let `run_feedforward.sh` auto-install on first use. The default output is compact `predictions.npz` only; add `--blend` for `scene.blend`, `--html` for a Plotly viewer, and `--frames` to save preprocessed RGB frames.
+Install backends (Python 3.11 + `bpy`). Pre-install from GitHub (see Installation) or let `run_feedforward.sh` auto-install on first use. The default output is compact `predictions.npz` only (~4k points/frame); add `--frames`, `--html`, and `--blend` as needed.
+
+Examples below build up step by step on the same base command — each step adds one thing.
 
 ```bash
 pip install vibephysics bpy
 
-# compact ~4k/frame + first N frames from video + preprocessed RGB folder
+# 1. Simplest — compact predictions.npz only (~4k pts/frame)
+./run_feedforward.sh --method lingbot_map --input test_recording.MOV
+
+# 2. + preprocessed RGB frames folder
+./run_feedforward.sh \
+  --method lingbot_map \
+  --input test_recording.MOV \
+  --frames
+
+# 3. + Plotly browser viewer (uses frames/ for source-frame preview)
+./run_feedforward.sh \
+  --method lingbot_map \
+  --input test_recording.MOV \
+  --frames \
+  --html
+
+# 4. + Blender scene export
+./run_feedforward.sh \
+  --method lingbot_map \
+  --input test_recording.MOV \
+  --frames \
+  --html \
+  --blend
+
+# 5. + limit frame count (quick test on a short clip)
 ./run_feedforward.sh \
   --method lingbot_map \
   --input test_recording.MOV \
   --max_frames 12 \
   --max_frames_mode first \
-  --random_points_per_frame 4000 \
-  --frames
+  --frames \
+  --html \
+  --blend
 
-# light ~1k/frame + browser viewer
+# 6. + lighter point cloud (faster HTML / smaller npz)
 ./run_feedforward.sh \
   --method lingbot_map \
   --input test_recording.MOV \
   --random_points_per_frame 1000 \
+  --frames \
   --html
 
-# non-compact: 0 = full depth/conf/world_points + stricter confidence
-./run_feedforward.sh \
-  --method lingbot_map \
-  --input test_recording.MOV \
-  --random_points_per_frame 0 \
-  --min_confidence 1.5
-
-# dense compact 20k/frame + Blender export
+# 7. + denser compact cloud for Blender
 ./run_feedforward.sh \
   --method lingbot_map \
   --input test_recording.MOV \
   --random_points_per_frame 20000 \
   --compact \
-  --blend \
-  --point_scale 0.02
+  --point_scale 0.02 \
+  --frames \
+  --blend
 
-# sample across long video + capped global points + html
+# 8. Long input — spread sampling + global point cap
 ./run_feedforward.sh \
   --method vggt_omega \
   --input path/to/images \
@@ -149,24 +171,32 @@ pip install vibephysics bpy
   --max_frames_mode spread \
   --random_points_per_frame 5000 \
   --total_random_points 120000 \
+  --frames \
   --html
 
-# r3 on Mac/MPS: first 4 frames only, small cloud, save preprocessed frames
+# 9. Dense legacy arrays — full depth/conf/world_points (not compact sampling)
+./run_feedforward.sh \
+  --method lingbot_map \
+  --input test_recording.MOV \
+  --random_points_per_frame 0 \
+  --min_confidence 1.5
+
+# 10. Alternate engine — R3 on Mac/MPS (small batch)
 ./run_feedforward.sh \
   --method r3 \
   --input test_recording.MOV \
   --max_frames 4 \
-  --max_frames_mode first \
   --random_points_per_frame 2000 \
   --frames
 
+# 11. Map-Anything factory method — e.g. Depth Anything 3
 ./run_feedforward.sh \
   --method da3 \
   --input path/to/images \
   --random_points_per_frame 6000 \
   --blend
 
-# r3_long: custom output dir, first 24 frames, blend + html
+# 12. Full custom — custom output dir, caps, all exports
 ./run_feedforward.sh \
   --method r3_long \
   --input test_recording.MOV \
@@ -175,8 +205,9 @@ pip install vibephysics bpy
   --max_frames_mode first \
   --random_points_per_frame 4000 \
   --total_random_points 200000 \
-  --blend \
-  --html
+  --frames \
+  --html \
+  --blend
 ```
 
 Configs: `src/vibephysics/feedforward/configs/`

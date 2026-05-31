@@ -9,23 +9,105 @@ import numpy as np
 from .schema import FeedforwardPrediction
 
 _GROUND_ALIGN_MAX_POINTS = 80_000
+# OpenCV world is Y-down; physical "up" is -Y (same frame ground align rotates in).
+_OPENCV_UP = np.array([0.0, -1.0, 0.0], dtype=np.float64)
+# Depth reconstructions are bumpy — fit the lowest band, not a perfect plane / largest wall.
+_FLOOR_BOTTOM_PERCENTILE = 22.0
+_FLOOR_TRIM_PASSES = 3
+_FLOOR_TRIM_KEEP_PERCENTILE = 88.0
+_FLOOR_NORMAL_HORIZ_KEEP = 0.25
 
 
-def _fit_plane_from_triplet(p0: np.ndarray, p1: np.ndarray, p2: np.ndarray) -> tuple[np.ndarray, float] | None:
-    normal = np.cross(p1 - p0, p2 - p0)
-    norm = float(np.linalg.norm(normal))
-    if norm < 1e-8:
-        return None
-    normal = normal / norm
-    offset = -float(np.dot(normal, p0))
-    return normal, offset
+def _heights(points: np.ndarray, up: np.ndarray = _OPENCV_UP) -> np.ndarray:
+    return points @ up
+
+
+def _normalize(v: np.ndarray) -> np.ndarray:
+    n = float(np.linalg.norm(v))
+    return v / n if n > 1e-8 else _OPENCV_UP.copy()
+
+
+def _camera_up_consensus(
+    extrinsics: np.ndarray,
+    *,
+    w2c_as_camera_pose: bool,
+) -> tuple[np.ndarray, float]:
+    """Median OpenCV camera-up in world space; agreement in [0, 1]."""
+    vecs: list[np.ndarray] = []
+    for w2c in extrinsics:
+        w2c4 = np.vstack([np.asarray(w2c, dtype=np.float64), [0.0, 0.0, 0.0, 1.0]])
+        c2w = w2c4 if w2c_as_camera_pose else np.linalg.inv(w2c4)
+        up_cam = -c2w[:3, 1]
+        vecs.append(_normalize(up_cam))
+    if not vecs:
+        return _OPENCV_UP.copy(), 0.0
+    ref = vecs[0]
+    aligned = [v if float(v @ ref) >= 0.0 else -v for v in vecs]
+    stack = np.stack(aligned, axis=0)
+    up = _normalize(np.median(stack, axis=0))
+    return up, float(np.median(np.abs(stack @ up)))
+
+
+def _up_from_point_axes(points: np.ndarray) -> np.ndarray:
+    """Pick ±X/±Y/±Z with the best near-horizontal low band (engine-agnostic fallback)."""
+    best_up = _OPENCV_UP.copy()
+    best_score = -1.0
+    for axis in range(3):
+        for sign in (-1.0, 1.0):
+            u = np.zeros(3, dtype=np.float64)
+            u[axis] = sign
+            heights = _heights(points, u)
+            band = points[heights <= float(np.percentile(heights, _FLOOR_BOTTOM_PERCENTILE))]
+            if band.shape[0] < 50:
+                continue
+            normal, _ = _refine_plane(band, np.ones(band.shape[0], dtype=bool))
+            normal = _normalize(normal)
+            horiz = abs(float(normal @ u))
+            if horiz < 0.5:
+                continue
+            score = float(band.shape[0]) * horiz
+            if score > best_score:
+                best_score = score
+                best_up = u if float(normal @ u) > 0.0 else -u
+    return _normalize(best_up)
+
+
+def _ensure_floor_points_low(points: np.ndarray, up: np.ndarray) -> np.ndarray:
+    """Flip up so the bottom percentile is below the scene median."""
+    heights = _heights(points, up)
+    if float(np.percentile(heights, 12.0)) > float(np.percentile(heights, 50.0)):
+        up = -up
+    return _normalize(up)
+
+
+def _estimate_scene_up(
+    points: np.ndarray,
+    extrinsics: np.ndarray,
+    *,
+    w2c_as_camera_pose: bool,
+) -> np.ndarray:
+    """Gravity-up in the engine's world frame (not assumed to be OpenCV Y)."""
+    cam_up, agree = _camera_up_consensus(extrinsics, w2c_as_camera_pose=w2c_as_camera_pose)
+    if agree >= 0.75 and len(extrinsics) >= 2:
+        up = cam_up
+    elif agree >= 0.5:
+        point_up = _up_from_point_axes(points)
+        up = cam_up if float(point_up @ cam_up) >= 0.0 else -cam_up
+    else:
+        up = _up_from_point_axes(points)
+    return _ensure_floor_points_low(points, up)
 
 
 def _plane_distances(points: np.ndarray, normal: np.ndarray, offset: float) -> np.ndarray:
     return np.abs(points @ normal + offset)
 
 
-def _refine_plane(points: np.ndarray, mask: np.ndarray) -> tuple[np.ndarray, float]:
+def _refine_plane(
+    points: np.ndarray,
+    mask: np.ndarray,
+    *,
+    fallback_up: np.ndarray = _OPENCV_UP,
+) -> tuple[np.ndarray, float]:
     inliers = points[mask]
     centroid = inliers.mean(axis=0)
     centered = inliers - centroid
@@ -33,7 +115,7 @@ def _refine_plane(points: np.ndarray, mask: np.ndarray) -> tuple[np.ndarray, flo
     normal = vh[-1]
     norm = float(np.linalg.norm(normal))
     if norm < 1e-8:
-        normal = np.array([0.0, 0.0, 1.0], dtype=np.float64)
+        normal = fallback_up.copy()
     else:
         normal = normal / norm
     offset = -float(np.dot(normal, centroid))
@@ -45,12 +127,13 @@ def _orient_ground_normal(
     *,
     points: np.ndarray | None = None,
     inlier_mask: np.ndarray | None = None,
+    up: np.ndarray = _OPENCV_UP,
 ) -> np.ndarray:
-    """Make the plane normal point upward (+Z) with scene content above the ground."""
+    """Orient plane normal to point along physical up (+up direction)."""
     normal = np.asarray(normal, dtype=np.float64)
     norm = float(np.linalg.norm(normal))
     if norm < 1e-8:
-        return np.array([0.0, 0.0, 1.0], dtype=np.float64)
+        return up.copy()
     normal = normal / norm
 
     candidates = (normal, -normal)
@@ -58,94 +141,56 @@ def _orient_ground_normal(
         inliers = points[inlier_mask]
         outliers = points[~inlier_mask]
         plane_point = inliers.mean(axis=0)
-        best = normal if normal[2] >= 0.0 else -normal
+        best = normal if float(normal @ up) >= 0.0 else -normal
         best_score = float("-inf")
         for candidate in candidates:
-            if candidate[2] <= 0.0:
+            if float(candidate @ up) <= 0.0:
                 continue
             if outliers.shape[0] == 0:
-                score = candidate[2]
+                score = float(candidate @ up)
             else:
                 signed = (outliers - plane_point) @ candidate
-                score = float(np.mean(signed > 0.0)) + 0.01 * candidate[2]
+                score = float(np.mean(signed > 0.0)) + 0.01 * float(candidate @ up)
             if score > best_score:
                 best_score = score
                 best = candidate
         return best
 
-    if normal[2] < 0.0:
+    if float(normal @ up) < 0.0:
         normal = -normal
     return normal
 
 
-def _rotation_matrix_axis_angle(axis: np.ndarray, angle: float) -> np.ndarray:
-    axis = np.asarray(axis, dtype=np.float64)
-    norm = float(np.linalg.norm(axis))
-    if norm < 1e-8 or abs(angle) < 1e-8:
-        return np.eye(3, dtype=np.float64)
-    axis = axis / norm
-    kx, ky, kz = axis
-    k = np.array([[0.0, -kz, ky], [kz, 0.0, -kx], [-ky, kx, 0.0]], dtype=np.float64)
-    return np.eye(3) + math.sin(angle) * k + (1.0 - math.cos(angle)) * (k @ k)
-
-
-def _refine_residual_plane_tilt(
-    rotation_blender: np.ndarray,
-    points: np.ndarray,
-    inlier_mask: np.ndarray,
+def _snap_floor_normal(
+    normal: np.ndarray,
+    *,
+    up: np.ndarray = _OPENCV_UP,
+    horiz_keep: float = _FLOOR_NORMAL_HORIZ_KEEP,
 ) -> np.ndarray:
-    """
-    Second pass after normal-to-Z: level residual dz/dx and dz/dy on the floor band.
-
-    Pass 1 makes the plane normal horizontal; drift can still leave visible tilt in
-    one orthographic view (X vs Y). Fit z = ax*x + ay*y on low-Z points and apply
-    small pitch/roll corrections.
-    """
-    aligned = (rotation_blender @ points[inlier_mask].T).T
-    if aligned.shape[0] < 100:
-        aligned = (rotation_blender @ points.T).T
-    z_cut = float(np.percentile(aligned[:, 2], 25))
-    ground = aligned[aligned[:, 2] <= z_cut]
-    if ground.shape[0] < 100:
-        ground = aligned
-
-    design = np.column_stack([ground[:, 0], ground[:, 1], np.ones(ground.shape[0])])
-    coef, _, _, _ = np.linalg.lstsq(design, ground[:, 2], rcond=None)
-    ax, ay = float(coef[0]), float(coef[1])
-    if abs(ax) < 0.005 and abs(ay) < 0.005:
-        return rotation_blender
-
-    # z ≈ ax*x + ay*y  ->  rotate about Y to fix dz/dx, then X for dz/dy.
-    ry = _rotation_matrix_axis_angle(np.array([0.0, 1.0, 0.0]), -math.atan(ax))
-    rx = _rotation_matrix_axis_angle(np.array([1.0, 0.0, 0.0]), math.atan(ay))
-    return rx @ ry @ rotation_blender
+    """Tilt estimate from a bumpy low band — damp tilt perpendicular to up."""
+    normal = _orient_ground_normal(normal, up=up)
+    along = float(normal @ up) * up
+    horiz = normal - along
+    if float(np.linalg.norm(along)) < 0.35:
+        return up.copy()
+    damped = along + horiz_keep * horiz
+    return _normalize(damped)
 
 
-def _flip_upside_down_rotation(
-    rotation_blender: np.ndarray,
-    points: np.ndarray,
-    inlier_mask: np.ndarray,
-) -> np.ndarray:
-    """Flip 180° about X when the ground plane sits above the scene bulk."""
-    aligned = (rotation_blender @ points.T).T
-    ground_z = float(np.median(aligned[inlier_mask, 2]))
-    split_z = float(np.percentile(aligned[:, 2], 40))
-    if ground_z > split_z:
-        flip = np.diag([1.0, -1.0, -1.0])
-        return flip @ rotation_blender
-    return rotation_blender
-
-
-def _rotation_matrix_normal_to_z(normal: np.ndarray) -> np.ndarray:
-    """Return 3x3 rotation mapping unit normal onto +Z."""
+def _rotation_matrix_align_normal(normal: np.ndarray, target: np.ndarray) -> np.ndarray:
+    """Return 3x3 rotation mapping unit normal onto target."""
     normal = normal / max(float(np.linalg.norm(normal)), 1e-8)
-    target = np.array([0.0, 0.0, 1.0], dtype=np.float64)
+    target = np.asarray(target, dtype=np.float64)
+    target = target / max(float(np.linalg.norm(target)), 1e-8)
     dot = float(np.clip(np.dot(normal, target), -1.0, 1.0))
 
     if dot > 1.0 - 1e-8:
         return np.eye(3, dtype=np.float64)
     if dot < -1.0 + 1e-8:
-        return np.diag([1.0, -1.0, -1.0])
+        axis = np.cross(normal, target)
+        if float(np.linalg.norm(axis)) < 1e-8:
+            return np.diag([1.0, -1.0, -1.0])
+        return _rotation_matrix_align_normal(-normal, target)
 
     axis = np.cross(normal, target)
     axis_norm = float(np.linalg.norm(axis))
@@ -158,16 +203,72 @@ def _rotation_matrix_normal_to_z(normal: np.ndarray) -> np.ndarray:
     return np.eye(3) + math.sin(angle) * k + (1.0 - math.cos(angle)) * (k @ k)
 
 
-_GROUND_ALIGN_MAX_TILT_DEG = 85.0
+def _level_ground_rotation(
+    rotation: np.ndarray,
+    points: np.ndarray,
+    *,
+    passes: int = 4,
+    height_percentile: float = 20.0,
+    tilt_stop_deg: float = 0.05,
+    up: np.ndarray = _OPENCV_UP,
+) -> np.ndarray:
+    """Iteratively fit the lowest points and align their plane normal to up."""
+    rot = rotation
+    for _ in range(passes):
+        aligned = (rot @ points.T).T
+        heights = _heights(aligned, up)
+        h_cut = float(np.percentile(heights, height_percentile))
+        ground = aligned[heights <= h_cut]
+        if ground.shape[0] < 50:
+            ground = aligned
+        if ground.shape[0] < 3:
+            break
+        normal, _ = _refine_plane(ground, np.ones(ground.shape[0], dtype=bool))
+        normal = _orient_ground_normal(normal, up=up)
+        tilt_deg = math.degrees(
+            math.acos(float(np.clip(abs(float(normal @ up)), 0.0, 1.0)))
+        )
+        if tilt_deg < tilt_stop_deg:
+            break
+        rot = _rotation_matrix_align_normal(normal, up) @ rot
+    return rot
 
 
-def _is_reasonable_ground_rotation(rotation_blender: np.ndarray) -> bool:
-    """Reject fits that would flip the scene (~180°) from a wrong dominant plane."""
-    euler = _matrix_to_euler_xyz(rotation_blender)
-    for angle in euler[:2]:
-        if abs(math.degrees(angle)) > _GROUND_ALIGN_MAX_TILT_DEG:
-            return False
-    return True
+def _flip_upside_down_rotation(
+    rotation: np.ndarray,
+    points: np.ndarray,
+    inlier_mask: np.ndarray,
+    *,
+    up: np.ndarray = _OPENCV_UP,
+) -> np.ndarray:
+    """Flip 180° about X when the fitted floor sits above the scene bulk."""
+    aligned = (rotation @ points.T).T
+    heights = _heights(aligned, up)
+    ground_h = float(np.median(heights[inlier_mask]))
+    split_h = float(np.percentile(heights, 40))
+    if ground_h > split_h:
+        flip = np.diag([1.0, -1.0, -1.0])
+        return flip @ rotation
+    return rotation
+
+
+_GROUND_ALIGN_MAX_RESIDUAL_TILT_DEG = 15.0
+_GROUND_ALIGN_MAX_FLOOR_SLOPE = 0.10
+_MIN_TILT_IMPROVEMENT_DEG = 1.0
+
+
+def _is_acceptable_ground_rotation(rotation: np.ndarray, points: np.ndarray) -> tuple[bool, float, float, float]:
+    """Accept when alignment clearly improves tilt (floor need not be geometrically flat)."""
+    tilt, slope_x, slope_y = _residual_floor_slopes(rotation, points)
+    tilt_before, _, _ = _residual_floor_slopes(np.eye(3), points)
+    improved = (tilt_before - tilt) >= _MIN_TILT_IMPROVEMENT_DEG
+    ok = (
+        improved
+        and tilt <= _GROUND_ALIGN_MAX_RESIDUAL_TILT_DEG
+        and abs(slope_x) <= _GROUND_ALIGN_MAX_FLOOR_SLOPE
+        and abs(slope_y) <= _GROUND_ALIGN_MAX_FLOOR_SLOPE
+    )
+    return ok, tilt, slope_x, slope_y
 
 
 def _matrix_to_euler_xyz(rotation: np.ndarray) -> tuple[float, float, float]:
@@ -185,8 +286,13 @@ def _matrix_to_euler_xyz(rotation: np.ndarray) -> tuple[float, float, float]:
     return x, y, z
 
 
-def _collect_ground_align_points(predictions: dict | FeedforwardPrediction) -> tuple[np.ndarray, int]:
-    """Collect finite world points for RANSAC (subsampled, no color pass)."""
+def _collect_ground_align_points(
+    predictions: dict | FeedforwardPrediction,
+    *,
+    up: np.ndarray = _OPENCV_UP,
+    prefilter_floor: bool = True,
+) -> tuple[np.ndarray, int]:
+    """Collect finite world points for floor tilt estimation (subsampled)."""
     if isinstance(predictions, FeedforwardPrediction):
         world_points = predictions.world_points
     else:
@@ -194,150 +300,67 @@ def _collect_ground_align_points(predictions: dict | FeedforwardPrediction) -> t
 
     flat = np.asarray(world_points, dtype=np.float64).reshape(-1, 3)
     valid = np.isfinite(flat).all(axis=1)
-    pts = flat[valid]
-    total = int(pts.shape[0])
+    out = flat[valid]
+    total = int(out.shape[0])
     if total < 3:
         raise ValueError("Not enough finite points for ground alignment.")
-
-    out = np.empty_like(pts)
-    out[:, 0] = pts[:, 0]
-    out[:, 1] = pts[:, 2]
-    out[:, 2] = -pts[:, 1]
-
-    # Prefer lowest-Z band so RANSAC sees floor, not walls/ceiling (helps short max_frames clips).
-    z_cut = float(np.percentile(out[:, 2], 30))
-    floor_pts = out[out[:, 2] <= z_cut]
-    if floor_pts.shape[0] >= 3000:
-        out = floor_pts
 
     if out.shape[0] > _GROUND_ALIGN_MAX_POINTS:
         rng = np.random.default_rng(0)
         idx = rng.choice(out.shape[0], _GROUND_ALIGN_MAX_POINTS, replace=False)
         out = out[idx]
+
+    if prefilter_floor:
+        heights = _heights(out, up)
+        h_cut = float(np.percentile(heights, 30))
+        floor_pts = out[heights <= h_cut]
+        if floor_pts.shape[0] >= 3000:
+            out = floor_pts
     return out, total
 
 
-def _msac_score(distances: np.ndarray, threshold: float) -> float:
-    """Truncated quadratic (MSAC) score; smoother than hard inlier counting."""
-    ratio = distances / max(threshold, 1e-12)
-    return float(np.sum(np.maximum(0.0, 1.0 - ratio * ratio)))
-
-
-def ransac_dominant_ground_plane(
+def fit_floor_plane_low_band(
     points: np.ndarray,
     *,
-    distance_threshold: float | None = None,
-    min_horizontal: float = 0.7,
-    max_iterations: int = 600,
-    max_sample_points: int = 40_000,
-    min_inliers: int = 500,
-    rng: np.random.Generator | None = None,
+    up: np.ndarray = _OPENCV_UP,
 ) -> tuple[np.ndarray, float, np.ndarray] | None:
     """
-    Find the largest near-horizontal plane in a point cloud.
+    Estimate a mean floor tilt from the lowest points (robust to bumpy depth).
 
     Returns (unit_normal, offset, inlier_mask) where normal·p + offset ≈ 0.
-    Hypothesis scoring uses a subsample; refinement runs on the same subsample.
     """
     points = np.asarray(points, dtype=np.float64)
     if points.shape[0] < 3:
         return None
 
-    rng = rng or np.random.default_rng(0)
-    n_sample = min(points.shape[0], max_sample_points)
-    if points.shape[0] > n_sample:
-        sample_idx = rng.choice(points.shape[0], n_sample, replace=False)
-        sample = points[sample_idx]
-    else:
-        sample = points
+    heights = _heights(points, up)
+    band = points[heights <= float(np.percentile(heights, _FLOOR_BOTTOM_PERCENTILE))]
+    if band.shape[0] < 100:
+        band = points[heights <= float(np.percentile(heights, 35.0))]
 
-    if distance_threshold is None:
-        extent = np.ptp(sample, axis=0)
-        distance_threshold = max(float(np.linalg.norm(extent)) * 0.01, 1e-3)
+    mask = np.ones(band.shape[0], dtype=bool)
+    normal = up.copy()
+    for _ in range(_FLOOR_TRIM_PASSES):
+        if int(mask.sum()) < 3:
+            break
+        normal, offset = _refine_plane(band, mask)
+        normal = _snap_floor_normal(normal, up=up)
+        dist = _plane_distances(band, normal, offset)
+        cut = float(np.percentile(dist[mask], _FLOOR_TRIM_KEEP_PERCENTILE))
+        mask = dist <= max(cut, 1e-6)
 
-    min_count = min(min_inliers, max(100, sample.shape[0] // 100))
-    min_tri_area = max(distance_threshold * distance_threshold, float(np.ptp(sample, axis=0).max()) * 1e-5)
-
-    best_score = -1.0
-    best_mean_z = float("inf")
-    best_normal: np.ndarray | None = None
-    best_offset = 0.0
-    stale_iters = 0
-
-    for _ in range(max_iterations):
-        idx = rng.choice(sample.shape[0], 3, replace=False)
-        p0, p1, p2 = sample[idx[0]], sample[idx[1]], sample[idx[2]]
-        if 0.5 * float(np.linalg.norm(np.cross(p1 - p0, p2 - p0))) < min_tri_area:
-            continue
-
-        candidate = _fit_plane_from_triplet(p0, p1, p2)
-        if candidate is None:
-            continue
-
-        normal, offset = candidate
-        if abs(float(normal[2])) < min_horizontal:
-            continue
-
-        distances = _plane_distances(sample, normal, offset)
-        count = int(np.count_nonzero(distances < distance_threshold))
-        if count < min_count:
-            continue
-
-        score = _msac_score(distances, distance_threshold)
-        mean_z = float(sample[distances < distance_threshold, 2].mean()) if count else float("inf")
-        if score > best_score + 1e-6 or (
-            abs(score - best_score) <= 1e-6 and mean_z < best_mean_z
-        ):
-            best_score = score
-            best_mean_z = mean_z
-            best_normal = normal.copy()
-            best_offset = float(offset)
-            stale_iters = 0
-        else:
-            stale_iters += 1
-            if stale_iters >= 120:
-                break
-
-    if best_normal is None:
+    if int(mask.sum()) < 3:
         return None
 
-    normal = best_normal
-    offset = best_offset
-    inliers = _plane_distances(sample, normal, offset) < distance_threshold
-    normal, offset = _refine_plane(sample, inliers)
-
-    inliers = _plane_distances(points, normal, offset) < distance_threshold
-    normal = _orient_ground_normal(normal, points=points, inlier_mask=inliers)
-    inlier_pts = points[inliers]
-    offset = -float(np.dot(normal, inlier_pts.mean(axis=0)))
-    inliers = _plane_distances(points, normal, offset) < distance_threshold
-    for _ in range(2):
-        normal, offset = _refine_plane(points, inliers)
-        inliers = _plane_distances(points, normal, offset) < distance_threshold
-        normal = _orient_ground_normal(normal, points=points, inlier_mask=inliers)
-        inlier_pts = points[inliers]
-        offset = -float(np.dot(normal, inlier_pts.mean(axis=0)))
-        inliers = _plane_distances(points, normal, offset) < distance_threshold
-
-    normal = _orient_ground_normal(normal, points=points, inlier_mask=inliers)
-    inlier_pts = points[inliers]
-    offset = -float(np.dot(normal, inlier_pts.mean(axis=0)))
+    normal = _snap_floor_normal(normal, up=up)
+    centroid = band[mask].mean(axis=0)
+    offset = -float(np.dot(normal, centroid))
+    dist_all = _plane_distances(points, normal, offset)
+    inliers = dist_all <= float(np.percentile(dist_all, 45.0))
+    normal = _orient_ground_normal(normal, points=points, inlier_mask=inliers, up=up)
+    offset = -float(np.dot(normal, points[inliers].mean(axis=0)))
+    inliers = _plane_distances(points, normal, offset) <= float(np.percentile(dist_all, 45.0))
     return normal, offset, inliers
-
-
-def _opencv_world_to_blender_matrix_3x3() -> np.ndarray:
-    """Linear part of OpenCV world -> Blender (x, z, -y)."""
-    return np.array(
-        [[1.0, 0.0, 0.0], [0.0, 0.0, 1.0], [0.0, -1.0, 0.0]],
-        dtype=np.float64,
-    )
-
-
-def _blender_rotation_to_opencv(rotation_blender: np.ndarray) -> np.ndarray:
-    """Convert a 3x3 rotation estimated in Blender coords to OpenCV world coords."""
-    m = _opencv_world_to_blender_matrix_3x3()
-    rot = np.asarray(rotation_blender, dtype=np.float64)
-    return m.T @ rot @ m
 
 
 def _apply_world_rotation_opencv(
@@ -387,38 +410,73 @@ def _warn_spread_frame_sampling(predictions: dict | FeedforwardPrediction) -> No
         )
 
 
+def _residual_floor_slopes(rotation: np.ndarray, points: np.ndarray) -> tuple[float, float, float]:
+    """Return (tilt_deg, dz/dx, dz/dy) on Blender Z-up floor band for logging."""
+    from .common import opencv_to_blender_points
+
+    aligned_cv = (rotation @ points.T).T
+    aligned = opencv_to_blender_points(aligned_cv)
+    heights = aligned[:, 2]
+    ground = aligned[heights <= float(np.percentile(heights, 20))]
+    if ground.shape[0] < 3:
+        return 0.0, 0.0, 0.0
+    _, _, vh = np.linalg.svd(ground - ground.mean(axis=0), full_matrices=False)
+    tilt = math.degrees(math.acos(float(np.clip(abs(vh[-1][2]), 0.0, 1.0))))
+    coef, _, _, _ = np.linalg.lstsq(
+        np.column_stack([ground[:, 0], ground[:, 1], np.ones(ground.shape[0])]),
+        ground[:, 2],
+        rcond=None,
+    )
+    return tilt, float(coef[0]), float(coef[1])
+
+
 def _estimate_ground_rotation_matrix_opencv(
     predictions: dict | FeedforwardPrediction,
-) -> np.ndarray | None:
-    """Estimate 3x3 ground-alignment rotation in OpenCV world coordinates."""
+) -> tuple[np.ndarray | None, np.ndarray | None]:
+    """Estimate ground-alignment rotation and the subsampled points used for fitting."""
     _warn_spread_frame_sampling(predictions)
-    try:
-        points, total_finite = _collect_ground_align_points(predictions)
-    except ValueError:
-        return None
+    if isinstance(predictions, FeedforwardPrediction):
+        extrinsics = predictions.extrinsic
+        w2c_as_camera_pose = bool(predictions.metadata.get("w2c_as_camera_pose"))
+    else:
+        extrinsics = predictions["extrinsic"]
+        meta = predictions.get("metadata") or {}
+        w2c_as_camera_pose = bool(meta.get("w2c_as_camera_pose"))
 
-    fit = ransac_dominant_ground_plane(points)
+    try:
+        probe, total_finite = _collect_ground_align_points(
+            predictions, prefilter_floor=False
+        )
+        scene_up = _estimate_scene_up(
+            probe, extrinsics, w2c_as_camera_pose=w2c_as_camera_pose
+        )
+        points, _ = _collect_ground_align_points(predictions, up=scene_up)
+    except ValueError:
+        return None, None
+
+    fit = fit_floor_plane_low_band(points, up=scene_up)
     if fit is None:
-        return None
+        return None, None
 
     normal, _offset, inliers = fit
-    rotation_blender = _rotation_matrix_normal_to_z(normal)
-    rotation_blender = _flip_upside_down_rotation(rotation_blender, points, inliers)
-    rotation_blender = _refine_residual_plane_tilt(rotation_blender, points, inliers)
-    rotation_opencv = _blender_rotation_to_opencv(rotation_blender)
+    rotation = _rotation_matrix_align_normal(normal, _OPENCV_UP)
+    rotation = _level_ground_rotation(rotation, points, up=_OPENCV_UP)
+    rotation = _flip_upside_down_rotation(rotation, points, inliers, up=_OPENCV_UP)
+    rotation = _level_ground_rotation(rotation, points, up=_OPENCV_UP)
+
     inlier_count = int(inliers.sum())
-    euler = _matrix_to_euler_xyz(rotation_blender)
-    aligned = (rotation_blender @ points[inliers].T).T
-    _, _, aligned_vh = np.linalg.svd(aligned - aligned.mean(axis=0), full_matrices=False)
-    residual_tilt = math.degrees(math.acos(float(np.clip(abs(aligned_vh[-1][2]), 0.0, 1.0))))
+    euler = _matrix_to_euler_xyz(rotation)
+    residual_tilt, slope_x, slope_y = _residual_floor_slopes(rotation, points)
     print(
         f"[vibephysics] Ground align: {inlier_count}/{len(points)} inliers "
         f"({total_finite} finite pts), "
+        f"scene_up=({scene_up[0]:.3f}, {scene_up[1]:.3f}, {scene_up[2]:.3f}), "
         f"normal=({normal[0]:.3f}, {normal[1]:.3f}, {normal[2]:.3f}), "
-        f"euler=({math.degrees(euler[0]):.1f}°, {math.degrees(euler[1]):.1f}°, {math.degrees(euler[2]):.1f}°), "
-        f"residual tilt={residual_tilt:.2f}°"
+        f"euler=({math.degrees(euler[0]):.1f}°, {math.degrees(euler[1]):.1f}°, "
+        f"{math.degrees(euler[2]):.1f}°), "
+        f"residual tilt={residual_tilt:.2f}° (dz/dx={slope_x:.4f}, dz/dy={slope_y:.4f})"
     )
-    return rotation_opencv
+    return rotation, points
 
 
 def apply_world_rotation_to_prediction(
@@ -437,7 +495,7 @@ def apply_world_rotation_to_prediction(
 
 def align_prediction_ground(prediction: FeedforwardPrediction) -> bool:
     """
-    Align the dominant ground plane to horizontal in canonical OpenCV world coords.
+    Level mean floor tilt to horizontal in canonical OpenCV world coords (bumpy depth OK).
 
     Single entry point for all engines. Mutates ``world_points`` and ``extrinsic``
     in place. Returns True when applied.
@@ -445,25 +503,22 @@ def align_prediction_ground(prediction: FeedforwardPrediction) -> bool:
     if prediction.metadata.get("ground_align_applied"):
         return False
 
-    rotation = _estimate_ground_rotation_matrix_opencv(prediction)
-    if rotation is None:
-        print("[vibephysics] Ground align skipped: could not estimate a dominant ground plane.")
+    rotation, align_points = _estimate_ground_rotation_matrix_opencv(prediction)
+    if rotation is None or align_points is None:
+        print("[vibephysics] Ground align skipped: could not estimate floor tilt from low points.")
         return False
 
-    m = _opencv_world_to_blender_matrix_3x3()
-    rotation_blender = m @ rotation @ m.T
-    if not _is_reasonable_ground_rotation(rotation_blender):
-        euler = _matrix_to_euler_xyz(rotation_blender)
+    ok, tilt, slope_x, slope_y = _is_acceptable_ground_rotation(rotation, align_points)
+    if not ok:
+        euler = _matrix_to_euler_xyz(rotation)
         print(
-            "[vibephysics] Ground align rejected: estimated rotation is too large "
-            f"(euler=({math.degrees(euler[0]):.1f}°, {math.degrees(euler[1]):.1f}°, "
-            f"{math.degrees(euler[2]):.1f}°)) — likely a wall/ceiling plane on a drifted "
-            "reconstruction. Fix poses (e.g. windowed mode for >320 frames) or disable "
-            "align_ground."
+            "[vibephysics] Ground align rejected: floor still tilted after fit "
+            f"(residual={tilt:.2f}°, dz/dx={slope_x:.4f}, dz/dy={slope_y:.4f}; "
+            f"euler=({math.degrees(euler[0]):.1f}°, {math.degrees(euler[1]):.1f}°, "
+            f"{math.degrees(euler[2]):.1f}°)) — no clear improvement from low-band fit."
         )
         return False
 
-    euler = _matrix_to_euler_xyz(rotation_blender)
-    euler_deg = tuple(math.degrees(a) for a in euler)
+    euler_deg = tuple(math.degrees(a) for a in _matrix_to_euler_xyz(rotation))
     apply_world_rotation_to_prediction(prediction, rotation, euler_deg=euler_deg)
     return True

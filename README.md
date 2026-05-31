@@ -8,7 +8,7 @@
 
 ## Changelog
 
-- **2026-05-30** — Added [R3 / R3-Long](https://github.com/KevinXu02/R3) feedforward support and unified all feedforward methods under `run_feedforward.sh`.
+- **2026-05-30** — Added [R3 / R3-Long](https://github.com/KevinXu02/R3) feedforward support, unified all feedforward methods under `run_feedforward.sh`, consolidated to one `feedforward.yaml`, and made compact random-sampled `predictions.npz` the default with opt-in `--blend`, `--html`, and `--frames` exports.
 - **2026-05-29** — Added [Map-Anything](https://github.com/facebookresearch/map-anything) and [VGG-TTT](https://github.com/nv-dvl/vgg-ttt) feedforward adapters behind the shared `FeedforwardPrediction` output.
 - **2026-05-28** — Added [VGGT-Omega](https://github.com/facebookresearch/vggt-omega), improved [LingBot-Map](https://github.com/robbyant/lingbot-map) long-video handling, and standardized feedforward outputs to Blender Z-up `predictions.npz`.
 - **2026-05-27** — Added [GLOMAP](https://github.com/colmap/glomap) / [COLMAP](https://github.com/colmap/colmap) sparse mapping visualization and Plotly HTML point-cloud export.

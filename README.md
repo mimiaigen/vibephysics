@@ -94,20 +94,54 @@ Output: `sparse/0/` plus `visualize.blend` (unless `--no-blend`).
 
 ![Feedforward Comparison](assets/feedforward_comparison.gif)
 
-Dense depth, poses, and world points from video or images via LingBot-Map, VGGT-Omega, VGG-TTT, Map-Anything, and R3/R3-Long. `predictions.npz` is Z-up ground truth; Blender only visualizes it.
+Feedforward 3D reconstruction from video or images via LingBot-Map, VGGT-Omega, VGG-TTT, Map-Anything, and R3/R3-Long. By default, `predictions.npz` stores a compact colored point cloud plus camera poses; dense depth/world-point tensors are opt-in.
 
 <details>
 <summary>Feedforward setup & usage</summary>
 
-Install backends (Python 3.11 + `bpy`). Pre-install from GitHub (see Installation) or let `run_feedforward.sh` auto-install on first use:
+Install backends (Python 3.11 + `bpy`). Pre-install from GitHub (see Installation) or let `run_feedforward.sh` auto-install on first use. The default output is compact `predictions.npz` only; add `--blend` for `scene.blend`, `--html` for a Plotly viewer, and `--frames` to save preprocessed RGB frames.
 
 ```bash
 pip install vibephysics bpy
+
+# Quick examples
 ./run_feedforward.sh --method lingbot_map --input test_recording.MOV
 ./run_feedforward.sh --method vggt_omega --input path/to/images --point_scale 0.03
 ./run_feedforward.sh --method r3_long --input test_recording.MOV --max_frames 4
 ./run_feedforward.sh --method da3 --input path/to/images
-./run_feedforward.sh --method mapanything --input test_recording.MOV
+./run_feedforward.sh --method mapanything --input test_recording.MOV --random_points_per_frame 4000 --total_random_points 200000
+./run_feedforward.sh --method lingbot_map --input test_recording.MOV --blend
+./run_feedforward.sh --method vggt_omega --input path/to/images --html
+./run_feedforward.sh --method r3 --input test_recording.MOV --frames
+
+# Full example with common flags
+# --method: choose a direct engine or Map-Anything model key
+# --input: video, image folder, or single image
+# --output_path: output directory; omit for timestamped feedforward_output/
+# --max_frames: limit frames for speed/memory
+# --max_frames_mode: first = first N frames, spread = sample across the full input
+# --min_confidence: drop low-confidence points before sampling
+# --random_points_per_frame: random point budget per frame after confidence filtering
+# --total_random_points: optional global random cap after per-frame sampling
+# --point_scale: Blender point radius when exporting .blend
+# --mode: preprocessing override for engines that support it
+# --blend: save scene.blend
+# --html: save visual.html Plotly viewer
+# --frames: save model-preprocessed RGB frames
+# --no-install: skip auto-install if you manage dependencies yourself
+./run_feedforward.sh \
+  --method r3_long \
+  --input test_recording.MOV \
+  --output_path output/r3_long_demo \
+  --max_frames 24 \
+  --max_frames_mode first \
+  --min_confidence 2.0 \
+  --random_points_per_frame 4000 \
+  --total_random_points 200000 \
+  --point_scale 0.01 \
+  --blend \
+  --html \
+  --frames
 ```
 
 Configs: `src/vibephysics/feedforward/configs/`
@@ -115,7 +149,7 @@ Configs: `src/vibephysics/feedforward/configs/`
 | Config | Engine | Notes |
 |--------|--------|-------|
 | `feedforward.yaml` | `lingbot_map` (default) | Generic template |
-| `feedforward_lingbot_map.yaml` | `lingbot_map` | Demo defaults (`min_confidence: 1.5`) |
+| `feedforward_lingbot_map.yaml` | `lingbot_map` | LingBot-Map defaults |
 | `feedforward_vggt_omega.yaml` | `vggt_omega` | Requires [gated HF access](https://huggingface.co/facebook/VGGT-Omega) |
 | `feedforward_vgg_ttt.yaml` | `vgg_ttt` | NVIDIA VGG-TTT defaults |
 | `feedforward_map_anything.yaml` | `map_anything` | Unified adapter for `facebookresearch/map-anything` model keys |
@@ -133,9 +167,14 @@ video:
   max_frames_mode: first   # first | spread
 
 output:
-  save_blend: scene.blend
-  min_confidence: 0.5
+  save_blend: null             # set by ./run_feedforward.sh --blend when needed
+  save_html: null              # set by ./run_feedforward.sh --html when needed
+  save_frames: false           # set by ./run_feedforward.sh --frames when needed
+  min_confidence: 2.0
   point_scale: 0.01       # absolute point radius in Blender units
+  random_points_per_frame: 4000  # compact saved predictions randomly keep up to this many points per frame
+  total_random_points: null      # optional global random sample after per-frame filtering
+  compact: false          # true = compact even if random_points_per_frame is disabled
   align_ground: true
   animate: true
   animation_fps: 24
@@ -165,6 +204,8 @@ map_anything:
 **Input:** folder, single image, or video (`.mov`/`.mp4`). Videos extract frames at `video.fps` into `output/<video_stem>/` and reuse cached frames on reruns.
 
 `run_feedforward.sh` routes direct engines (`lingbot_map`, `vggt_omega`, `vgg_ttt`, `r3`, `r3_long`) and Map-Anything factory model keys (`da3`, `mapanything`, `vggt`, `mast3r`, `pi3`, etc.) through one CLI. Unknown method names are treated as Map-Anything model keys so new factory methods can be tried without changing the script.
+
+**Saved output defaults:** `predictions.npz` is compact by default because `--random_points_per_frame` defaults to `4000`, with `min_confidence: 2.0` filtering low-confidence points first. It stores `points`, `colors`, `conf`, `frame_ids`, camera `extrinsic`/`intrinsic`, `trajectory`, `engine`, and `metadata`. Filtering order is: first apply `--min_confidence`, then randomly keep up to `--random_points_per_frame K` points within each frame, then apply `--total_random_points K` globally if provided. Set `--random_points_per_frame 0` to disable per-frame random sampling and save dense legacy arrays (`depth`, `conf`, `world_points`, etc.) unless `--compact` or `--total_random_points` is set. Pass `--blend` to additionally export `scene.blend`, `--html` to export `visual.html`, and `--frames` to save the model-preprocessed RGB frames folder.
 
 **Map-Anything model keys:**
 
@@ -215,28 +256,32 @@ map_output_dir = feedforward.reconstruct_from_config(
 | **VGGT-Omega** | High-quality batches | 10–100 |
 | **VGG-TTT** | Test-time training experiments | Small batches |
 | **Map-Anything** | Trying many feedforward models behind one interface | Model-dependent |
+| **R3 / R3-Long** | Online/streaming relative-pose reconstruction | Long videos; use small `--max_frames` on Mac/MPS |
 
 **Output layout:**
 ```
 feedforward_output/{engine}_{timestamp}/
-  predictions.npz          # Z-up arrays (depth, conf, poses, world_points)
+  predictions.npz          # compact points+poses by default; dense arrays if --random_points_per_frame 0
   reconstruct_config.json
-  scene.blend              # optional viewer export
+  frames/                  # optional, only when --frames is passed
+  visual.html              # optional, only when --html is passed
+  scene.blend              # optional, only when --blend is passed
 ```
 
-`predictions.npz` uses Blender Z-up (`metadata.world_coordinates: blender_z_up`). Ground align runs before save when `align_ground: true`; Blender does not re-align or re-axis-convert on load.
+`predictions.npz` uses Blender Z-up (`metadata.world_coordinates: blender_z_up`). Ground align runs before save when `align_ground: true`; Blender does not re-align or re-axis-convert on load. Compact predictions are best when you only need a colored 3D point cloud, trajectory, and camera poses; dense mode is best when you need full per-pixel depth/confidence/world-point maps.
 
 **Plotly HTML point cloud:**
 
 ```bash
+./run_feedforward.sh --method lingbot_map --input test_recording.MOV --html
+
 python -m vibephysics.feedforward.export plotly \
   --predictions output/feedforward_output/lingbot_map_20260528_144552/predictions.npz \
   --output output/feedforward_output/lingbot_map_20260528_144552/pointcloud_plotly.html \
-  --max-points 200000 \
   --trajectory
 ```
 
-The HTML viewer samples dense points from `predictions.npz`, colors them from saved frames when available, draws the camera trajectory as red dots connected by a red line, and includes Play/Pause buttons (`1x` to `16x`) plus a frame slider. Install Plotly if needed:
+The HTML viewer renders all valid points saved in `predictions.npz`; point count is normally controlled by `random_points_per_frame` and `total_random_points` during reconstruction. For manual ad-hoc export, you can still pass `--max-points` to downsample a large existing prediction. It draws the camera trajectory as red dots connected by a red line and includes Play/Pause buttons (`1x` to `16x`) plus a frame slider. Install Plotly if needed:
 
 ```bash
 pip install plotly

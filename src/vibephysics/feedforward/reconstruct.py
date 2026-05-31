@@ -35,7 +35,7 @@ from .common import (
     resolve_confidence_threshold,
 )
 from .config import FEEDFORWARD_ENGINES
-from .schema import save_prediction, save_reconstruct_config
+from .schema import save_compact_prediction, save_prediction, save_reconstruct_config
 
 VIDEO_EXTENSIONS = {".mov", ".mp4", ".avi", ".mkv", ".webm", ".m4v", ".MOV", ".MP4", ".MKV", ".WEBM", ".M4V"}
 
@@ -501,6 +501,8 @@ def _export_blend_scene(
     *,
     min_confidence: float,
     point_scale: float,
+    point_random_points_per_frame: int | None,
+    point_total_random_points: int | None,
     animate: bool,
     animation_fps: int,
     video_fps: float | None,
@@ -521,6 +523,8 @@ def _export_blend_scene(
         prediction,
         min_confidence=min_confidence,
         point_scale=point_scale,
+        point_random_points_per_frame=point_random_points_per_frame,
+        point_total_random_points=point_total_random_points,
         global_indices=prediction.metadata.get("selected_indices"),
         animate=animate,
         animation_fps=animation_fps,
@@ -531,6 +535,38 @@ def _export_blend_scene(
     if verbose:
         print(f"Saved Blender scene to {blend_path}")
     return blend_path
+
+
+def _export_plotly_html(
+    predictions_path: Path,
+    output_path: Path,
+    save_html: str | Path,
+    *,
+    video_fps: float | None,
+) -> Path:
+    from argparse import Namespace
+
+    from .export import export_plotly
+
+    html_path = Path(save_html)
+    if not html_path.is_absolute():
+        html_path = output_path / html_path
+    export_plotly(
+        Namespace(
+            predictions=predictions_path,
+            output=html_path,
+            min_confidence=None,
+            video_fps=video_fps,
+            seed=0,
+            sample_rounds=8,
+            max_points=None,
+            frames_dir=None,
+            point_size=1.5,
+            opacity=0.85,
+            trajectory=True,
+        )
+    )
+    return html_path
 
 
 def _engine_available(engine: str) -> bool:
@@ -571,10 +607,15 @@ def reconstruct(
     image_path: str | Path,
     output_path: str | Path | None = None,
     engine: str = "lingbot_map",
-    save_blend: str | Path | None = "scene.blend",
-    min_confidence: float = 0.5,
+    save_blend: str | Path | None = None,
+    save_html: str | Path | None = None,
+    save_frames: bool = False,
+    min_confidence: float = 2.0,
     filter_edges: bool = True,
     point_scale: float = 0.01,
+    point_random_points_per_frame: int | None = 4000,
+    point_total_random_points: int | None = None,
+    compact: bool = False,
     animate: bool = True,
     animation_fps: int = 24,
     align_ground: bool = True,
@@ -744,11 +785,7 @@ def reconstruct(
             raise ValueError(f"Unknown engine: {engine}")
 
     export_min_confidence = min_confidence
-    if export_min_confidence == 0.5 and is_lingbot_map_engine(prediction.engine):
-        export_min_confidence = 1.5
-    elif export_min_confidence == 0.5 and is_r3_engine(prediction.engine):
-        export_min_confidence = 1.0
-    elif is_vggt_omega_engine(prediction.engine):
+    if is_vggt_omega_engine(prediction.engine):
         export_min_confidence = resolve_confidence_threshold(
             prediction,
             min_confidence,
@@ -776,8 +813,12 @@ def reconstruct(
 
         output_path = prepare_output_directory(image_path, output_path, engine=engine, verbose=verbose)
         prediction.metadata["source_image_paths"] = list(prediction.image_paths)
-        prediction.image_paths = persist_preprocessed_frames(output_path, prediction)
-        prediction.metadata["preprocessed_frames_dir"] = str((output_path / "frames").resolve())
+        save_compact = compact or point_random_points_per_frame is not None or point_total_random_points is not None
+        if save_frames:
+            prediction.image_paths = persist_preprocessed_frames(output_path, prediction)
+            prediction.metadata["preprocessed_frames_dir"] = str((output_path / "frames").resolve())
+        else:
+            prediction.metadata["preprocessed_frames_dir"] = None
         config = {
             "engine": engine,
             "source_path": str(source_path),
@@ -795,6 +836,11 @@ def reconstruct(
                 else None
             ),
             "point_scale": point_scale,
+            "point_random_points_per_frame": point_random_points_per_frame,
+            "point_total_random_points": point_total_random_points,
+            "compact": save_compact,
+            "save_html": save_html,
+            "save_frames": save_frames,
             "filter_edges": filter_edges,
             "mask_sky": mask_sky,
             "video_fps": source_video_fps,
@@ -804,7 +850,25 @@ def reconstruct(
             "prediction_metadata": prediction.metadata,
         }
         save_reconstruct_config(output_path / "reconstruct_config.json", config)
-        save_prediction(output_path / "predictions.npz", prediction)
+        if save_compact:
+            save_compact_prediction(
+                output_path / "predictions.npz",
+                prediction,
+                min_confidence=export_min_confidence,
+                random_points_per_frame=point_random_points_per_frame,
+                total_random_points=point_total_random_points,
+            )
+        else:
+            save_prediction(output_path / "predictions.npz", prediction)
+
+    if save_html is not None:
+        with profiler.stage("html_export"):
+            _export_plotly_html(
+                output_path / "predictions.npz",
+                output_path,
+                save_html,
+                video_fps=source_video_fps,
+            )
 
     if save_blend is not None:
         with profiler.stage("blend_export"):
@@ -814,6 +878,8 @@ def reconstruct(
                 save_blend,
                 min_confidence=export_min_confidence,
                 point_scale=point_scale,
+                point_random_points_per_frame=point_random_points_per_frame,
+                point_total_random_points=point_total_random_points,
                 animate=animate,
                 animation_fps=animation_fps,
                 video_fps=source_video_fps,
@@ -839,6 +905,12 @@ def reconstruct_from_config(
     max_frames: int | None = None,
     max_frames_mode: str | None = None,
     point_scale: float | None = None,
+    min_confidence: float | None = None,
+    random_points_per_frame: int | None = None,
+    total_random_points: int | None = None,
+    compact: bool | None = None,
+    html: bool | None = None,
+    frames: bool | None = None,
     map_anything_model: str | None = None,
     map_anything_install_all: bool = False,
 ) -> Path:
@@ -859,6 +931,36 @@ def reconstruct_from_config(
         if not isinstance(output, dict):
             raise ValueError("Config section 'output' must be a mapping")
         output["point_scale"] = float(point_scale)
+    if min_confidence is not None:
+        output = cfg.setdefault("output", {})
+        if not isinstance(output, dict):
+            raise ValueError("Config section 'output' must be a mapping")
+        output["min_confidence"] = float(min_confidence)
+    if random_points_per_frame is not None:
+        output = cfg.setdefault("output", {})
+        if not isinstance(output, dict):
+            raise ValueError("Config section 'output' must be a mapping")
+        output["random_points_per_frame"] = int(random_points_per_frame)
+    if total_random_points is not None:
+        output = cfg.setdefault("output", {})
+        if not isinstance(output, dict):
+            raise ValueError("Config section 'output' must be a mapping")
+        output["total_random_points"] = int(total_random_points)
+    if compact is not None:
+        output = cfg.setdefault("output", {})
+        if not isinstance(output, dict):
+            raise ValueError("Config section 'output' must be a mapping")
+        output["compact"] = bool(compact)
+    if html is not None:
+        output = cfg.setdefault("output", {})
+        if not isinstance(output, dict):
+            raise ValueError("Config section 'output' must be a mapping")
+        output["save_html"] = "visual.html" if html else None
+    if frames is not None:
+        output = cfg.setdefault("output", {})
+        if not isinstance(output, dict):
+            raise ValueError("Config section 'output' must be a mapping")
+        output["save_frames"] = bool(frames)
     if map_anything_model is not None:
         if cfg.get("engine") != "map_anything":
             raise ValueError("--model is only supported when engine is 'map_anything'")
@@ -944,6 +1046,42 @@ def main() -> None:
         help="Override output.point_scale as an absolute point radius in the saved .blend.",
     )
     parser.add_argument(
+        "--min_confidence",
+        "--min-confidence",
+        type=float,
+        default=None,
+        help="Override output.min_confidence for saved predictions and exports.",
+    )
+    parser.add_argument(
+        "--random_points_per_frame",
+        "--random-points-per-frame",
+        type=int,
+        default=None,
+        help="Randomly keep up to N points per frame after confidence filtering.",
+    )
+    parser.add_argument(
+        "--total_random_points",
+        "--total-random-points",
+        type=int,
+        default=None,
+        help="Randomly keep up to N total points after per-frame filtering.",
+    )
+    parser.add_argument(
+        "--compact",
+        action="store_true",
+        help="Save compact predictions.npz with colored points and camera poses only.",
+    )
+    parser.add_argument(
+        "--html",
+        action="store_true",
+        help="Save an interactive Plotly HTML point cloud next to predictions.npz.",
+    )
+    parser.add_argument(
+        "--frames",
+        action="store_true",
+        help="Save model-preprocessed RGB frames next to predictions.npz.",
+    )
+    parser.add_argument(
         "--mode",
         dest="preprocess_mode",
         default=None,
@@ -972,6 +1110,12 @@ def main() -> None:
             max_frames=args.max_frames,
             max_frames_mode=args.max_frames_mode,
             point_scale=args.point_scale,
+            min_confidence=args.min_confidence,
+            random_points_per_frame=args.random_points_per_frame,
+            total_random_points=args.total_random_points,
+            compact=args.compact if args.compact else None,
+            html=args.html if args.html else None,
+            frames=args.frames if args.frames else None,
             map_anything_model=args.map_anything_model,
             map_anything_install_all=args.map_anything_install_all,
         )

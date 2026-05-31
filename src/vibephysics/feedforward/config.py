@@ -75,6 +75,13 @@ def _optional_int(value: Any) -> int | None:
     return int(value)
 
 
+def _optional_positive_int(value: Any) -> int | None:
+    parsed = _optional_int(value)
+    if parsed is None or parsed <= 0:
+        return None
+    return parsed
+
+
 def _normalize_max_frames_mode(mode: Any) -> str:
     normalized = str(mode).strip().lower()
     if normalized not in MAX_FRAMES_MODES:
@@ -141,6 +148,12 @@ def parse_feedforward_config(cfg: dict[str, Any], config_path: Path | None = Non
     video = _nested(cfg, "video")
 
     max_frames, max_frames_mode = resolve_input_frame_limits(cfg, engine)
+    point_random_points_per_frame = _optional_positive_int(
+        output.get("random_points_per_frame", output.get("point_random_points_per_frame", 4000))
+    )
+    point_total_random_points = _optional_positive_int(
+        output.get("total_random_points", output.get("point_total_random_points"))
+    )
 
     return {
         "image_path": _require(cfg, "image_path", config_path),
@@ -149,10 +162,15 @@ def parse_feedforward_config(cfg: dict[str, Any], config_path: Path | None = Non
         "verbose": cfg.get("verbose", True),
         "video_fps": video.get("fps", DEFAULT_VIDEO_FPS),
         "video_quality": video.get("quality", 2),
-        "save_blend": output.get("save_blend", "scene.blend"),
-        "min_confidence": output.get("min_confidence", 0.5),
+        "save_blend": output.get("save_blend"),
+        "save_html": output.get("save_html"),
+        "save_frames": bool(output.get("save_frames", False)),
+        "min_confidence": output.get("min_confidence", 2.0),
         "filter_edges": output.get("filter_edges", True),
         "point_scale": output.get("point_scale", 0.01),
+        "point_random_points_per_frame": point_random_points_per_frame,
+        "point_total_random_points": point_total_random_points,
+        "compact": bool(output.get("compact", False)),
         "animate": output.get("animate", True),
         "animation_fps": output.get("animation_fps", 24),
         "align_ground": output.get("align_ground", True),

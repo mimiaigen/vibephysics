@@ -12,7 +12,7 @@ usage() {
     echo "  $0 --method lingbot_map --input test_recording.MOV --max_frames 50"
     echo "  $0 --method r3_long --input path/to/video.MOV"
     echo "  $0 --method da3 --input path/to/images"
-    echo "  $0 --method mapanything --input path/to/images"
+    echo "  $0 --method mapanything --input path/to/images --blend"
     echo ""
     echo "Direct engines:"
     echo "  lingbot_map, vggt_omega, vgg_ttt, r3, r3_long, map_anything"
@@ -24,7 +24,9 @@ usage() {
     echo ""
     echo "Common args are forwarded, including:"
     echo "  --input/--image_path, --output_path, --point_scale, --max_frames,"
-    echo "  --max_frames_mode, --mode, --config, --no-install, --install-all"
+    echo "  --max_frames_mode, --min_confidence, --random_points_per_frame, --total_random_points,"
+    echo "  --compact, --mode, --config,"
+    echo "  --blend, --html, --frames, --no-install, --install-all"
     exit 1
 }
 
@@ -34,6 +36,12 @@ INPUT=""
 MAP_MODEL=""
 MAP_MODEL_SET=0
 INSTALL_ALL=0
+BLEND=0
+HTML=0
+FRAMES=0
+RANDOM_POINTS_PER_FRAME="4000"
+TOTAL_RANDOM_POINTS=""
+COMPACT=0
 ARGS=()
 
 while [[ "$#" -gt 0 ]]; do
@@ -59,6 +67,26 @@ while [[ "$#" -gt 0 ]]; do
             ;;
         --install-all|--install_all|--map-anything-install-all|--map_anything_install_all)
             INSTALL_ALL=1
+            ;;
+        --blend)
+            BLEND=1
+            ;;
+        --html)
+            HTML=1
+            ;;
+        --frames)
+            FRAMES=1
+            ;;
+        --random_points_per_frame|--random-points-per-frame)
+            RANDOM_POINTS_PER_FRAME="$2"
+            shift
+            ;;
+        --total_random_points|--total-random-points)
+            TOTAL_RANDOM_POINTS="$2"
+            shift
+            ;;
+        --compact)
+            COMPACT=1
             ;;
         --no-install|--no_install)
             export VIBEPHYSICS_NO_AUTO_INSTALL=1
@@ -185,12 +213,12 @@ resolve_python() {
     return 1
 }
 
-make_r3_config() {
-    local model="$1"
-    local source_config="${CONFIG:-$SCRIPT_DIR/src/vibephysics/feedforward/configs/feedforward_r3.yaml}"
+make_runtime_config() {
+    local r3_model="$1"
+    local source_config="${CONFIG:-$DEFAULT_CONFIG}"
     local tmp_config
-    tmp_config="$(mktemp "${TMPDIR:-/tmp}/vibephysics_r3_${model}.XXXXXX.yaml")"
-    "$PYTHON" - "$source_config" "$tmp_config" "$model" <<'PY'
+    tmp_config="$(mktemp "${TMPDIR:-/tmp}/vibephysics_feedforward.XXXXXX.yaml")"
+    "$PYTHON" - "$source_config" "$tmp_config" "$r3_model" "$BLEND" "$HTML" "$FRAMES" "$RANDOM_POINTS_PER_FRAME" "$TOTAL_RANDOM_POINTS" "$COMPACT" <<'PY'
 import sys
 from pathlib import Path
 
@@ -198,16 +226,33 @@ import yaml
 
 src = Path(sys.argv[1])
 dst = Path(sys.argv[2])
-model = sys.argv[3]
+r3_model = sys.argv[3]
+blend = sys.argv[4] == "1"
+html = sys.argv[5] == "1"
+frames = sys.argv[6] == "1"
+random_points_per_frame = sys.argv[7]
+total_random_points = sys.argv[8]
+compact = sys.argv[9] == "1"
 
 cfg = yaml.safe_load(src.read_text())
 if not isinstance(cfg, dict):
     raise SystemExit(f"Config is not a YAML mapping: {src}")
-cfg["engine"] = "r3"
-section = cfg.setdefault("r3", {})
-if not isinstance(section, dict):
-    raise SystemExit("Config section 'r3' must be a mapping")
-section["model"] = model
+output = cfg.setdefault("output", {})
+if not isinstance(output, dict):
+    raise SystemExit("Config section 'output' must be a mapping")
+output["save_blend"] = "scene.blend" if blend else None
+output["save_html"] = "visual.html" if html else None
+output["save_frames"] = frames
+output["random_points_per_frame"] = None if random_points_per_frame.lower() in {"", "none", "null", "0"} else int(random_points_per_frame)
+output["total_random_points"] = None if total_random_points.lower() in {"", "none", "null", "0"} else int(total_random_points)
+output["compact"] = compact
+
+if r3_model:
+    cfg["engine"] = "r3"
+    section = cfg.setdefault("r3", {})
+    if not isinstance(section, dict):
+        raise SystemExit("Config section 'r3' must be a mapping")
+    section["model"] = r3_model
 dst.write_text(yaml.safe_dump(cfg, sort_keys=False))
 PY
     printf '%s' "$tmp_config"
@@ -278,11 +323,9 @@ export TORCHDYNAMO_DISABLE="${TORCHDYNAMO_DISABLE:-1}"
 [ -z "$CONFIG" ] && CONFIG="$DEFAULT_CONFIG"
 
 TMP_CONFIG=""
-if [ "$ENGINE" = "r3" ] && [ -n "$R3_MODEL" ]; then
-    TMP_CONFIG="$(make_r3_config "$R3_MODEL")"
-    trap 'rm -f "$TMP_CONFIG"' EXIT
-    CONFIG="$TMP_CONFIG"
-fi
+TMP_CONFIG="$(make_runtime_config "$R3_MODEL")"
+trap 'rm -f "$TMP_CONFIG"' EXIT
+CONFIG="$TMP_CONFIG"
 
 if ! "$PYTHON" - "$ENGINE" "$CONFIG" "$MAP_MODEL" "$INSTALL_ALL" <<'PY'
 import sys

@@ -396,7 +396,7 @@ def confidence_threshold(conf: np.ndarray, percentile: float) -> float:
 
 def resolve_confidence_threshold(
     predictions,
-    min_confidence: float = 0.5,
+    min_confidence: float = 2.0,
     *,
     conf_percentile: float | None = None,
 ) -> float:
@@ -586,12 +586,21 @@ def convert_prediction_to_blender_zup(prediction) -> bool:
 
 def collect_colored_point_cloud(
     predictions,
-    min_confidence: float = 0.5,
+    min_confidence: float = 2.0,
     *,
     to_blender: bool = True,
     with_frame_ids: bool = False,
+    random_points_per_frame: int | None = None,
+    total_random_points: int | None = None,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray | None]:
-    """Return filtered (N,3) positions, (N,3) uint8 RGB, (N,) conf, optional frame ids."""
+    """
+    Return filtered positions/RGB/conf.
+
+    Filtering order is intentional:
+      1. drop points below min_confidence within each frame,
+      2. if random_points_per_frame is set, randomly sample within each frame,
+      3. if total_random_points is set, randomly sample globally.
+    """
     from .schema import FeedforwardPrediction
 
     if isinstance(predictions, FeedforwardPrediction):
@@ -621,22 +630,47 @@ def collect_colored_point_cloud(
         if not np.any(valid_mask):
             continue
         pts = frame_points[valid_mask]
+        rgb = np.clip(frame_colors[valid_mask], 0.0, 1.0)
+        frame_conf_valid = frame_conf[valid_mask].astype(np.float32)
+
+        if random_points_per_frame is not None:
+            random_frame = int(random_points_per_frame)
+            if random_frame <= 0:
+                raise ValueError("random_points_per_frame must be positive when provided")
+            if random_frame < len(frame_conf_valid):
+                rng = np.random.default_rng(frame_idx)
+                frame_idx_keep = rng.choice(len(frame_conf_valid), size=random_frame, replace=False)
+                pts = pts[frame_idx_keep]
+                rgb = rgb[frame_idx_keep]
+                frame_conf_valid = frame_conf_valid[frame_idx_keep]
+
         if to_blender:
             pts = opencv_to_blender_points(pts)
         point_chunks.append(pts.astype(np.float32))
-        rgb = np.clip(frame_colors[valid_mask], 0.0, 1.0)
         color_chunks.append((rgb * 255.0).astype(np.uint8))
-        conf_chunks.append(frame_conf[valid_mask].astype(np.float32))
+        conf_chunks.append(frame_conf_valid)
         if with_frame_ids:
-            frame_id_chunks.append(np.full(int(valid_mask.sum()), frame_idx, dtype=np.int32))
+            frame_id_chunks.append(np.full(len(frame_conf_valid), frame_idx, dtype=np.int32))
 
     if not point_chunks:
         raise ValueError("No points passed confidence threshold.")
 
+    points_out = np.concatenate(point_chunks, axis=0)
+    colors_out = np.concatenate(color_chunks, axis=0)
+    conf_out = np.concatenate(conf_chunks, axis=0)
     frame_ids = np.concatenate(frame_id_chunks, axis=0) if with_frame_ids else None
-    return (
-        np.concatenate(point_chunks, axis=0),
-        np.concatenate(color_chunks, axis=0),
-        np.concatenate(conf_chunks, axis=0),
-        frame_ids,
-    )
+
+    if total_random_points is not None:
+        total_random = int(total_random_points)
+        if total_random <= 0:
+            raise ValueError("total_random_points must be positive when provided")
+        if total_random < len(conf_out):
+            rng = np.random.default_rng(0)
+            idx = rng.choice(len(conf_out), size=total_random, replace=False)
+            points_out = points_out[idx]
+            colors_out = colors_out[idx]
+            conf_out = conf_out[idx]
+            if frame_ids is not None:
+                frame_ids = frame_ids[idx]
+
+    return points_out, colors_out, conf_out, frame_ids

@@ -120,7 +120,7 @@ def add_point_cloud_geo_nodes(
     mat,
     scale: float = DEFAULT_POINT_RADIUS,
     *,
-    min_confidence: float = 0.5,
+    min_confidence: float = 2.0,
     animate_frames: bool = False,
     recon_time_scale: float = 1.0,
 ) -> None:
@@ -220,7 +220,7 @@ def create_point_cloud_object(
     confs: np.ndarray,
     collection=None,
     scale: float = DEFAULT_POINT_RADIUS,
-    min_confidence: float = 0.5,
+    min_confidence: float = 2.0,
     frame_ids: np.ndarray | None = None,
     recon_time_scale: float = 1.0,
 ) -> bpy.types.Object:
@@ -583,8 +583,10 @@ def create_camera_trajectory(
 def import_point_cloud(
     predictions: dict,
     collection=None,
-    min_confidence: float = 0.5,
+    min_confidence: float = 2.0,
     point_scale: float = DEFAULT_POINT_RADIUS,
+    random_points_per_frame: int | None = None,
+    total_random_points: int | None = None,
     animate: bool = False,
     timing: _AnimationTiming | None = None,
 ) -> bpy.types.Object | None:
@@ -596,6 +598,8 @@ def import_point_cloud(
             min_confidence=min_confidence,
             to_blender=True,
             with_frame_ids=animate,
+            random_points_per_frame=random_points_per_frame,
+            total_random_points=total_random_points,
         )
     except ValueError:
         print("[vibephysics] No points passed confidence threshold.")
@@ -849,8 +853,10 @@ def _configure_viewports_material_preview() -> None:
 def load_reconstruction(
     predictions: dict | FeedforwardPrediction,
     collection_name: str | None = None,
-    min_confidence: float = 0.5,
+    min_confidence: float = 2.0,
     point_scale: float = DEFAULT_POINT_RADIUS,
+    point_random_points_per_frame: int | None = None,
+    point_total_random_points: int | None = None,
     import_cameras: bool = True,
     import_trajectory: bool = True,
     import_points: bool = True,
@@ -868,9 +874,7 @@ def load_reconstruction(
     else:
         engine = predictions.get("engine", "feedforward")
 
-    if min_confidence == 0.5 and is_lingbot_map_engine(engine):
-        min_confidence = 1.5
-    elif is_vggt_omega_engine(engine):
+    if is_vggt_omega_engine(engine):
         min_confidence = resolve_confidence_threshold(
             predictions,
             min_confidence,
@@ -942,6 +946,8 @@ def load_reconstruction(
             collection=col,
             min_confidence=min_confidence,
             point_scale=point_scale,
+            random_points_per_frame=point_random_points_per_frame,
+            total_random_points=point_total_random_points,
             animate=animate,
             timing=timing,
         )

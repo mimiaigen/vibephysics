@@ -43,7 +43,7 @@ def _blend_load_settings(predictions_path: Path, args: argparse.Namespace) -> di
 
     min_confidence = getattr(args, "min_confidence", None)
     if min_confidence is None:
-        min_confidence = defaults.get("min_confidence", 0.5)
+        min_confidence = defaults.get("min_confidence", 2.0)
 
     point_scale = args.point_scale
     if point_scale is None:
@@ -201,6 +201,57 @@ def export_compare_blend(args: argparse.Namespace) -> None:
     )
 
 
+def _select_plotly_compact_indices(
+    selected_idx: "np.ndarray",
+    conf_all: "np.ndarray",
+    max_points: int | None,
+    rng: "np.random.Generator",
+    frame_ids: "np.ndarray | None" = None,
+) -> "np.ndarray":
+    """Downsample compact points without biasing toward the first stored frames."""
+    import numpy as np
+
+    if max_points is None:
+        return selected_idx
+    if len(selected_idx) <= max_points:
+        return selected_idx
+
+    if frame_ids is None:
+        return rng.choice(selected_idx, size=max_points, replace=False)
+
+    selected_frame_ids = frame_ids[selected_idx]
+    unique_frames = np.unique(selected_frame_ids)
+    if len(unique_frames) == 0:
+        return selected_idx[:max_points]
+
+    per_frame = max(max_points // len(unique_frames), 1)
+    chosen_chunks: list[np.ndarray] = []
+    chosen_mask = np.zeros(len(selected_idx), dtype=bool)
+
+    for frame in unique_frames:
+        local = np.flatnonzero(selected_frame_ids == frame)
+        if len(local) <= per_frame:
+            keep_local = local
+        else:
+            order = np.argsort(conf_all[selected_idx[local]])[::-1]
+            keep_local = local[order[:per_frame]]
+        chosen_mask[keep_local] = True
+        chosen_chunks.append(selected_idx[keep_local])
+
+    chosen = np.concatenate(chosen_chunks) if chosen_chunks else selected_idx[:0]
+    if len(chosen) < max_points:
+        remaining = selected_idx[~chosen_mask]
+        if len(remaining):
+            fill_count = min(max_points - len(chosen), len(remaining))
+            fill_order = np.argsort(conf_all[remaining])[::-1][:fill_count]
+            chosen = np.concatenate([chosen, remaining[fill_order]])
+    elif len(chosen) > max_points:
+        order = np.argsort(conf_all[chosen])[::-1][:max_points]
+        chosen = chosen[order]
+
+    return chosen
+
+
 def export_plotly(args: argparse.Namespace) -> None:
     """Export a sampled interactive Plotly point cloud from predictions.npz."""
     import numpy as np
@@ -210,65 +261,96 @@ def export_plotly(args: argparse.Namespace) -> None:
     defaults = _load_output_defaults(args.predictions)
     min_confidence = args.min_confidence
     if min_confidence is None:
-        min_confidence = float(defaults.get("min_confidence", 0.5))
+        min_confidence = float(defaults.get("min_confidence", 2.0))
     video_fps = args.video_fps
     if video_fps is None:
         video_fps = float(defaults.get("video_fps") or 2.0)
 
-    rng = np.random.default_rng(args.seed)
     with np.load(args.predictions, allow_pickle=True) as data:
-        world_points = data["world_points"]
-        confidence = data["conf"]
         extrinsic = data["extrinsic"]
         metadata = data["metadata"][0] if "metadata" in data.files and len(data["metadata"]) else {}
+        frames_dir = args.frames_dir
+        if frames_dir is None:
+            frames_dir = Path(metadata.get("preprocessed_frames_dir") or (args.predictions.parent / "frames"))
+        else:
+            frames_dir = Path(frames_dir)
+        if not frames_dir.is_absolute():
+            frames_dir = args.predictions.parent / frames_dir
+        frame_paths = sorted(frames_dir.glob("frame_*.jpg"))
+        is_compact = "points" in data.files and "colors" in data.files
+        if is_compact:
+            points_all = data["points"].astype(np.float32)
+            conf_all = data["conf"].reshape(-1).astype(np.float32)
+            mask = (conf_all >= min_confidence) & np.isfinite(conf_all) & np.isfinite(points_all).all(axis=1)
+            if not np.any(mask):
+                raise ValueError(f"No finite compact points found at confidence >= {min_confidence:g}")
+            selected_idx = np.flatnonzero(mask)
+            frame_ids = data["frame_ids"] if "frame_ids" in data.files else None
+            selected_idx = _select_plotly_compact_indices(
+                selected_idx,
+                conf_all,
+                args.max_points,
+                np.random.default_rng(args.seed),
+                frame_ids=frame_ids,
+            )
+            points = points_all[selected_idx]
+            conf_values = conf_all[selected_idx]
+            colors = data["colors"][selected_idx].astype(np.uint8)
+            marker_color = [f"rgb({r},{g},{b})" for r, g, b in colors]
+            colorbar = None
+            colorscale = None
+        else:
+            world_points = data["world_points"]
+            confidence = data["conf"]
+            num_frames, height, width = confidence.shape
+            flat_points = world_points.reshape(-1, 3)
+            flat_conf = confidence.reshape(-1)
+            total_points = flat_conf.size
 
-    num_frames, height, width = confidence.shape
-    flat_points = world_points.reshape(-1, 3)
-    flat_conf = confidence.reshape(-1)
-    total_points = flat_conf.size
+            if args.max_points is None:
+                mask = (flat_conf >= min_confidence) & np.isfinite(flat_conf) & np.isfinite(flat_points).all(axis=1)
+                if not np.any(mask):
+                    raise ValueError(f"No finite points found at confidence >= {min_confidence:g}")
+                sampled_idx = np.flatnonzero(mask)
+            else:
+                rng = np.random.default_rng(args.seed)
+                sampled_chunks: list[np.ndarray] = []
+                chunk_size = min(2_000_000, total_points)
+                for _ in range(args.sample_rounds):
+                    idx = rng.integers(0, total_points, size=chunk_size, endpoint=False)
+                    pts = flat_points[idx]
+                    conf = flat_conf[idx]
+                    mask = (conf >= min_confidence) & np.isfinite(conf) & np.isfinite(pts).all(axis=1)
+                    if not np.any(mask):
+                        continue
+                    sampled_chunks.append(idx[mask])
+                    if sum(len(chunk) for chunk in sampled_chunks) >= args.max_points:
+                        break
+                if not sampled_chunks:
+                    raise ValueError(f"No finite points found at confidence >= {min_confidence:g}")
+                sampled_idx = np.concatenate(sampled_chunks)[: args.max_points]
+            points = flat_points[sampled_idx].astype(np.float32)
+            conf_values = flat_conf[sampled_idx].astype(np.float32)
 
-    sampled_chunks: list[np.ndarray] = []
-    chunk_size = min(2_000_000, total_points)
-    for _ in range(args.sample_rounds):
-        idx = rng.integers(0, total_points, size=chunk_size, endpoint=False)
-        pts = flat_points[idx]
-        conf = flat_conf[idx]
-        mask = (conf >= min_confidence) & np.isfinite(conf) & np.isfinite(pts).all(axis=1)
-        if not np.any(mask):
-            continue
-        sampled_chunks.append(idx[mask])
-        if sum(len(chunk) for chunk in sampled_chunks) >= args.max_points:
-            break
-    if not sampled_chunks:
-        raise ValueError(f"No finite points found at confidence >= {min_confidence:g}")
-
-    sampled_idx = np.concatenate(sampled_chunks)[: args.max_points]
-    points = flat_points[sampled_idx].astype(np.float32)
-    conf_values = flat_conf[sampled_idx].astype(np.float32)
-
-    frames_dir = args.frames_dir
-    if frames_dir is None:
-        frames_dir = Path(metadata.get("preprocessed_frames_dir") or (args.predictions.parent / "frames"))
-    frame_paths = sorted(frames_dir.glob("frame_*.jpg"))
-    marker_color = conf_values
-    colorbar = {"title": "confidence"}
-    colorscale = "Viridis"
-    if len(frame_paths) >= num_frames:
-        frame_idx = sampled_idx // (height * width)
-        rem = sampled_idx % (height * width)
-        yy = rem // width
-        xx = rem % width
-        rgb_values = np.empty((len(sampled_idx), 3), dtype=np.uint8)
-        for frame in np.unique(frame_idx):
-            image = Image.open(frame_paths[int(frame)]).convert("RGB")
-            if image.size != (width, height):
-                image = image.resize((width, height), Image.Resampling.BICUBIC)
-            rgb = np.asarray(image, dtype=np.uint8)
-            selected = frame_idx == frame
-            rgb_values[selected] = rgb[yy[selected], xx[selected]]
-        marker_color = [f"rgb({r},{g},{b})" for r, g, b in rgb_values]
-        colorbar = None
-        colorscale = None
+            marker_color = conf_values
+            colorbar = {"title": "confidence"}
+            colorscale = "Viridis"
+            if len(frame_paths) >= num_frames:
+                frame_idx = sampled_idx // (height * width)
+                rem = sampled_idx % (height * width)
+                yy = rem // width
+                xx = rem % width
+                rgb_values = np.empty((len(sampled_idx), 3), dtype=np.uint8)
+                for frame in np.unique(frame_idx):
+                    image = Image.open(frame_paths[int(frame)]).convert("RGB")
+                    if image.size != (width, height):
+                        image = image.resize((width, height), Image.Resampling.BICUBIC)
+                    rgb = np.asarray(image, dtype=np.uint8)
+                    selected = frame_idx == frame
+                    rgb_values[selected] = rgb[yy[selected], xx[selected]]
+                marker_color = [f"rgb({r},{g},{b})" for r, g, b in rgb_values]
+                colorbar = None
+                colorscale = None
 
     figure_data = [
         go.Scatter3d(
@@ -343,8 +425,9 @@ def export_plotly(args: argparse.Namespace) -> None:
     layout = {
         "title": f"Point cloud: {len(points):,} sampled points (conf >= {min_confidence:g})",
         "scene": {"xaxis_title": "X", "yaxis_title": "Y", "zaxis_title": "Z", "aspectmode": "data"},
-        "margin": {"l": 0, "r": 0, "b": 0, "t": 45},
+        "margin": {"l": 0, "r": 0, "b": 64, "t": 56},
         "template": "plotly_dark",
+        "hoverlabel": {"align": "left", "bgcolor": "rgba(20,20,20,0.92)"},
     }
     fig.update_layout(**layout)
 
@@ -397,15 +480,18 @@ def _plotly_trajectory_controls_script(
     'position:absolute',
     'z-index:10',
     'left:16px',
-    'top:12px',
+    'bottom:16px',
     'display:flex',
     'gap:8px',
     'align-items:center',
+    'flex-wrap:wrap',
+    'max-width:calc(100% - 360px)',
     'background:rgba(0,0,0,0.65)',
     'color:white',
     'padding:8px 10px',
     'border-radius:6px',
-    'font:13px sans-serif'
+    'font:13px sans-serif',
+    'box-shadow:0 2px 12px rgba(0,0,0,0.35)'
   ].join(';');
   controls.innerHTML = `
     <button id="vp-play-pause" type="button">Play</button>
@@ -430,18 +516,20 @@ def _plotly_trajectory_controls_script(
   framePanel.style.cssText = [
     'position:absolute',
     'z-index:9',
-    'left:16px',
-    'top:62px',
-    'width:320px',
+    'right:16px',
+    'bottom:16px',
+    'width:min(320px, 32vw)',
     'background:rgba(0,0,0,0.65)',
     'color:white',
     'padding:8px',
     'border-radius:6px',
-    'font:13px sans-serif'
+    'font:13px sans-serif',
+    'box-shadow:0 2px 12px rgba(0,0,0,0.35)',
+    'display:none'
   ].join(';');
   framePanel.innerHTML = `
     <div style="margin-bottom:6px">Source frame</div>
-    <img id="vp-frame-image" alt="source frame" style="display:block;width:100%;height:auto;border:1px solid rgba(255,255,255,0.35);border-radius:4px;background:#111">
+    <img id="vp-frame-image" alt="source frame" style="display:block;width:100%;max-height:38vh;object-fit:contain;border:1px solid rgba(255,255,255,0.35);border-radius:4px;background:#111">
   `;
   plot.parentElement.appendChild(framePanel);
 
@@ -450,6 +538,9 @@ def _plotly_trajectory_controls_script(
   const frameSlider = controls.querySelector('#vp-frame');
   const frameLabel = controls.querySelector('#vp-frame-label');
   const frameImage = framePanel.querySelector('#vp-frame-image');
+  if (frameUrls.length) {{
+    framePanel.style.display = 'block';
+  }}
 
   function speedMultiplier() {{
     return Math.max(Number(speedSelect.value || 1), 1);
@@ -626,7 +717,12 @@ def main() -> None:
     plotly.add_argument("--predictions", type=Path, required=True, help="Path to predictions.npz")
     plotly.add_argument("--output", type=Path, required=True, help="Output .html path")
     plotly.add_argument("--min_confidence", "--min-confidence", type=float, default=None)
-    plotly.add_argument("--max-points", type=int, default=200_000, help="Maximum sampled points to embed")
+    plotly.add_argument(
+        "--max-points",
+        type=int,
+        default=None,
+        help="Optional manual cap for ad-hoc HTML export; default embeds all saved/valid points",
+    )
     plotly.add_argument("--point-size", type=float, default=1.2)
     plotly.add_argument("--opacity", type=float, default=0.85)
     plotly.add_argument("--seed", type=int, default=42)

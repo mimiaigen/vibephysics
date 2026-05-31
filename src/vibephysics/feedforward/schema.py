@@ -78,6 +78,53 @@ def save_prediction(path: Path, prediction: FeedforwardPrediction) -> None:
     np.savez_compressed(path, **payload)
 
 
+def save_compact_prediction(
+    path: Path,
+    prediction: FeedforwardPrediction,
+    *,
+    min_confidence: float = 2.0,
+    random_points_per_frame: int | None = None,
+    total_random_points: int | None = None,
+) -> None:
+    """Save filtered colored 3D points plus camera pose/trajectory data."""
+    from .common import collect_colored_point_cloud
+
+    points, colors, conf, frame_ids = collect_colored_point_cloud(
+        prediction,
+        min_confidence=min_confidence,
+        to_blender=True,
+        with_frame_ids=True,
+        random_points_per_frame=random_points_per_frame,
+        total_random_points=total_random_points,
+    )
+    trajectory = prediction.extrinsic[:, :3, 3].astype(np.float32)
+    metadata = dict(prediction.metadata)
+    metadata.update(
+        {
+            "compact": True,
+            "compact_schema": "colored_points_pose_v1",
+            "compact_min_confidence": float(min_confidence),
+            "compact_random_points_per_frame": None if random_points_per_frame is None else int(random_points_per_frame),
+            "compact_total_random_points": None if total_random_points is None else int(total_random_points),
+            "compact_point_count": int(points.shape[0]),
+            "color_format": "uint8_rgb",
+        }
+    )
+    payload = {
+        "points": points.astype(np.float32),
+        "colors": colors.astype(np.uint8),
+        "conf": conf.astype(np.float32),
+        "frame_ids": frame_ids.astype(np.int32),
+        "extrinsic": prediction.extrinsic.astype(np.float32),
+        "intrinsic": prediction.intrinsic.astype(np.float32),
+        "trajectory": trajectory,
+        "image_paths": np.array(prediction.image_paths, dtype=object),
+        "engine": prediction.engine,
+        "metadata": np.array([metadata], dtype=object),
+    }
+    np.savez_compressed(path, **payload)
+
+
 def load_prediction(path: Path | str) -> FeedforwardPrediction:
     path = Path(path)
     data = np.load(path, allow_pickle=True)

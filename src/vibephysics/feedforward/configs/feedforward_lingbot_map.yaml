@@ -12,10 +12,15 @@ video:
   max_frames_mode: first   # first = first N consecutive; spread = evenly across input
 
 output:
-  save_blend: scene.blend
-  min_confidence: 1.5   # official demo.py --conf_threshold
+  save_blend: null
+  save_html: null      # set to visual.html or use --html to save an interactive Plotly view
+  save_frames: false   # true = save model-preprocessed RGB frames next to predictions.npz
+  min_confidence: 2.0   # confidence threshold for saved points and exports
   filter_edges: true
   point_scale: 0.01
+  random_points_per_frame: 4000 # random per-frame sample after confidence filtering; null/0 = dense
+  total_random_points: null # optional global random sample after per-frame filtering
+  compact: false      # true = force compact colored points + camera poses only
   animate: true
   animation_fps: 24
   align_ground: true

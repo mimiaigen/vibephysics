@@ -10,11 +10,12 @@
 
 ## Changelog
 
-- **2026-05-31 — v0.3.5** — Published on PyPI. Feedforward runs print a per-stage wall-time and peak-RSS summary; point export uses `min_confidence` (default `2.0`), per-frame `random_points_per_frame` (default `4000`), and optional `total_random_points`; Plotly HTML uses balanced frame sampling from compact NPZ; `run_feedforward.sh` warns when R3/R3-Long is likely to be killed on Mac/MPS.
-- **2026-05-30** — Added [R3 / R3-Long](https://github.com/KevinXu02/R3) feedforward support, unified all feedforward methods under `run_feedforward.sh`, consolidated to one `feedforward.yaml`, and made compact random-sampled `predictions.npz` the default with opt-in `--blend`, `--html`, and `--frames` exports.
-- **2026-05-29** — Added [Map-Anything](https://github.com/facebookresearch/map-anything) and [VGG-TTT](https://github.com/nv-dvl/vgg-ttt) feedforward adapters behind the shared `FeedforwardPrediction` output.
-- **2026-05-28** — Added [VGGT-Omega](https://github.com/facebookresearch/vggt-omega), improved [LingBot-Map](https://github.com/robbyant/lingbot-map) long-video handling, and standardized feedforward outputs to Blender Z-up `predictions.npz`.
-- **2026-05-27** — Added [GLOMAP](https://github.com/colmap/glomap) / [COLMAP](https://github.com/colmap/colmap) sparse mapping visualization and Plotly HTML point-cloud export.
+- **Unreleased** — [DVLT](https://github.com/nv-tlabs/dvlt) feedforward (`--method dvlt`); `.vibephysics/feedforward/` weight caches; Plotly trajectory aligned with saved poses; feedforward `SKILL.md` for agents.
+- **v0.3.5** (2026-05-31) — PyPI; feedforward stage timing/RSS; compact NPZ defaults (`min_confidence`, per-frame/global sampling); Plotly frame-balanced sampling; R3 Mac/MPS kill warning.
+- **2026-05-30** — [R3](https://github.com/KevinXu02/R3) / R3-Long; unified `run_feedforward.sh` + `feedforward.yaml`; opt-in `--blend` / `--html` / `--frames`.
+- **2026-05-29** — [Map-Anything](https://github.com/facebookresearch/map-anything), [VGG-TTT](https://github.com/nv-dvl/vgg-ttt).
+- **2026-05-28** — [VGGT-Omega](https://github.com/facebookresearch/vggt-omega); LingBot-Map long video; Blender Z-up `predictions.npz`.
+- **2026-05-27** — GLOMAP/COLMAP mapping viz; Plotly HTML export.
 
 ---
 
@@ -97,7 +98,7 @@ Output: `sparse/0/` plus `visualize.blend` (unless `--no-blend`).
 
 ![Feedforward Comparison](assets/feedforward_comparison.gif)
 
-Feedforward 3D reconstruction from video or images via LingBot-Map, VGGT-Omega, VGG-TTT, Map-Anything, and R3/R3-Long. By default, `predictions.npz` stores a compact colored point cloud plus camera poses; dense depth/world-point tensors are opt-in.
+Feedforward 3D reconstruction from video or images via LingBot-Map, VGGT-Omega, VGG-TTT, Map-Anything, R3/R3-Long, and DVLT. By default, `predictions.npz` stores a compact colored point cloud plus camera poses; dense depth/world-point tensors are opt-in.
 
 <details>
 <summary>Feedforward setup & usage</summary>
@@ -184,7 +185,7 @@ Configs: `src/vibephysics/feedforward/configs/`
 **Config (`feedforward.yaml`):** one file for all engines. `run_feedforward.sh` sets `engine` from `--method` and patches `output.save_blend`, `output.save_html`, `output.save_frames`, `output.random_points_per_frame`, `output.total_random_points`, and `output.compact` from CLI flags. For R3, `--method r3` / `r3_long` also sets `r3.model`.
 
 ```yaml
-engine: lingbot_map       # lingbot_map | vggt_omega | vgg_ttt | map_anything | r3
+engine: lingbot_map       # lingbot_map | vggt_omega | vgg_ttt | map_anything | r3 | dvlt
 image_path: path/to/images
 output_path: null
 verbose: true
@@ -263,7 +264,7 @@ r3:
 
 **Input:** folder, single image, or video (`.mov`/`.mp4`). Videos extract frames at `video.fps` into `output/<video_stem>/` and reuse cached frames on reruns.
 
-`run_feedforward.sh` routes direct engines (`lingbot_map`, `vggt_omega`, `vgg_ttt`, `r3`, `r3_long`) and Map-Anything factory model keys (`da3`, `mapanything`, `vggt`, `mast3r`, `pi3`, etc.) through one CLI. Unknown method names are treated as Map-Anything model keys so new factory methods can be tried without changing the script.
+`run_feedforward.sh` routes direct engines (`lingbot_map`, `vggt_omega`, `vgg_ttt`, `r3`, `r3_long`, `dvlt`) and Map-Anything factory model keys (`da3`, `mapanything`, `vggt`, `mast3r`, `pi3`, etc.) through one CLI. Unknown method names are treated as Map-Anything model keys so new factory methods can be tried without changing the script.
 
 **Saved output defaults:** `predictions.npz` is compact by default because `--random_points_per_frame` defaults to `4000`, with `min_confidence: 2.0` filtering low-confidence points first. It stores `points`, `colors`, `conf`, `frame_ids`, camera `extrinsic`/`intrinsic`, `trajectory`, `engine`, and `metadata`. Filtering order is: first apply `--min_confidence`, then randomly keep up to `--random_points_per_frame K` points within each frame, then apply `--total_random_points K` globally if provided. Set `--random_points_per_frame 0` to disable per-frame random sampling and save dense legacy arrays (`depth`, `conf`, `world_points`, etc.) unless `--compact` or `--total_random_points` is set. Pass `--blend` to additionally export `scene.blend`, `--html` to export `visual.html`, and `--frames` to save the model-preprocessed RGB frames folder.
 

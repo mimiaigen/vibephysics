@@ -151,50 +151,84 @@ Configs: `src/vibephysics/feedforward/configs/`
 
 `feedforward.yaml` is the single feedforward config. It includes sections for all engines; `run_feedforward.sh --method ...` selects the active engine and patches runtime output flags.
 
-**Config (`feedforward.yaml`):**
+**Config (`feedforward.yaml`):** one file for all engines. `run_feedforward.sh` sets `engine` from `--method` and patches `output.save_blend`, `output.save_html`, `output.save_frames`, `output.random_points_per_frame`, `output.total_random_points`, and `output.compact` from CLI flags. For R3, `--method r3` / `r3_long` also sets `r3.model`.
+
 ```yaml
 engine: lingbot_map       # lingbot_map | vggt_omega | vgg_ttt | map_anything | r3
 image_path: path/to/images
 output_path: null
+verbose: true
 
 video:
-  fps: 2
-  max_frames: null
+  fps: 2                   # extraction rate; cached in .vibephysics_extract_fps
+  quality: 2
+  max_frames: null         # null = all frames; N limits count
   max_frames_mode: first   # first | spread
 
 output:
-  save_blend: null             # set by ./run_feedforward.sh --blend when needed
-  save_html: null              # set by ./run_feedforward.sh --html when needed
-  save_frames: false           # set by ./run_feedforward.sh --frames when needed
+  save_blend: null         # scene.blend path, or set by --blend
+  save_html: null          # e.g. visual.html, or set by --html
+  save_frames: false       # true = save model-preprocessed RGB frames
   min_confidence: 2.0
-  point_scale: 0.01       # absolute point radius in Blender units
-  random_points_per_frame: 4000  # compact saved predictions randomly keep up to this many points per frame
-  total_random_points: null      # optional global random sample after per-frame filtering
-  compact: false          # true = compact even if random_points_per_frame is disabled
-  align_ground: true
+  filter_edges: true
+  point_scale: 0.01
+  random_points_per_frame: 4000  # per-frame random sample after confidence filter; null/0 = dense
+  total_random_points: null      # optional global random cap after per-frame sampling
+  compact: false           # true = force compact points + poses only
   animate: true
   animation_fps: 24
+  align_ground: true
 
 lingbot_map:
   model: lingbot-map
+  checkpoint: null
   image_size: 518
-  mode: auto
+  mode: auto               # auto | streaming | batch
+  keyframe_interval: null
+  max_streaming_keyframes: null
   window_size: 64
   overlap_size: 16
+  overlap_keyframes: null
+  use_sdpa: false
+  mask_sky: false
 
 vggt_omega:
+  checkpoint: null
   checkpoint_name: vggt-omega-1b-512
   resolution: 512
+  preprocess_mode: balanced
+  enable_alignment: false
   conf_percentile: 50.0
+  depth_edge_rtol: 0.03
+
+vgg_ttt:
+  model_id: nvidia/vgg-ttt
+  preprocess_mode: crop
+  image_size: 518
+  conf_percentile: 50.0
+  depth_edge_rtol: 0.03
+  num_ttt_steps: 1
+  memory_efficient_inference: false
 
 map_anything:
-  model: vggt              # model_factory key, see table below
-  model_kwargs: null       # null = VibePhysics defaults for selected model
+  model: vggt              # model_factory key; see table below
+  model_kwargs: null
   install_all: false
   resolution: 518
-  norm_type: identity
+  norm_type: identity      # vggt/pi3/moge=identity; mapanything/da3=dinov2; dust3r=dust3r
   patch_size: 14
-  resize_mode: fixed_mapping
+  resize_mode: fixed_mapping # fixed_mapping | longest_side | square | fixed_size
+  size: null               # required for longest_side / square / fixed_size
+
+r3:
+  checkpoint: null         # null = auto-download KevinXu02/R3
+  model: r3_long           # r3 | r3_long (--method r3_long sets this)
+  config_name: r3-large
+  mode: local              # test | local | long | strided
+  image_size: 504
+  kv_backend: dense        # dense | paged (paged needs flashinfer)
+  rel_pose_method: greedy  # greedy | pgo
+  metric_model_name: depth-anything/DA3METRIC-LARGE
 ```
 
 **Input:** folder, single image, or video (`.mov`/`.mp4`). Videos extract frames at `video.fps` into `output/<video_stem>/` and reuse cached frames on reruns.

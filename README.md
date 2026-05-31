@@ -107,68 +107,70 @@ Install backends (Python 3.11 + `bpy`). Pre-install from GitHub (see Installatio
 ```bash
 pip install vibephysics bpy
 
-# compact (default): ~4k pts/frame — balanced size/speed (script default if omitted)
+# compact ~4k/frame + preprocessed RGB frames folder
 ./run_feedforward.sh \
   --method lingbot_map \
   --input test_recording.MOV \
-  --random_points_per_frame 4000
+  --random_points_per_frame 4000 \
+  --frames
 
-# compact, lighter: ~1k pts/frame — faster runs / quick checks
+# light ~1k/frame + browser viewer
 ./run_feedforward.sh \
   --method lingbot_map \
   --input test_recording.MOV \
-  --random_points_per_frame 1000
+  --random_points_per_frame 1000 \
+  --html
 
-# non-compact: 0 disables sampling → full per-pixel depth/conf/world_points (large npz)
+# non-compact: 0 = full depth/conf/world_points + stricter confidence
 ./run_feedforward.sh \
   --method lingbot_map \
   --input test_recording.MOV \
-  --random_points_per_frame 0
+  --random_points_per_frame 0 \
+  --min_confidence 1.5
 
-# compact, denser: 20k pts/frame — richer cloud, still no depth arrays (--compact optional)
+# dense compact 20k/frame + Blender export
 ./run_feedforward.sh \
   --method lingbot_map \
   --input test_recording.MOV \
   --random_points_per_frame 20000 \
-  --compact
+  --compact \
+  --blend \
+  --point_scale 0.02
 
-# --blend only: 10k pts/frame — fuller Blender scene; skip HTML if not needed
+# sample across long video + capped global points + html
 ./run_feedforward.sh \
-  --method lingbot_map \
-  --input test_recording.MOV \
-  --random_points_per_frame 10000 \
-  --blend
-
-# --html only: 4k/frame + 80k global cap — keeps browser viewer responsive
-./run_feedforward.sh \
-  --method lingbot_map \
-  --input test_recording.MOV \
-  --random_points_per_frame 4000 \
-  --total_random_points 80000 \
+  --method vggt_omega \
+  --input path/to/images \
+  --max_frames 30 \
+  --max_frames_mode spread \
+  --random_points_per_frame 5000 \
+  --total_random_points 120000 \
   --html
 
-# r3 on Mac/MPS: 2k pts/frame + few frames — lower memory
+# r3 on Mac/MPS: few input frames, small cloud, save preprocessed frames
 ./run_feedforward.sh \
   --method r3 \
   --input test_recording.MOV \
   --max_frames 4 \
-  --random_points_per_frame 2000
+  --random_points_per_frame 2000 \
+  --frames
 
 ./run_feedforward.sh \
   --method da3 \
   --input path/to/images \
-  --random_points_per_frame 6000
+  --random_points_per_frame 6000 \
+  --blend
 
-# everything at once (npz + blend + html + preprocessed frames)
+# r3_long: custom output dir, larger cap, blend + html (no --frames here)
 ./run_feedforward.sh \
   --method r3_long \
   --input test_recording.MOV \
+  --output_path output/r3_long_demo \
   --max_frames 24 \
   --random_points_per_frame 4000 \
   --total_random_points 200000 \
   --blend \
-  --html \
-  --frames
+  --html
 ```
 
 Configs: `src/vibephysics/feedforward/configs/`

@@ -245,8 +245,14 @@ cfg["engine"] = engine
 output["save_blend"] = "scene.blend" if blend else None
 output["save_html"] = "visual.html" if html else None
 output["save_frames"] = frames
-output["random_points_per_frame"] = None if random_points_per_frame.lower() in {"", "none", "null", "0"} else int(random_points_per_frame)
-output["total_random_points"] = None if total_random_points.lower() in {"", "none", "null", "0"} else int(total_random_points)
+if random_points_per_frame.lower() not in {"", "none", "null"}:
+    output["random_points_per_frame"] = (
+        None if random_points_per_frame == "0" else int(random_points_per_frame)
+    )
+if total_random_points.lower() not in {"", "none", "null"}:
+    output["total_random_points"] = (
+        None if total_random_points == "0" else int(total_random_points)
+    )
 output["compact"] = compact
 
 if r3_model:
@@ -377,7 +383,7 @@ if [ "$(uname -s)" = "Darwin" ] && [ "$ENGINE" = "r3" ]; then
         echo "--- [run_feedforward] Warning: r3_long on Mac/MPS can be killed by memory pressure on longer clips. Use --max_frames N or --method r3 for the smaller checkpoint. ---"
     fi
 fi
-feedforward_print_frame_plan "$CONFIG" "${INPUT:-}"
+feedforward_print_frame_plan "$CONFIG" "${INPUT:-}" "$ENGINE"
 
 "$PYTHON" -m vibephysics.feedforward.reconstruct "${RECON_ARGS[@]}"
 status=$?

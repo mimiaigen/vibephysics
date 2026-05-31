@@ -18,15 +18,22 @@ from ..common import (
     c2w_to_w2c,
     discover_images,
     feedforward_engine_dir,
+    feedforward_hf_hub_cache,
+    feedforward_torch_hub_cache,
     get_vram_gb,
     limit_image_frames,
     resolve_torch_device,
     to_numpy,
 )
-from ..deps import ensure_engine_dependencies, pip_install
+from ..deps import (
+    MAP_ANYTHING_EXTRA_SPECS,
+    ensure_engine_dependencies,
+    install_map_anything_extra,
+)
 from ..schema import FeedforwardPrediction
 
 DEFAULT_MODEL_NAME = "vggt"
+DEFAULT_CACHE = feedforward_engine_dir("map_anything")
 IMAGES_ONLY_GEOMETRIC_CONFIG = {
     "overall_prob": 0.0,
     "dropout_prob": 1.0,
@@ -182,9 +189,50 @@ def default_model_kwargs(model_name: str) -> dict[str, Any]:
 
 
 def _checkpoint_dir() -> Path:
-    path = feedforward_engine_dir("map_anything") / "checkpoints"
+    path = DEFAULT_CACHE / "checkpoints"
     path.mkdir(parents=True, exist_ok=True)
     return path
+
+
+@contextlib.contextmanager
+def _map_anything_weight_cache(*, verbose: bool = False) -> Iterator[None]:
+    """
+    Keep Map-Anything weights under .vibephysics/feedforward/ (like lingbot_map).
+
+    - Hugging Face checkpoints -> .vibephysics/feedforward/huggingface/hub/
+    - torch.hub (DINOv2 backbones) -> .vibephysics/feedforward/map_anything/torch_hub/
+    - Manual .pth downloads -> .vibephysics/feedforward/map_anything/checkpoints/
+    """
+    import torch
+
+    torch_hub_dir = feedforward_torch_hub_cache("map_anything")
+    hf_hub_dir = feedforward_hf_hub_cache()
+    hf_home = hf_hub_dir.parent
+
+    saved_env = {
+        "HF_HOME": os.environ.get("HF_HOME"),
+        "HUGGINGFACE_HUB_CACHE": os.environ.get("HUGGINGFACE_HUB_CACHE"),
+    }
+    previous_torch_hub_dir = torch.hub.get_dir()
+    os.environ["HF_HOME"] = str(hf_home)
+    os.environ["HUGGINGFACE_HUB_CACHE"] = str(hf_hub_dir)
+    torch.hub.set_dir(str(torch_hub_dir))
+
+    if verbose:
+        print(
+            f"--- [vibephysics] Map-Anything weight cache: HF {hf_hub_dir}, "
+            f"torch.hub {torch_hub_dir} ---",
+            flush=True,
+        )
+    try:
+        yield
+    finally:
+        torch.hub.set_dir(previous_torch_hub_dir)
+        for key, value in saved_env.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
 
 
 def _download_file(url: str, path: Path, *, verbose: bool = True) -> None:
@@ -236,16 +284,27 @@ def _resolve_model_kwargs(
     return kwargs
 
 
-def _build_model(model_name: str, kwargs: dict[str, Any], device: str):
-    if model_name in CORE_PRETRAINED_MODEL_NAMES:
-        from mapanything.models import MapAnything
+def _build_model(
+    model_name: str,
+    kwargs: dict[str, Any],
+    device: str,
+    *,
+    verbose: bool = False,
+):
+    with _map_anything_weight_cache(verbose=verbose):
+        if model_name in CORE_PRETRAINED_MODEL_NAMES:
+            from mapanything.models import MapAnything
 
-        model_id = kwargs.pop("model_id", "facebook/map-anything")
-        return MapAnything.from_pretrained(model_id).to(device).eval()
+            model_id = kwargs.pop("model_id", "facebook/map-anything")
+            model = MapAnything.from_pretrained(
+                model_id,
+                cache_dir=str(feedforward_hf_hub_cache()),
+            )
+            return model.to(device).eval()
 
-    from mapanything.models import model_factory
+        from mapanything.models import model_factory
 
-    return model_factory(model_name, **kwargs).to(device).eval()
+        return model_factory(model_name, **kwargs).to(device).eval()
 
 
 def _vcs_extra_spec(extra: str) -> str:
@@ -277,20 +336,17 @@ def ensure_dependencies(
         "true",
         "yes",
     }
-    install_constraints = ["numpy<2"]
 
     if install_all:
-        spec = _vcs_extra_spec("all")
         if not auto_install:
             if verbose:
-                print(f"[vibephysics] Map-Anything [all] extra not installed; auto-install disabled.")
+                print("[vibephysics] Map-Anything optional models not installed; auto-install disabled.")
             return False
-        try:
-            pip_install(spec, verbose=verbose, extra_specs=install_constraints)
-        except subprocess.CalledProcessError:
-            if verbose:
-                print(f"[vibephysics] Failed to install Map-Anything extras with: pip install '{spec}'")
-            return False
+        if verbose:
+            print("--- [vibephysics] Installing Map-Anything optional model extras ---", flush=True)
+        for extra in MAP_ANYTHING_EXTRA_SPECS:
+            if not install_map_anything_extra(extra, verbose=verbose):
+                return False
         return True
 
     model_name = str(model_name).strip()
@@ -298,18 +354,16 @@ def ensure_dependencies(
     if extra is None or _external_model_importable(model_name):
         return True
 
-    spec = _vcs_extra_spec(extra)
     if not auto_install:
         if verbose:
             print(f"[vibephysics] Map-Anything extra '{extra}' for {model_name} not installed; auto-install disabled.")
         return False
     if verbose:
-        print(f"--- [vibephysics] Installing Map-Anything extra for {model_name}: {extra} ---")
-    try:
-        pip_install(spec, verbose=verbose, extra_specs=install_constraints)
-    except subprocess.CalledProcessError:
-        if verbose:
-            print(f"[vibephysics] Install manually with: pip install '{spec}'")
+        print(f"--- [vibephysics] Installing Map-Anything extra for {model_name}: {extra} ---", flush=True)
+    if not install_map_anything_extra(extra, verbose=verbose):
+        specs = MAP_ANYTHING_EXTRA_SPECS.get(extra, [])
+        if verbose and specs:
+            print(f"[vibephysics] Install manually with: pip install {' '.join(specs)} numpy<2")
         return False
     return _external_model_importable(model_name)
 
@@ -558,7 +612,7 @@ def run_map_anything(
     with _cpu_cuda_shim(device):
         if verbose:
             print(f"--- [vibephysics] Building Map-Anything factory model '{model_name}' ---", flush=True)
-        model = _build_model(model_name, kwargs, device)
+        model = _build_model(model_name, kwargs, device, verbose=verbose)
         views_device = _move_views_to_device(views, device)
         with torch.no_grad():
             if model_name in CORE_PRETRAINED_MODEL_NAMES:

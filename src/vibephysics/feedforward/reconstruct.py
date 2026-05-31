@@ -614,7 +614,7 @@ def reconstruct(
     filter_edges: bool = True,
     point_scale: float = 0.01,
     point_random_points_per_frame: int | None = 4000,
-    point_total_random_points: int | None = None,
+    point_total_random_points: int | None = 400_000,
     compact: bool = False,
     animate: bool = True,
     animation_fps: int = 24,

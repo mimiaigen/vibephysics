@@ -29,6 +29,7 @@ feedforward_append_frame_args() {
 feedforward_print_frame_plan() {
     local config_path="$1"
     local input_path="$2"
+    local engine_override="${3:-}"
     [ -z "${input_path:-}" ] && return 0
     local plan
     plan=$("$PYTHON" -c "
@@ -40,8 +41,7 @@ try:
         resolve_input_frame_limits,
         apply_video_frame_overrides,
     )
-    from vibephysics.feedforward.common import get_vram_gb
-    from vibephysics.feedforward.lingbot_map import preview_input_plan
+    from vibephysics.feedforward.common import get_vram_gb, preview_feedforward_input_plan
     cfg = load_yaml_config('${config_path}')
     cli_max = '${MAX_FRAMES:-}'
     cli_mode = '${MAX_FRAMES_MODE:-}'
@@ -50,16 +50,18 @@ try:
         max_frames=int(cli_max) if cli_max else None,
         max_frames_mode=cli_mode or None,
     )
-    engine = cfg.get('engine', 'lingbot_map')
+    engine = '${engine_override}' or cfg.get('engine', 'lingbot_map')
     mf, mode = resolve_input_frame_limits(cfg, engine)
     video = cfg.get('video') or {}
     lm = cfg.get('lingbot_map') or {}
-    print(preview_input_plan(
+    lingbot = engine == 'lingbot_map'
+    print(preview_feedforward_input_plan(
+        engine,
         '${input_path}',
-        mode=lm.get('mode') if engine == 'lingbot_map' else None,
-        keyframe_interval=lm.get('keyframe_interval') if engine == 'lingbot_map' else None,
-        max_streaming_keyframes=lm.get('max_streaming_keyframes') if engine == 'lingbot_map' else None,
-        vram_gb=get_vram_gb() if engine == 'lingbot_map' else None,
+        mode=lm.get('mode') if lingbot else None,
+        keyframe_interval=lm.get('keyframe_interval') if lingbot else None,
+        max_streaming_keyframes=lm.get('max_streaming_keyframes') if lingbot else None,
+        vram_gb=get_vram_gb() if lingbot else None,
         max_frames=mf,
         max_frames_mode=mode,
         video_fps=video.get('fps', 2),

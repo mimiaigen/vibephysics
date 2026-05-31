@@ -98,9 +98,109 @@ def _squeeze_single_batch(key, value):
     return value
 
 
+def _apply_lingbot_pretrained_patch() -> None:
+    """
+    Upstream LingBot-Map always tries torch.load(pretrained_path) for DINOv2.
+
+    Official runs pass an empty string, which prints a noisy warning even though
+    the full model weights are loaded from lingbot-map.pt immediately after.
+    """
+    from lingbot_map.aggregator import base as agg_base
+    from lingbot_map.layers import PatchEmbed
+    from lingbot_map.layers.vision_transformer import vit_base, vit_giant2, vit_large, vit_small
+
+    if getattr(agg_base.AggregatorBase, "_vibephysics_pretrained_patch", False):
+        return
+
+    _orig_build = agg_base.AggregatorBase._build_patch_embed
+
+    def _build_patch_embed(
+        self,
+        patch_embed: str,
+        img_size: int,
+        patch_size: int,
+        num_register_tokens: int,
+        embed_dim: int,
+        pretrained_path: str | None,
+        interpolate_antialias=True,
+        interpolate_offset=0.0,
+        block_chunks=0,
+        init_values=1.0,
+    ):
+        if pretrained_path:
+            return _orig_build(
+                self,
+                patch_embed,
+                img_size,
+                patch_size,
+                num_register_tokens,
+                embed_dim,
+                pretrained_path,
+                interpolate_antialias=interpolate_antialias,
+                interpolate_offset=interpolate_offset,
+                block_chunks=block_chunks,
+                init_values=init_values,
+            )
+
+        if "conv" in patch_embed:
+            self.patch_embed = PatchEmbed(
+                img_size=img_size,
+                patch_size=patch_size,
+                in_chans=3,
+                embed_dim=embed_dim,
+            )
+            self._dino_checkpoint = None
+            return
+
+        vit_models = {
+            "dinov2_vitl14_reg": vit_large,
+            "dinov2_vitb14_reg": vit_base,
+            "dinov2_vits14_reg": vit_small,
+            "dinov2_vitg2_reg": vit_giant2,
+        }
+        if patch_embed not in vit_models:
+            raise NotImplementedError(f"Unknown patch_embed type: {patch_embed}")
+
+        self.patch_embed = vit_models[patch_embed](
+            img_size=img_size,
+            patch_size=patch_size,
+            num_register_tokens=num_register_tokens,
+            interpolate_antialias=interpolate_antialias,
+            interpolate_offset=interpolate_offset,
+            block_chunks=block_chunks,
+            init_values=init_values,
+        )
+        self._dino_checkpoint = None
+        if hasattr(self.patch_embed, "mask_token"):
+            self.patch_embed.mask_token.requires_grad_(False)
+
+    agg_base.AggregatorBase._build_patch_embed = _build_patch_embed
+    agg_base.AggregatorBase._vibephysics_pretrained_patch = True
+
+
+@contextlib.contextmanager
+def _suppress_lingbot_pretrained_print() -> Iterator[None]:
+    import builtins
+
+    real_print = builtins.print
+
+    def filtered_print(*args, **kwargs):
+        if args and str(args[0]).startswith("pretrained_path:"):
+            return
+        real_print(*args, **kwargs)
+
+    builtins.print = filtered_print
+    try:
+        yield
+    finally:
+        builtins.print = real_print
+
+
 def _load_model(args, device):
     """Load GCTStream from checkpoint (mirrors upstream demo.py)."""
     import torch
+
+    _apply_lingbot_pretrained_patch()
 
     if getattr(args, "mode", "streaming") == "windowed":
         from lingbot_map.models.gct_stream_window import GCTStream
@@ -108,18 +208,20 @@ def _load_model(args, device):
         from lingbot_map.models.gct_stream import GCTStream
 
     print("Building model...")
-    model = GCTStream(
-        img_size=args.image_size,
-        patch_size=args.patch_size,
-        enable_3d_rope=args.enable_3d_rope,
-        max_frame_num=args.max_frame_num,
-        kv_cache_sliding_window=args.kv_cache_sliding_window,
-        kv_cache_scale_frames=args.num_scale_frames,
-        kv_cache_cross_frame_special=True,
-        kv_cache_include_scale_frames=True,
-        use_sdpa=args.use_sdpa,
-        camera_num_iterations=args.camera_num_iterations,
-    )
+    with _suppress_lingbot_pretrained_print():
+        model = GCTStream(
+            img_size=args.image_size,
+            patch_size=args.patch_size,
+            enable_3d_rope=args.enable_3d_rope,
+            max_frame_num=args.max_frame_num,
+            kv_cache_sliding_window=args.kv_cache_sliding_window,
+            kv_cache_scale_frames=args.num_scale_frames,
+            kv_cache_cross_frame_special=True,
+            kv_cache_include_scale_frames=True,
+            use_sdpa=args.use_sdpa,
+            camera_num_iterations=args.camera_num_iterations,
+            pretrained_path=None,
+        )
 
     if args.model_path:
         print(f"Loading checkpoint: {args.model_path}")
@@ -391,74 +493,22 @@ def preview_input_plan(
     window_size: int = 64,
     overlap_size: int = 16,
 ) -> str:
-    """Estimate inference plan from a path before full reconstruction (for CLI preview)."""
-    from ..reconstruct import (
-        default_video_frames_dir,
-        discover_images,
-        existing_frames_in_dir,
-        looks_like_video_path,
-    )
+    """Estimate LingBot-Map inference plan from a path before full reconstruction."""
+    from ..common import preview_feedforward_input_plan
 
-    path = Path(input_path)
-    num_frames: int | None = None
-
-    if path.is_dir():
-        try:
-            num_frames = len(discover_images(path))
-        except (ValueError, FileNotFoundError):
-            pass
-    elif path.is_file() and looks_like_video_path(path):
-        existing = existing_frames_in_dir(default_video_frames_dir(path))
-        if existing:
-            num_frames = len(existing)
-        else:
-            num_frames = _estimate_video_frame_count(path, video_fps)
-    elif path.is_file():
-        num_frames = 1
-
-    if num_frames is None:
-        return "Inference plan: frame count unknown until video frames are extracted"
-    if max_frames is not None and num_frames > max_frames:
-        num_frames = max_frames
-    suffix = ""
-    if max_frames is not None and max_frames_mode == "first":
-        suffix = " [first consecutive frames]"
-    elif max_frames is not None:
-        suffix = " [spread across full input]"
-    return format_inference_plan(
-        num_frames,
+    return preview_feedforward_input_plan(
+        "lingbot_map",
+        input_path,
         mode=mode,
         keyframe_interval=keyframe_interval,
         max_streaming_keyframes=max_streaming_keyframes,
         vram_gb=vram_gb,
+        max_frames=max_frames,
+        max_frames_mode=max_frames_mode,
+        video_fps=video_fps,
         window_size=window_size,
         overlap_size=overlap_size,
-    ) + suffix
-
-
-def _estimate_video_frame_count(video_path: Path, extract_fps: float) -> int | None:
-    import subprocess
-
-    try:
-        result = subprocess.run(
-            [
-                "ffprobe",
-                "-v",
-                "error",
-                "-show_entries",
-                "format=duration",
-                "-of",
-                "default=noprint_wrappers=1:nokey=1",
-                str(video_path),
-            ],
-            check=True,
-            capture_output=True,
-            text=True,
-        )
-        duration = float(result.stdout.strip())
-    except (FileNotFoundError, subprocess.CalledProcessError, ValueError):
-        return None
-    return max(int(duration * max(float(extract_fps), 1e-6)), 1)
+    )
 
 
 def _flashinfer_available() -> bool:
@@ -615,11 +665,6 @@ def run_lingbot_map(
     ckpt = model_path or download_checkpoint(model_name, verbose=verbose)
     if verbose:
         print(f"--- [vibephysics] Building LingBot-Map model (checkpoint: {ckpt}) ---", flush=True)
-        print(
-            "--- [vibephysics] Note: official code may warn about empty DINOv2 "
-            "pretrained_path — weights load from the LingBot-Map checkpoint next. ---",
-            flush=True,
-        )
     args = SimpleNamespace(
         mode=mode,
         image_size=image_size,

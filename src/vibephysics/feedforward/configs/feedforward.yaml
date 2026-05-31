@@ -19,7 +19,7 @@ output:
   filter_edges: true
   point_scale: 0.01
   random_points_per_frame: 4000 # random per-frame sample after confidence filtering; null/0 = dense
-  total_random_points: null # optional global random sample after per-frame filtering
+  total_random_points: 400000 # global random sample after per-frame filtering; null/0 = disable
   compact: false      # true = force compact colored points + camera poses only
   animate: true
   animation_fps: 24

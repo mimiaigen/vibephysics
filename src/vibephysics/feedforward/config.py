@@ -152,7 +152,7 @@ def parse_feedforward_config(cfg: dict[str, Any], config_path: Path | None = Non
         output.get("random_points_per_frame", output.get("point_random_points_per_frame", 4000))
     )
     point_total_random_points = _optional_positive_int(
-        output.get("total_random_points", output.get("point_total_random_points"))
+        output.get("total_random_points", output.get("point_total_random_points", 400_000))
     )
 
     return {

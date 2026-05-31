@@ -78,6 +78,52 @@ _ENGINE_GIT: dict[str, str] = {
 
 _TORCH_IMPORTS = {"torch", "torchvision"}
 _TORCH_INDEX_ENV = "VIBEPHYSICS_TORCH_INDEX_URL"
+_NUMPY_BPY_CONSTRAINT = "numpy<2"
+
+# mapanything + uniception declare rerun-sdk (numpy>=2) for optional viz only; never install it here.
+_MAP_ANYTHING_RUNTIME_SPECS = [
+    "huggingface_hub",
+    "hydra-core",
+    "natsort",
+    "opencv-python-headless==4.10.0.84",
+    "orjson",
+    "pillow-heif",
+    "plyfile",
+    "python-box",
+    "requests",
+    "safetensors",
+    "tensorboard",
+    "tqdm",
+    "trimesh",
+]
+
+_UNICEPTION_VERSION = "uniception==0.1.7"
+# uniception runtime deps minus rerun-sdk (inference does not import uniception.utils.viz).
+_UNICEPTION_RUNTIME_SPECS = [
+    "jaxtyping",
+    "minio",
+    "torchmetrics",
+    "timm",
+]
+
+# Direct installs for mapanything optional extras (avoid mapanything[extra] pulling rerun-sdk).
+MAP_ANYTHING_EXTRA_SPECS: dict[str, list[str]] = {
+    "anycalib": ["anycalib @ git+https://github.com/javrtg/AnyCalib.git@main#egg=anycalib"],
+    "dust3r": [
+        "croco @ git+https://github.com/naver/croco.git@croco_module#egg=croco",
+        "dust3r @ git+https://github.com/naver/dust3r.git@dust3r_setup#egg=dust3r",
+    ],
+    "mast3r": ["mast3r @ git+https://github.com/Nik-V9/mast3r.git@main#egg=mast3r"],
+    "must3r": ["must3r @ git+https://github.com/naver/must3r.git@main#egg=must3r"],
+    "pi3": ["pi3 @ git+https://github.com/yyfz/Pi3.git@main#egg=pi3"],
+    "pow3r": ["pow3r @ git+https://github.com/Nik-V9/pow3r.git@main#egg=pow3r"],
+    "depth-anything-3": [
+        "depth-anything-3 @ git+https://github.com/Nik-V9/depth-anything-3.git@main#egg=depth-anything-3"
+    ],
+    "vggt-omega": [
+        "vggt-omega @ git+https://github.com/facebookresearch/vggt-omega.git@main#egg=vggt-omega"
+    ],
+}
 
 
 def _has_module(name: str) -> bool:
@@ -90,16 +136,111 @@ def pip_install(
     verbose: bool = True,
     extra_specs: list[str] | None = None,
     index_url: str | None = None,
+    no_deps: bool = False,
 ) -> None:
     specs = [spec, *(extra_specs or [])]
     if verbose:
         source = f" --index-url {index_url}" if index_url else ""
-        print(f"--- [vibephysics] Installing{source} {' '.join(specs)} ---")
+        no_deps_note = " --no-deps" if no_deps else ""
+        print(f"--- [vibephysics] Installing{source}{no_deps_note} {' '.join(specs)} ---")
     cmd = [sys.executable, "-m", "pip", "install"]
     if index_url:
         cmd.extend(["--index-url", index_url])
+    if no_deps:
+        cmd.append("--no-deps")
     cmd.extend(specs)
     subprocess.check_call(cmd)
+
+
+def _uninstall_rerun_sdk(*, verbose: bool) -> None:
+    if importlib.util.find_spec("rerun") is None:
+        return
+    if verbose:
+        print("--- [vibephysics] Removing rerun-sdk (not used by feedforward) ---", flush=True)
+    subprocess.run(
+        [sys.executable, "-m", "pip", "uninstall", "-y", "rerun-sdk"],
+        check=False,
+        capture_output=not verbose,
+    )
+
+
+def _install_uniception_without_rerun(*, verbose: bool) -> None:
+    if _has_module("uniception"):
+        return
+    if verbose:
+        print(
+            f"--- [vibephysics] Installing {_UNICEPTION_VERSION} without rerun-sdk ---",
+            flush=True,
+        )
+    pip_install(_UNICEPTION_VERSION, verbose=verbose, no_deps=True)
+    if _UNICEPTION_RUNTIME_SPECS:
+        pip_install(
+            _UNICEPTION_RUNTIME_SPECS[0],
+            verbose=verbose,
+            extra_specs=[*_UNICEPTION_RUNTIME_SPECS[1:], _NUMPY_BPY_CONSTRAINT],
+        )
+
+
+def _install_map_anything_runtime_deps(*, verbose: bool) -> None:
+    pip_install(
+        _MAP_ANYTHING_RUNTIME_SPECS[0],
+        verbose=verbose,
+        extra_specs=[*_MAP_ANYTHING_RUNTIME_SPECS[1:], _NUMPY_BPY_CONSTRAINT],
+    )
+    _install_uniception_without_rerun(verbose=verbose)
+    _uninstall_rerun_sdk(verbose=verbose)
+
+
+def install_map_anything_from_git(*, verbose: bool) -> None:
+    """
+    Install Map-Anything without rerun-sdk (requires numpy>=2, conflicts with bpy).
+    """
+    if verbose:
+        print(
+            "--- [vibephysics] Installing Map-Anything (skipping optional rerun-sdk; "
+            "feedforward inference does not need it) ---",
+            flush=True,
+        )
+    pip_install(MAP_ANYTHING_GIT, verbose=verbose, no_deps=True)
+    _install_map_anything_runtime_deps(verbose=verbose)
+
+
+def ensure_map_anything_package(*, verbose: bool = True) -> bool:
+    if _has_module("mapanything"):
+        return True
+    try:
+        install_map_anything_from_git(verbose=verbose)
+    except subprocess.CalledProcessError:
+        if verbose:
+            print(
+                "[vibephysics] Map-Anything install failed. "
+                f"Core package needs numpy<2 for Blender (bpy); upstream also pins "
+                f"rerun-sdk which requires numpy>=2. vibephysics installs Map-Anything "
+                f"without rerun-sdk. Retry:\n"
+                f"  pip install --no-deps {MAP_ANYTHING_GIT}\n"
+                f"  pip install {' '.join(_MAP_ANYTHING_RUNTIME_SPECS)} {_NUMPY_BPY_CONSTRAINT}\n"
+                f"  pip install --no-deps {_UNICEPTION_VERSION}\n"
+                f"  pip install {' '.join(_UNICEPTION_RUNTIME_SPECS)} {_NUMPY_BPY_CONSTRAINT}",
+                flush=True,
+            )
+        return False
+    return _has_module("mapanything")
+
+
+def install_map_anything_extra(extra: str, *, verbose: bool = True) -> bool:
+    specs = MAP_ANYTHING_EXTRA_SPECS.get(extra)
+    if not specs:
+        return True
+    if not ensure_map_anything_package(verbose=verbose):
+        return False
+    for spec in specs:
+        try:
+            pip_install(spec, verbose=verbose, extra_specs=[_NUMPY_BPY_CONSTRAINT])
+        except subprocess.CalledProcessError:
+            if verbose:
+                print(f"[vibephysics] Failed to install Map-Anything extra '{extra}': {spec}")
+            return False
+    return True
 
 
 def _nvidia_driver_version() -> str | None:
@@ -204,7 +345,7 @@ def ensure_engine_dependencies(engine: str, *, verbose: bool = True) -> bool:
         "true",
         "yes",
     }
-    install_constraints = ["numpy<2"] if engine in {"map_anything", "vgg_ttt", "r3"} else None
+    install_constraints = [_NUMPY_BPY_CONSTRAINT] if engine in {"vgg_ttt", "r3"} else None
 
     if not _ensure_torch_dependencies(engine, auto_install=auto_install, verbose=verbose):
         return False
@@ -233,14 +374,18 @@ def ensure_engine_dependencies(engine: str, *, verbose: bool = True) -> bool:
             if verbose:
                 print(f"[vibephysics] Missing {module}; auto-install disabled.")
             return False
-        git_spec = _ENGINE_GIT[engine]
-        if verbose:
-            print(f"\n[vibephysics] Missing {module}; installing from GitHub")
-        try:
-            pip_install(git_spec, verbose=verbose, extra_specs=install_constraints)
-        except subprocess.CalledProcessError:
+        if engine == "map_anything":
+            if not ensure_map_anything_package(verbose=verbose):
+                return False
+        else:
+            git_spec = _ENGINE_GIT[engine]
             if verbose:
-                print(f"[vibephysics] Install manually with: pip install {git_spec}")
-            return False
+                print(f"\n[vibephysics] Missing {module}; installing from GitHub")
+            try:
+                pip_install(git_spec, verbose=verbose, extra_specs=install_constraints)
+            except subprocess.CalledProcessError:
+                if verbose:
+                    print(f"[vibephysics] Install manually with: pip install {git_spec}")
+                return False
 
     return _has_module(module)

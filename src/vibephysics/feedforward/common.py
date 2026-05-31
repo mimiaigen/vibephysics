@@ -46,6 +46,20 @@ def feedforward_engine_dir(engine: str) -> Path:
     return path
 
 
+def feedforward_hf_hub_cache() -> Path:
+    """Hugging Face Hub snapshot cache shared by feedforward engines."""
+    path = feedforward_engine_dir("huggingface") / "hub"
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def feedforward_torch_hub_cache(engine: str) -> Path:
+    """torch.hub checkout cache (e.g. facebookresearch/dinov2) for a feedforward engine."""
+    path = feedforward_engine_dir(engine) / "torch_hub"
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
 def is_lingbot_map_engine(engine: str) -> bool:
     engine = str(engine)
     return engine == "lingbot_map" or engine == "lingbot" or engine.startswith("lingbot_map")
@@ -149,6 +163,135 @@ def limit_image_frames(
             flush=True,
         )
     return selected, indices, total
+
+
+def engine_preview_label(engine: str) -> str:
+    """Human-readable engine name for CLI frame-plan previews."""
+    engine = str(engine).strip().lower()
+    if is_lingbot_map_engine(engine):
+        return "LingBot-Map"
+    if is_vggt_omega_engine(engine):
+        return "VGGT-Omega"
+    if is_vgg_ttt_engine(engine):
+        return "VGG-TTT"
+    if is_r3_engine(engine):
+        return "R3"
+    if is_map_anything_engine(engine):
+        return "Map-Anything"
+    return engine.replace("_", " ").strip() or "feedforward"
+
+
+def estimate_video_frame_count(video_path: Path, extract_fps: float) -> int | None:
+    """Estimate extracted frame count from video duration and target fps."""
+    try:
+        result = subprocess.run(
+            [
+                "ffprobe",
+                "-v",
+                "error",
+                "-show_entries",
+                "format=duration",
+                "-of",
+                "default=noprint_wrappers=1:nokey=1",
+                str(video_path),
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        duration = float(result.stdout.strip())
+    except (FileNotFoundError, subprocess.CalledProcessError, ValueError):
+        return None
+    return max(int(duration * max(float(extract_fps), 1e-6)), 1)
+
+
+def estimate_input_frame_count(
+    input_path: str | Path,
+    *,
+    max_frames: int | None = None,
+    max_frames_mode: str = "first",
+    video_fps: float = DEFAULT_VIDEO_FPS,
+) -> tuple[int | None, str]:
+    """
+    Estimate how many frames will be processed from an image folder, image, or video.
+
+    Returns (frame_count, suffix) where suffix notes max_frames limiting when applicable.
+    """
+    from .reconstruct import (
+        default_video_frames_dir,
+        existing_frames_in_dir,
+        looks_like_video_path,
+    )
+
+    path = Path(input_path)
+    num_frames: int | None = None
+
+    if path.is_dir():
+        try:
+            num_frames = len(discover_images(path))
+        except (ValueError, FileNotFoundError):
+            pass
+    elif path.is_file() and looks_like_video_path(path):
+        existing = existing_frames_in_dir(default_video_frames_dir(path))
+        if existing:
+            num_frames = len(existing)
+        else:
+            num_frames = estimate_video_frame_count(path, video_fps)
+    elif path.is_file():
+        num_frames = 1
+
+    suffix = ""
+    if num_frames is not None and max_frames is not None and num_frames > max_frames:
+        num_frames = max_frames
+        if max_frames_mode == "first":
+            suffix = " [first consecutive frames]"
+        else:
+            suffix = " [spread across full input]"
+    return num_frames, suffix
+
+
+def preview_feedforward_input_plan(
+    engine: str,
+    input_path: str | Path,
+    *,
+    mode: str | None = None,
+    keyframe_interval: int | None = None,
+    max_streaming_keyframes: int | None = None,
+    vram_gb: float | None = None,
+    max_frames: int | None = None,
+    max_frames_mode: str = "first",
+    video_fps: float = DEFAULT_VIDEO_FPS,
+    window_size: int = 64,
+    overlap_size: int = 16,
+) -> str:
+    """CLI preview of input frame count; LingBot-Map also shows streaming/windowed plan."""
+    label = engine_preview_label(engine)
+    num_frames, suffix = estimate_input_frame_count(
+        input_path,
+        max_frames=max_frames,
+        max_frames_mode=max_frames_mode,
+        video_fps=video_fps,
+    )
+    if num_frames is None:
+        return f"{label}: frame count unknown until video frames are extracted"
+
+    if is_lingbot_map_engine(engine):
+        from .lingbot_map import format_inference_plan
+
+        return (
+            format_inference_plan(
+                num_frames,
+                mode=mode,
+                keyframe_interval=keyframe_interval,
+                max_streaming_keyframes=max_streaming_keyframes,
+                vram_gb=vram_gb,
+                window_size=window_size,
+                overlap_size=overlap_size,
+            )
+            + suffix
+        )
+
+    return f"{label}: {num_frames} frames{suffix}"
 
 
 def to_numpy(x) -> np.ndarray:

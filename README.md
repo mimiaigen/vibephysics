@@ -10,7 +10,7 @@
 
 ## Changelog
 
-- **Unreleased** — Blender fixed-size camera frustums/trajectory; feedforward point cloud icosphere instancing; default `point_scale` 0.0005.
+- **Unreleased** — Feedforward ground align: frame-0 camera up, 1D Hough multi-floor → bottom floor, bumpy-depth tilt fit; fixed-size Blender frustums/trajectory; point cloud icosphere instancing (`point_scale` default in `feedforward.yaml`).
 - **v0.3.6** (2026-05-31) — PyPI; [DVLT](https://github.com/nv-tlabs/dvlt) feedforward (`--method dvlt`); `.vibephysics/feedforward/` weight caches; Plotly trajectory aligned with saved poses; feedforward `SKILL.md` for agents; GPU dependency fixes.
 - **v0.3.5** (2026-05-31) — PyPI; feedforward stage timing/RSS; compact NPZ defaults (`min_confidence`, per-frame/global sampling); Plotly frame-balanced sampling; R3 Mac/MPS kill warning.
 - **2026-05-30** — [R3](https://github.com/KevinXu02/R3) / R3-Long; unified `run_feedforward.sh` + `feedforward.yaml`; opt-in `--blend` / `--html` / `--frames`.
@@ -209,7 +209,7 @@ output:
   compact: false           # true = force compact points + poses only
   animate: true
   animation_fps: 24
-  align_ground: true
+  align_ground: true       # frame-0 camera up + Hough floor peaks → bottom floor (OpenCV, pre-save)
 
 lingbot_map:
   model: lingbot-map
@@ -330,7 +330,9 @@ feedforward_output/{engine}_{timestamp}/
   scene.blend              # optional, only when --blend is passed
 ```
 
-`predictions.npz` uses Blender Z-up (`metadata.world_coordinates: blender_z_up`). Ground align runs before save when `align_ground: true`; Blender does not re-align or re-axis-convert on load. Compact predictions are best when you only need a colored 3D point cloud, trajectory, and camera poses; dense mode is best when you need full per-pixel depth/confidence/world-point maps.
+`predictions.npz` uses Blender Z-up (`metadata.world_coordinates: blender_z_up`). **Ground align** (`align_ground: true`, default) runs in OpenCV space **before** Z-up save: frame-0 camera pose sets rough up, **1D Hough voting** along that axis finds multiple floor heights, and the **lowest floor below the camera** is leveled (works on bumpy depth, not a flat-plane assumption). Metadata may include `ground_align_floor_count` and `ground_align_floor_heights`. Blender import does not re-align or re-axis-convert. Post-process an existing `.blend` with `run_postprocess_blend.sh --point_scale SIZE`.
+
+Compact predictions are best when you only need a colored 3D point cloud, trajectory, and camera poses; dense mode is best when you need full per-pixel depth/confidence/world-point maps.
 
 **Plotly HTML point cloud:**
 

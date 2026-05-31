@@ -20,7 +20,7 @@ feedforward/
 
   common.py                 # images, geometry, caches, point clouds, Blender Z-up
   deps.py                   # ensure_engine_dependencies() per engine
-  ground_align.py           # ground plane align (all engines, OpenCV space)
+  ground_align.py           # ground tilt align (OpenCV); Hough floors + frame-0 camera up
   visual.py                 # Blender import (Z-up NPZ; no second coord pass)
   export.py                 # npz → .blend / compare / Plotly HTML
 ```
@@ -108,7 +108,7 @@ All engines return `FeedforwardPrediction` → saved as `predictions.npz`:
 - Dense: `world_points`, `depth`, `conf`, `extrinsic`, `intrinsic`, `image_paths`
 - Compact (optional): `points`, `colors`, `conf`, `frame_ids` — fewer points for blend/HTML
 - Saved layout: Blender Z-up (`metadata.world_coordinates: blender_z_up`); engines infer in OpenCV first
-- Metadata: `ground_align_applied`, `w2c_as_camera_pose` (per-engine; see below), `extrinsic_is_matrix_world`, `preprocessed_frames_dir`, `video_fps`
+- Metadata: `ground_align_applied`, `ground_align_floor_count`, `ground_align_floor_heights`, `ground_align_euler_deg`, `w2c_as_camera_pose` (per-engine; see below), `extrinsic_is_matrix_world`, `preprocessed_frames_dir`, `video_fps`
 
 ## Coordinates, extrinsics, and Plotly (do not break)
 
@@ -145,10 +145,40 @@ Blend CLI may load NPZ and call convert only for legacy OpenCV files (`export._p
 2. Confirm Plotly still uses `extrinsic[:, :3, 3]` only — not a new helper.
 3. Confirm Z-up still runs once before save, not twice on the same arrays.
 
+## Ground align (`ground_align.py`)
+
+Runs for **all engines** when `output.align_ground: true` (default). Mutates `world_points` and `extrinsic` in **OpenCV** space, then Z-up convert runs once before save.
+
+**Not a perfect-plane assumption.** Depth clouds are bumpy; the fit targets mean floor **tilt**, not a flat mesh.
+
+**Up direction (engine-agnostic):**
+
+1. **Frame-0 camera** — `-R[:,1]` from the first stored extrinsic (OpenCV camera up in world). Primary hint; sign always matches frame 0.
+2. **Multi-frame consensus** — median camera up when poses agree (`≥3` frames, agreement ≥ 0.6).
+3. **Point-axis fallback** — if cameras disagree, try ±X/±Y/±Z low bands.
+4. **Scene below camera** — flip `scene_up` if the bulk of points sit above frame-0 (handheld/video).
+
+Respect `w2c_as_camera_pose` when building c2w from `extrinsic` (same rules as Z-up convert).
+
+**Multi-floor (1D Hough):**
+
+1. Project points onto `scene_up` → height histogram (96 bins, smoothed).
+2. Peaks = horizontal floor clusters (merged if too close).
+3. **Bottom floor** = highest peak still **below** frame-0 camera height (ground, not upper levels).
+4. Trim outliers above the fitted plane; SVD plane + damped normal (`_snap_floor_normal`).
+5. Rotate floor normal → canonical OpenCV up (`[0,-1,0]`); optional level passes.
+6. **Upside-down check** — after leveling, 180° flip if frame-0 camera up disagrees or fitted floor is above the camera.
+
+**Acceptance:** applied only if residual tilt improves by ≥ 1° and stays within loose bounds (bumpy floor OK). Logs: `scene_up`, `frame0_up`, `N Hough floor(s), bottom_h=…`. Skipped/rejected lines explain why.
+
+**Do not reimplement** in engine folders. Tune constants at top of `ground_align.py` (`_FLOOR_HOUGH_*`, `_FLOOR_BOTTOM_PERCENTILE`, …).
+
+**Blend-only re-align:** `export` may call `align_prediction_ground` when exporting with `--align-ground` on legacy NPZ; normal path is align during `reconstruct`.
+
 ## Pipeline (`reconstruct.py`)
 
 1. **Engine** — upstream model → `FeedforwardPrediction` (OpenCV world)
-2. **Ground align** (`ground_align.py`) — if `align_ground: true`, still in OpenCV
+2. **Ground align** (`align_prediction_ground`) — if `align_ground: true`, still in OpenCV (see **Ground align**)
 3. **Z-up** (`common.convert_prediction_to_blender_zup`) — in place before save
 4. **Save** — `predictions.npz` (+ optional compact), `reconstruct_config.json`
 5. **Plotly** (`export.export_plotly` via `_export_plotly_html`) — reads NPZ as saved (see **Coordinates, extrinsics, and Plotly**)

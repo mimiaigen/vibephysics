@@ -7,7 +7,7 @@ import os
 import subprocess
 import sys
 
-from .common import LINGBOT_MAP_GIT, MAP_ANYTHING_GIT, R3_GIT, VGGT_OMEGA_GIT, VGG_TTT_GIT
+from .common import DVLT_GIT, LINGBOT_MAP_GIT, MAP_ANYTHING_GIT, R3_GIT, VGGT_OMEGA_GIT, VGG_TTT_GIT
 
 # (import_name, pip_spec)
 _PYPI_DEPS: dict[str, list[tuple[str, str]]] = {
@@ -58,6 +58,19 @@ _PYPI_DEPS: dict[str, list[tuple[str, str]]] = {
         ("addict", "addict"),
         ("huggingface_hub", "huggingface_hub"),
     ],
+    "dvlt": [
+        ("torch", "torch"),
+        ("torchvision", "torchvision"),
+        ("cv2", "opencv-python"),
+        ("PIL", "pillow"),
+        ("accelerate", "accelerate>=1.8"),
+        ("huggingface_hub", "huggingface_hub"),
+        ("hydra", "hydra-core"),
+        ("omegaconf", "omegaconf"),
+        ("safetensors", "safetensors"),
+        ("scipy", "scipy"),
+        ("pydantic", "pydantic>=2"),
+    ],
 }
 
 _ENGINE_MODULES: dict[str, str] = {
@@ -66,6 +79,7 @@ _ENGINE_MODULES: dict[str, str] = {
     "vgg_ttt": "vggttt",
     "map_anything": "mapanything",
     "r3": "R3",
+    "dvlt": "dvlt",
 }
 
 _ENGINE_GIT: dict[str, str] = {
@@ -74,7 +88,22 @@ _ENGINE_GIT: dict[str, str] = {
     "vgg_ttt": VGG_TTT_GIT,
     "map_anything": MAP_ANYTHING_GIT,
     "r3": R3_GIT,
+    "dvlt": DVLT_GIT,
 }
+
+# Upstream pins numpy>=2 and optional rerun-sdk; feedforward installs dvlt --no-deps + runtime only.
+_DVLT_RUNTIME_SPECS = [
+    "accelerate>=1.8",
+    "huggingface-hub>=0.23",
+    "hydra-core>=1.3",
+    "omegaconf>=2.3",
+    "opencv-python",
+    "pillow",
+    "safetensors",
+    "scipy",
+    "tqdm",
+    "pydantic>=2",
+]
 
 _TORCH_IMPORTS = {"torch", "torchvision"}
 _TORCH_INDEX_ENV = "VIBEPHYSICS_TORCH_INDEX_URL"
@@ -203,6 +232,42 @@ def install_map_anything_from_git(*, verbose: bool) -> None:
         )
     pip_install(MAP_ANYTHING_GIT, verbose=verbose, no_deps=True)
     _install_map_anything_runtime_deps(verbose=verbose)
+
+
+def install_dvlt_from_git(*, verbose: bool = True) -> None:
+    """
+    Install DVLT without upstream numpy>=2 / rerun-sdk (conflicts with bpy).
+
+    Weights load from Hugging Face (``nvidia/dvlt``) into .vibephysics/feedforward/huggingface/.
+    """
+    if verbose:
+        print(
+            "--- [vibephysics] Installing DVLT from GitHub (--no-deps; numpy<2 compatible runtime) ---",
+            flush=True,
+        )
+    pip_install(DVLT_GIT, verbose=verbose, no_deps=True)
+    pip_install(
+        _DVLT_RUNTIME_SPECS[0],
+        verbose=verbose,
+        extra_specs=[*_DVLT_RUNTIME_SPECS[1:], _NUMPY_BPY_CONSTRAINT],
+    )
+
+
+def ensure_dvlt_package(*, verbose: bool = True) -> bool:
+    if _has_module("dvlt"):
+        return True
+    try:
+        install_dvlt_from_git(verbose=verbose)
+    except subprocess.CalledProcessError:
+        if verbose:
+            print(
+                "[vibephysics] DVLT install failed. Upstream declares numpy>=2; vibephysics uses numpy<2 for bpy. Retry:\n"
+                f"  pip install --no-deps {DVLT_GIT}\n"
+                f"  pip install {' '.join(_DVLT_RUNTIME_SPECS)} {_NUMPY_BPY_CONSTRAINT}",
+                flush=True,
+            )
+        return False
+    return _has_module("dvlt")
 
 
 def ensure_map_anything_package(*, verbose: bool = True) -> bool:
@@ -376,6 +441,9 @@ def ensure_engine_dependencies(engine: str, *, verbose: bool = True) -> bool:
             return False
         if engine == "map_anything":
             if not ensure_map_anything_package(verbose=verbose):
+                return False
+        elif engine == "dvlt":
+            if not ensure_dvlt_package(verbose=verbose):
                 return False
         else:
             git_spec = _ENGINE_GIT[engine]

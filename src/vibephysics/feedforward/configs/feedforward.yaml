@@ -75,3 +75,10 @@ r3:
   kv_backend: dense            # dense | paged (paged needs flashinfer)
   rel_pose_method: greedy      # greedy | pgo
   metric_model_name: depth-anything/DA3METRIC-LARGE
+
+dvlt:
+  checkpoint: nvidia/dvlt      # HF Hub repo id, local dir, or HTTPS URL (NVIDIA license on weights)
+  img_size: 504
+  patch_size: 14
+  conf_percentile: 50.0
+  depth_edge_rtol: 0.03

@@ -27,6 +27,7 @@ from .common import (
     VIDEO_EXTRACT_FPS_FILE,
     discover_images,
     get_vram_gb,
+    is_dvlt_engine,
     is_lingbot_map_engine,
     is_r3_engine,
     is_vgg_ttt_engine,
@@ -479,6 +480,7 @@ _INSTALL_HINTS = {
     "vgg_ttt": "pip install vibephysics (deps auto-install on first run)",
     "map_anything": "pip install vibephysics (deps auto-install on first run)",
     "r3": "pip install vibephysics (deps auto-install on first run; CUDA + xformers required)",
+    "dvlt": "pip install vibephysics (deps auto-install on first run; CUDA recommended)",
 }
 
 
@@ -590,6 +592,10 @@ def _engine_available(engine: str) -> bool:
         from .r3 import is_available
 
         return is_available()
+    if engine == "dvlt":
+        from .dvlt import is_available
+
+        return is_available()
     return False
 
 
@@ -662,6 +668,11 @@ def reconstruct(
     r3_kv_backend: str = "dense",
     r3_rel_pose_method: str = "greedy",
     r3_metric_model_name: str = "depth-anything/DA3METRIC-LARGE",
+    dvlt_checkpoint: str | Path = "nvidia/dvlt",
+    dvlt_img_size: int = 504,
+    dvlt_patch_size: int = 14,
+    dvlt_conf_percentile: float = 50.0,
+    dvlt_depth_edge_rtol: float = 0.03,
     video_fps: float | None = None,
     video_quality: int = 2,
     verbose: bool = True,
@@ -781,6 +792,21 @@ def reconstruct(
                 max_frames_mode=max_frames_mode,
                 verbose=verbose,
             )
+        elif engine == "dvlt":
+            from .dvlt import run_dvlt
+
+            prediction = run_dvlt(
+                image_path=image_path,
+                checkpoint=dvlt_checkpoint,
+                img_size=dvlt_img_size,
+                patch_size=dvlt_patch_size,
+                max_frames=max_frames,
+                max_frames_mode=max_frames_mode,
+                filter_depth_edges=filter_edges,
+                depth_edge_rtol=dvlt_depth_edge_rtol,
+                conf_percentile=dvlt_conf_percentile,
+                verbose=verbose,
+            )
         else:
             raise ValueError(f"Unknown engine: {engine}")
 
@@ -796,6 +822,12 @@ def reconstruct(
             prediction,
             min_confidence,
             conf_percentile=vgg_ttt_conf_percentile,
+        )
+    elif is_dvlt_engine(prediction.engine):
+        export_min_confidence = resolve_confidence_threshold(
+            prediction,
+            min_confidence,
+            conf_percentile=dvlt_conf_percentile,
         )
 
     if align_ground:
@@ -833,6 +865,8 @@ def reconstruct(
                 if is_vggt_omega_engine(engine)
                 else vgg_ttt_conf_percentile
                 if is_vgg_ttt_engine(engine)
+                else dvlt_conf_percentile
+                if is_dvlt_engine(engine)
                 else None
             ),
             "point_scale": point_scale,

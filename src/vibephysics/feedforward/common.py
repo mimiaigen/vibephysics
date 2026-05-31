@@ -19,6 +19,7 @@ VGGT_OMEGA_GIT = "git+https://github.com/facebookresearch/vggt-omega.git"
 VGG_TTT_GIT = "git+https://github.com/nv-dvl/vgg-ttt.git"
 MAP_ANYTHING_GIT = "git+https://github.com/facebookresearch/map-anything.git"
 R3_GIT = "git+https://github.com/KevinXu02/R3.git"
+DVLT_GIT = "git+https://github.com/nv-tlabs/dvlt.git"
 DEFAULT_VIDEO_FPS = 2.0
 VIDEO_EXTRACT_FPS_FILE = ".vibephysics_extract_fps"
 
@@ -83,6 +84,11 @@ def is_map_anything_engine(engine: str) -> bool:
 def is_r3_engine(engine: str) -> bool:
     engine = str(engine)
     return engine == "r3" or engine.startswith("r3")
+
+
+def is_dvlt_engine(engine: str) -> bool:
+    engine = str(engine).strip().lower()
+    return engine == "dvlt" or engine in ("deja_view", "dejaview", "deja-view")
 
 
 def discover_images(image_path: Path) -> list[Path]:
@@ -178,6 +184,8 @@ def engine_preview_label(engine: str) -> str:
         return "R3"
     if is_map_anything_engine(engine):
         return "Map-Anything"
+    if is_dvlt_engine(engine):
+        return "DVLT"
     return engine.replace("_", " ").strip() or "feedforward"
 
 
@@ -555,7 +563,7 @@ def resolve_confidence_threshold(
         metadata = predictions.get("metadata", {})
         conf = predictions["conf"]
 
-    if is_vggt_omega_engine(engine) or is_vgg_ttt_engine(engine):
+    if is_vggt_omega_engine(engine) or is_vgg_ttt_engine(engine) or is_dvlt_engine(engine):
         percentile = conf_percentile
         if percentile is None and isinstance(metadata, dict):
             percentile = metadata.get("conf_percentile")

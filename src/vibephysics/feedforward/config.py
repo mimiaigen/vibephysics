@@ -12,7 +12,7 @@ from .common import DEFAULT_LINGBOT_MAP_MODEL, DEFAULT_VIDEO_FPS
 CONFIGS_DIR = Path(__file__).resolve().parent / "configs"
 DEFAULT_FEEDFORWARD_CONFIG = CONFIGS_DIR / "feedforward.yaml"
 
-FEEDFORWARD_ENGINES = ("lingbot_map", "vggt_omega", "vgg_ttt", "map_anything", "r3")
+FEEDFORWARD_ENGINES = ("lingbot_map", "vggt_omega", "vgg_ttt", "map_anything", "r3", "dvlt")
 
 MAX_FRAMES_MODES = ("spread", "first")
 
@@ -144,6 +144,7 @@ def parse_feedforward_config(cfg: dict[str, Any], config_path: Path | None = Non
     vgg_ttt = _nested(cfg, "vgg_ttt")
     map_anything = _nested(cfg, "map_anything")
     r3 = _nested(cfg, "r3")
+    dvlt = _nested(cfg, "dvlt")
     output = _nested(cfg, "output")
     video = _nested(cfg, "video")
 
@@ -217,4 +218,9 @@ def parse_feedforward_config(cfg: dict[str, Any], config_path: Path | None = Non
         "r3_kv_backend": r3.get("kv_backend", "dense"),
         "r3_rel_pose_method": r3.get("rel_pose_method", "greedy"),
         "r3_metric_model_name": r3.get("metric_model_name", "depth-anything/DA3METRIC-LARGE"),
+        "dvlt_checkpoint": dvlt.get("checkpoint") or "nvidia/dvlt",
+        "dvlt_img_size": dvlt.get("img_size", 504),
+        "dvlt_patch_size": dvlt.get("patch_size", 14),
+        "dvlt_conf_percentile": dvlt.get("conf_percentile", 50.0),
+        "dvlt_depth_edge_rtol": dvlt.get("depth_edge_rtol", 0.03),
     }

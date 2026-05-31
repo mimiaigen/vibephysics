@@ -15,7 +15,7 @@ usage() {
     echo "  $0 --method mapanything --input path/to/images --blend"
     echo ""
     echo "Direct engines:"
-    echo "  lingbot_map, vggt_omega, vgg_ttt, r3, r3_long, map_anything"
+    echo "  lingbot_map, vggt_omega, vgg_ttt, r3, r3_long, dvlt, map_anything"
     echo ""
     echo "Map-Anything factory methods (known examples; unknown methods route here too):"
     echo "  mapanything, mapanything_apache, mapanything_ablations, vggt, moge,"
@@ -288,6 +288,9 @@ case "$METHOD_NORM" in
         ENGINE="r3"
         R3_MODEL="r3_long"
         ;;
+    dvlt|deja_view|dejaview|deja-view)
+        ENGINE="dvlt"
+        ;;
     map_anything|mapanything_engine)
         ENGINE="map_anything"
         ;;
@@ -348,6 +351,10 @@ elif engine == "vgg_ttt":
     ok = ensure_dependencies()
 elif engine == "r3":
     from vibephysics.feedforward.r3 import ensure_dependencies
+
+    ok = ensure_dependencies()
+elif engine == "dvlt":
+    from vibephysics.feedforward.dvlt import ensure_dependencies
 
     ok = ensure_dependencies()
 elif engine == "map_anything":

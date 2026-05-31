@@ -11,6 +11,7 @@ feedforward/
   vgg_ttt/__init__.py       # VGG-TTT
   map_anything/__init__.py  # Map-Anything factory (many model keys)
   r3/__init__.py            # R3
+  dvlt/__init__.py          # Déjà View (DVLT) — https://github.com/nv-tlabs/dvlt
 
   schema.py                 # FeedforwardPrediction + predictions.npz I/O
   reconstruct.py            # orchestrator, video→frames, CLI, profiling
@@ -58,11 +59,12 @@ Preferred entry point. Sources `feedforward_run.inc.sh` for shared frame/plan he
 ./run_feedforward.sh --method r3_long --input path/to/video.MOV
 ./run_feedforward.sh --method mapanything --input path/to/images --blend --html
 ./run_feedforward.sh --method da3 --input path/to/images   # Map-Anything factory key
+./run_feedforward.sh --method dvlt --input path/to/video.MOV --html
 ```
 
 **What the shell script does:**
 
-1. Normalizes `--method` → `engine` (`lingbot_map`, `vggt_omega`, `vgg_ttt`, `r3`, `map_anything`).
+1. Normalizes `--method` → `engine` (`lingbot_map`, `vggt_omega`, `vgg_ttt`, `r3`, `dvlt`, `map_anything`). Aliases: `deja_view`, `dejaview` → `dvlt`.
 2. Unknown method names → `engine=map_anything` with `--model` set to that name (forward-compatible factory keys).
 3. Resolves Python 3.11 + `bpy` + `numpy<2`; sets `PYTHONPATH="${repo}/src"`.
 4. Builds a temp YAML from `configs/feedforward.yaml` (`save_blend`, `save_html`, `compact`, R3 model, …).
@@ -156,7 +158,9 @@ Legacy NPZ without `world_coordinates` are still treated as OpenCV at load/visua
 
 ## Engines (`config.FEEDFORWARD_ENGINES`)
 
-`lingbot_map`, `vggt_omega`, `vgg_ttt`, `map_anything`, `r3`
+`lingbot_map`, `vggt_omega`, `vgg_ttt`, `map_anything`, `r3`, `dvlt`
+
+**DVLT** ([nv-tlabs/dvlt](https://github.com/nv-tlabs/dvlt)): recurrent multi-view model; default checkpoint `nvidia/dvlt` on Hugging Face (NVIDIA license on weights). Installed with `pip install --no-deps` + a numpy&lt;2 runtime (see `deps.install_dvlt_from_git`) so it coexists with `bpy`. Outputs OpenCV c2w → stored as w2c with `w2c_as_camera_pose: false`. CUDA strongly recommended.
 
 Map-Anything: one engine module; `map_anything.model` / `--model` selects factory keys (`vggt`, `da3`, `pi3`, …). Extra pip specs live in `deps.MAP_ANYTHING_EXTRA_SPECS`.
 
@@ -179,6 +183,8 @@ Map-Anything: one engine module; `map_anything.model` / `--model` selects factor
 
 7. **Do not duplicate** ground align, `convert_prediction_to_blender_zup`, compact/dense save, blend, or Plotly in the engine folder
 
-8. **Set `w2c_as_camera_pose` correctly** for how your engine’s `extrinsic` rows must be interpreted by `convert_prediction_to_blender_zup` (see **Coordinates, extrinsics, and Plotly**). Wrong flag → wrong saved trajectory vs points.
+8. **Set `w2c_as_camera_pose` correctly** for how your engine’s `extrinsic` rows must be interpreted by `convert_prediction_to_blender_zup` (see **Coordinates, extrinsics, and Plotly**). Wrong flag → wrong saved trajectory vs points. **Do not copy LingBot’s `true` flag to other engines** unless their 3×4 rows use the same convention.
+
+9. **DVLT pattern:** `feedforward/dvlt/__init__.py` → `run_dvlt()` using upstream `DVLT` + `preprocess_images`; HF weights via `feedforward_hf_hub_cache()`; git install via `deps.ensure_dvlt_package()` (no upstream `[all]` extra).
 
 Optional: extend `common.engine_preview_label` / `preview_feedforward_input_plan` if the engine needs a custom frame-plan line in `feedforward_print_frame_plan`.

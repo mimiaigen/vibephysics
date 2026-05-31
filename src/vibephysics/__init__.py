@@ -16,7 +16,7 @@ Usage:
 Note: This package requires Blender 5.0's Python environment (bpy) for simulation.
 """
 
-__version__ = "0.3.6"
+__version__ = "0.3.7"
 __author__ = "Tsun-Yi Yang"
 
 try:

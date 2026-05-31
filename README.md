@@ -107,17 +107,20 @@ Install backends (Python 3.11 + `bpy`). Pre-install from GitHub (see Installatio
 ```bash
 pip install vibephysics bpy
 
-# default: compact predictions.npz (~4k pts/frame) — small, fast, good for Python/API
+# compact (default): npz has points/colors/poses only, ~4k sampled pts/frame — small, for viz/API/blend/html
 ./run_feedforward.sh --method lingbot_map --input test_recording.MOV
+
+# non-compact: npz keeps full per-pixel depth, conf, world_points — large, for custom dense processing
+./run_feedforward.sh --method lingbot_map --input test_recording.MOV --random_points_per_frame 0
+
+# --compact + no sampling: compact schema but all confident points (still no depth arrays)
+./run_feedforward.sh --method lingbot_map --input test_recording.MOV --random_points_per_frame 0 --compact
 
 # --blend only: open in Blender; skip HTML if you don't need a browser view
 ./run_feedforward.sh --method lingbot_map --input test_recording.MOV --blend
 
 # --html only: browser QA/share; skip blend if you're not in Blender yet
 ./run_feedforward.sh --method lingbot_map --input test_recording.MOV --html
-
-# dense npz: full depth/world_points (large); use --compact to still drop to points+poses
-./run_feedforward.sh --method vggt_omega --input path/to/images --random_points_per_frame 0
 
 # other engines
 ./run_feedforward.sh --method r3 --input test_recording.MOV --max_frames 4

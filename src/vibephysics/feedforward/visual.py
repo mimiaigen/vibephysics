@@ -26,9 +26,12 @@ ENGINE_COLLECTION_NAMES = {
     "vggt": "VGGT_Omega_Result",
 }
 
-TRAJECTORY_RADIUS_FACTOR = 0.0015
-TRAJECTORY_RADIUS_MIN = 0.0008
-DEFAULT_POINT_RADIUS = 0.01
+# Fixed viewport gizmo sizes in reconstruction coordinates (not scaled to scene extent).
+CAMERA_FRUSTUM_DISPLAY_SIZE = 0.02
+CAMERA_FRUSTUM_CLIP_START = 0.0005
+CAMERA_FRUSTUM_CLIP_END = 0.04
+CAMERA_TRAJECTORY_RADIUS = 0.0008
+DEFAULT_POINT_RADIUS = 0.001
 
 
 class _AnimationTiming:
@@ -147,6 +150,12 @@ def add_point_cloud_geo_nodes(
     input_node = node_group.nodes.new("NodeGroupInput")
     output_node = node_group.nodes.new("NodeGroupOutput")
     mesh_to_points = node_group.nodes.new("GeometryNodeMeshToPoints")
+    if hasattr(mesh_to_points, "mode"):
+        mesh_to_points.mode = "VERTICES"
+    instance_on_points = node_group.nodes.new("GeometryNodeInstanceOnPoints")
+    ico_sphere = node_group.nodes.new("GeometryNodeMeshIcoSphere")
+    ico_sphere.inputs["Subdivisions"].default_value = 1
+    realize_instances = node_group.nodes.new("GeometryNodeRealizeInstances")
     math_node = node_group.nodes.new("ShaderNodeMath")
     math_node.operation = "MULTIPLY"
     math_node.inputs[1].default_value = 1.0
@@ -163,7 +172,7 @@ def add_point_cloud_geo_nodes(
 
     node_group.links.new(input_node.outputs["Geometry"], mesh_to_points.inputs["Mesh"])
     node_group.links.new(input_node.outputs["Scale"], math_node.inputs[0])
-    node_group.links.new(math_node.outputs["Value"], mesh_to_points.inputs["Radius"])
+    node_group.links.new(math_node.outputs["Value"], ico_sphere.inputs["Radius"])
     node_group.links.new(mesh_to_points.outputs["Points"], delete_geo.inputs["Geometry"])
     node_group.links.new(named_attr.outputs["Attribute"], compare.inputs["A"])
     node_group.links.new(input_node.outputs["Threshold"], compare.inputs["B"])
@@ -209,7 +218,10 @@ def add_point_cloud_geo_nodes(
         node_group.links.new(frame_delete_mask.outputs["Boolean"], delete_frames.inputs["Selection"])
         last_geo = delete_frames.outputs["Geometry"]
 
-    node_group.links.new(last_geo, set_material_node.inputs["Geometry"])
+    node_group.links.new(last_geo, instance_on_points.inputs["Points"])
+    node_group.links.new(ico_sphere.outputs["Mesh"], instance_on_points.inputs["Instance"])
+    node_group.links.new(instance_on_points.outputs["Instances"], realize_instances.inputs["Geometry"])
+    node_group.links.new(realize_instances.outputs["Geometry"], set_material_node.inputs["Geometry"])
     node_group.links.new(set_material_node.outputs["Geometry"], output_node.inputs["Geometry"])
 
 
@@ -293,72 +305,6 @@ def _camera_center_blender(
         predictions=predictions,
     )
     return np.array(m.translation, dtype=np.float64)
-
-
-def _scene_scale_from_extrinsics(
-    extrinsics: np.ndarray,
-    *,
-    w2c_as_camera_pose: bool = False,
-    predictions: dict | None = None,
-) -> float:
-    """Scene extent from camera path in Blender space (matches point cloud coords)."""
-    if len(extrinsics) <= 1:
-        return 1.0
-    centers = np.array(
-        [
-            _camera_center_blender(
-                w2c,
-                w2c_as_camera_pose=w2c_as_camera_pose,
-                predictions=predictions,
-            )
-            for w2c in extrinsics
-        ],
-        dtype=np.float64,
-    )
-    return float(max(np.linalg.norm(np.ptp(centers, axis=0)), 0.1))
-
-
-def _scene_scale_from_points(
-    world_points: np.ndarray,
-    *,
-    predictions: dict | None = None,
-) -> float:
-    """Scene extent from point cloud (official GLB export uses 5th–95th percentile)."""
-    from .common import is_blender_z_up
-
-    flat = np.asarray(world_points, dtype=np.float64).reshape(-1, 3)
-    valid = np.isfinite(flat).all(axis=1)
-    pts = flat[valid]
-    if pts.shape[0] < 2:
-        return 1.0
-    if predictions is None or not is_blender_z_up(predictions):
-        pts = _opencv_to_blender_points(pts)
-    lo = np.percentile(pts, 5, axis=0)
-    hi = np.percentile(pts, 95, axis=0)
-    return float(max(np.linalg.norm(hi - lo), 0.1))
-
-
-def _resolve_scene_scale(
-    extrinsics: np.ndarray,
-    world_points: np.ndarray | None,
-    *,
-    w2c_as_camera_pose: bool = False,
-    predictions: dict | None = None,
-) -> float:
-    """Size frustums/trajectory from cameras and points (matches official viser/GLB)."""
-    cam_scale = _scene_scale_from_extrinsics(
-        extrinsics,
-        w2c_as_camera_pose=w2c_as_camera_pose,
-        predictions=predictions,
-    )
-    if world_points is None:
-        return cam_scale
-    return float(
-        max(
-            cam_scale,
-            _scene_scale_from_points(world_points, predictions=predictions),
-        )
-    )
 
 
 def _apply_build_animation(obj: bpy.types.Object, timing: _AnimationTiming) -> None:
@@ -448,7 +394,6 @@ def _aligned_quaternions(camera_objects: list[bpy.types.Object]) -> list:
 def _create_playback_camera(
     camera_objects: list[bpy.types.Object],
     collection: bpy.types.Collection | None,
-    scene_scale: float,
     timing: _AnimationTiming,
     *,
     smooth: bool = True,
@@ -466,7 +411,7 @@ def _create_playback_camera(
     else:
         bpy.context.scene.collection.objects.link(playback_obj)
 
-    _apply_scene_scale_camera_display(playback_data, scene_scale)
+    _apply_camera_viewport_display(playback_data)
     playback_obj.rotation_mode = "QUATERNION"
     quats = _aligned_quaternions(camera_objects)
     first_cam = camera_objects[0]
@@ -500,7 +445,6 @@ def _apply_intrinsics_to_blender_camera(
     intrinsic: np.ndarray,
     image_width: int,
     image_height: int,
-    scene_scale: float,
 ) -> None:
     """Map OpenCV intrinsics + image size to Blender camera FOV/frustum."""
     f_x, f_y = float(intrinsic[0, 0]), float(intrinsic[1, 1])
@@ -513,23 +457,20 @@ def _apply_intrinsics_to_blender_camera(
     cam_data.sensor_height = sensor_width * (image_height / image_width) * (f_x / f_y)
     cam_data.shift_x = (c_x - image_width / 2.0) / image_width
     cam_data.shift_y = -(c_y - image_height / 2.0) / image_height
-    _apply_scene_scale_camera_display(cam_data, scene_scale)
+    _apply_camera_viewport_display(cam_data)
 
 
-def _apply_scene_scale_camera_display(cam_data: bpy.types.Camera, scene_scale: float) -> None:
-    """Size viewport frustums relative to scene extent (matches common feedforward viewers)."""
-    frustum_width = scene_scale * 0.05
-    frustum_depth = scene_scale * 0.10
-    cam_data.display_size = max(frustum_width, 0.01)
-    cam_data.clip_start = max(frustum_depth * 0.01, 1e-4)
-    cam_data.clip_end = max(frustum_depth, 0.05)
+def _apply_camera_viewport_display(cam_data: bpy.types.Camera) -> None:
+    """Fixed-size viewport camera frustum gizmo (independent of scene extent)."""
+    cam_data.display_size = CAMERA_FRUSTUM_DISPLAY_SIZE
+    cam_data.clip_start = CAMERA_FRUSTUM_CLIP_START
+    cam_data.clip_end = CAMERA_FRUSTUM_CLIP_END
     cam_data.show_limits = True
 
 
 def create_camera_trajectory(
     predictions: dict,
     collection: bpy.types.Collection | None,
-    scene_scale: float,
     radius: float | None = None,
     w2c_as_camera_pose: bool = False,
     animate: bool = False,
@@ -541,7 +482,7 @@ def create_camera_trajectory(
         return None
 
     if radius is None:
-        radius = max(scene_scale * TRAJECTORY_RADIUS_FACTOR, TRAJECTORY_RADIUS_MIN)
+        radius = CAMERA_TRAJECTORY_RADIUS
 
     points = [
         _camera_center_blender(
@@ -626,7 +567,6 @@ def create_cameras(
     predictions: dict,
     collection=None,
     global_indices: list[int] | None = None,
-    scene_scale: float | None = None,
     w2c_as_camera_pose: bool = False,
     animate: bool = False,
     timing: _AnimationTiming | None = None,
@@ -636,13 +576,6 @@ def create_cameras(
     image_height, image_width = depth.shape[1], depth.shape[2]
     num_cameras = len(predictions["extrinsic"])
     image_paths = predictions.get("image_paths")
-
-    if scene_scale is None:
-        scene_scale = _scene_scale_from_extrinsics(
-            predictions["extrinsic"],
-            w2c_as_camera_pose=w2c_as_camera_pose,
-            predictions=predictions,
-        )
 
     target_collection = collection
     if collection is not None:
@@ -669,7 +602,6 @@ def create_cameras(
             predictions["intrinsic"][i],
             image_width,
             image_height,
-            scene_scale,
         )
 
         cam_obj = bpy.data.objects.new(name=cam_name, object_data=cam_data)
@@ -692,7 +624,7 @@ def create_cameras(
     if camera_objects and not animate:
         scene.camera = camera_objects[0]
     elif animate and timing is not None:
-        playback = _create_playback_camera(camera_objects, target_collection, scene_scale, timing)
+        playback = _create_playback_camera(camera_objects, target_collection, timing)
         if playback is not None:
             camera_objects.append(playback)
     return camera_objects
@@ -931,13 +863,6 @@ def load_reconstruction(
     root_obj.rotation_euler = user_euler
 
     point_obj = None
-    world_points = payload.get("world_points_from_depth", payload.get("world_points"))
-    scene_scale = _resolve_scene_scale(
-        payload["extrinsic"],
-        world_points,
-        w2c_as_camera_pose=w2c_as_camera_pose,
-        predictions=payload,
-    )
     camera_objects: list[bpy.types.Object] = []
     traj = None
     if import_points:
@@ -958,7 +883,6 @@ def load_reconstruction(
             payload,
             collection=col,
             global_indices=global_indices,
-            scene_scale=scene_scale,
             w2c_as_camera_pose=w2c_as_camera_pose,
             animate=animate,
             timing=timing,
@@ -969,7 +893,6 @@ def load_reconstruction(
         traj = create_camera_trajectory(
             payload,
             collection=col,
-            scene_scale=scene_scale,
             w2c_as_camera_pose=w2c_as_camera_pose,
             animate=animate,
             timing=timing,

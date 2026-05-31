@@ -69,7 +69,7 @@ def main():
         feedforward.load_reconstruction(
             prediction,
             min_confidence=output.get("min_confidence", 0.5),
-            point_scale=output.get("point_scale", 0.01),
+            point_scale=output.get("point_scale", 0.001),
         )
         save_path = Path(output.get("save_blend", "output/feedforward_scene.blend")).absolute()
         save_blend(str(save_path))

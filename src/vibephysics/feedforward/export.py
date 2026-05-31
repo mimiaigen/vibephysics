@@ -47,7 +47,7 @@ def _blend_load_settings(predictions_path: Path, args: argparse.Namespace) -> di
 
     point_scale = args.point_scale
     if point_scale is None:
-        point_scale = float(defaults.get("point_scale", 0.01))
+        point_scale = float(defaults.get("point_scale", 0.001))
 
     return {
         "min_confidence": float(min_confidence),
@@ -672,7 +672,7 @@ def main() -> None:
         "--point-scale",
         type=float,
         default=None,
-        help="Absolute point radius for feedforward points. Defaults to reconstruct_config.json or 0.01.",
+        help="Absolute point radius for feedforward points. Defaults to reconstruct_config.json or 0.001.",
     )
     single.add_argument("--animate", action=argparse.BooleanOptionalAction, default=True)
     single.add_argument("--align-ground", action=argparse.BooleanOptionalAction, default=True)
@@ -699,7 +699,7 @@ def main() -> None:
         "--point-scale",
         type=float,
         default=None,
-        help="Absolute point radius for feedforward points. Defaults to reconstruct_config.json or 0.01.",
+        help="Absolute point radius for feedforward points. Defaults to reconstruct_config.json or 0.001.",
     )
     compare.add_argument("--point-size", type=float, default=0.03, dest="point_size")
     compare.add_argument("--animate", action=argparse.BooleanOptionalAction, default=True)

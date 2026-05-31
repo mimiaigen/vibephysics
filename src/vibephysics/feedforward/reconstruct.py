@@ -618,7 +618,7 @@ def reconstruct(
     save_frames: bool = False,
     min_confidence: float = 2.0,
     filter_edges: bool = True,
-    point_scale: float = 0.01,
+    point_scale: float = 0.001,
     point_random_points_per_frame: int | None = 4000,
     point_total_random_points: int | None = 400_000,
     compact: bool = False,

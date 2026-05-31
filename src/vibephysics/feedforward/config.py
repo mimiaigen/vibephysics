@@ -168,7 +168,7 @@ def parse_feedforward_config(cfg: dict[str, Any], config_path: Path | None = Non
         "save_frames": bool(output.get("save_frames", False)),
         "min_confidence": output.get("min_confidence", 2.0),
         "filter_edges": output.get("filter_edges", True),
-        "point_scale": output.get("point_scale", 0.01),
+        "point_scale": output.get("point_scale", 0.001),
         "point_random_points_per_frame": point_random_points_per_frame,
         "point_total_random_points": point_total_random_points,
         "compact": bool(output.get("compact", False)),

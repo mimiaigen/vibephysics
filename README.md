@@ -10,12 +10,12 @@
 
 ## Changelog
 
-- **Unreleased** — [DVLT](https://github.com/nv-tlabs/dvlt) feedforward (`--method dvlt`); `.vibephysics/feedforward/` weight caches; Plotly trajectory aligned with saved poses; feedforward `SKILL.md` for agents.
-- **v0.3.5** (2026-05-31) — PyPI; feedforward stage timing/RSS; compact NPZ defaults (`min_confidence`, per-frame/global sampling); Plotly frame-balanced sampling; R3 Mac/MPS kill warning.
-- **2026-05-30** — [R3](https://github.com/KevinXu02/R3) / R3-Long; unified `run_feedforward.sh` + `feedforward.yaml`; opt-in `--blend` / `--html` / `--frames`.
-- **2026-05-29** — [Map-Anything](https://github.com/facebookresearch/map-anything), [VGG-TTT](https://github.com/nv-dvl/vgg-ttt).
-- **2026-05-28** — [VGGT-Omega](https://github.com/facebookresearch/vggt-omega); LingBot-Map long video; Blender Z-up `predictions.npz`.
-- **2026-05-27** — GLOMAP/COLMAP mapping viz; Plotly HTML export.
+- **Unreleased** — [LingBot-Map](https://github.com/robbyant/lingbot-map) Plotly camera-path fix; [DVLT](https://github.com/nv-tlabs/dvlt) (`--method dvlt`); `.vibephysics/feedforward/` caches; feedforward `SKILL.md`.
+- **v0.3.5** (2026-05-31) — PyPI; [LingBot-Map](https://github.com/robbyant/lingbot-map) / all engines: stage timing/RSS, ground align before save, compact NPZ sampling, Plotly HTML; R3 Mac/MPS warning.
+- **2026-05-30** — [R3](https://github.com/KevinXu02/R3) / R3-Long; unified `run_feedforward.sh` + `feedforward.yaml` (incl. LingBot-Map); `--blend` / `--html` / `--frames`.
+- **2026-05-29** — [Map-Anything](https://github.com/facebookresearch/map-anything), [VGG-TTT](https://github.com/nv-dvl/vgg-ttt) (+ LingBot-Map, VGGT-Omega).
+- **2026-05-28** — [VGGT-Omega](https://github.com/facebookresearch/vggt-omega); [LingBot-Map](https://github.com/robbyant/lingbot-map) streaming/windowed long video; Blender Z-up `predictions.npz`.
+- **2026-05-27** — GLOMAP/COLMAP mapping viz; Plotly HTML (LingBot-Map feedforward).
 
 ---
 
@@ -202,7 +202,7 @@ output:
   save_frames: false       # true = save model-preprocessed RGB frames
   min_confidence: 2.0
   filter_edges: true
-  point_scale: 0.01
+  point_scale: 0.001
   random_points_per_frame: 4000  # per-frame random sample after confidence filter; null/0 = dense
   total_random_points: null      # optional global random cap after per-frame sampling
   compact: false           # true = force compact points + poses only

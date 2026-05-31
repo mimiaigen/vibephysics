@@ -7,11 +7,10 @@ from pathlib import Path
 
 from vibephysics.feedforward.common import VIDEO_EXTRACT_FPS_FILE
 from vibephysics.feedforward.visual import (
-    TRAJECTORY_RADIUS_FACTOR,
-    TRAJECTORY_RADIUS_MIN,
+    CAMERA_TRAJECTORY_RADIUS,
     _AnimationTiming,
     _apply_build_animation,
-    _apply_scene_scale_camera_display,
+    _apply_camera_viewport_display,
     _configure_scene_timeline,
     _configure_viewports_material_preview,
     _create_playback_camera,
@@ -32,13 +31,6 @@ def _resolve_video_fps(frames_dir: str | Path | None, video_fps: float | None) -
 
 def _ordered_images(recon: pycolmap.Reconstruction) -> list[tuple[int, object]]:
     return sorted(recon.images.items(), key=lambda item: item[1].name)
-
-
-def _scene_scale_from_cameras(camera_objects: list[bpy.types.Object]) -> float:
-    if len(camera_objects) <= 1:
-        return 1.0
-    centers = np.array([obj.matrix_world.translation for obj in camera_objects], dtype=np.float64)
-    return float(max(np.linalg.norm(np.ptp(centers, axis=0)), 0.1))
 
 
 def _colmap_points_for_animation(
@@ -75,13 +67,12 @@ def _colmap_points_for_animation(
 def _create_camera_trajectory(
     camera_objects: list[bpy.types.Object],
     collection: bpy.types.Collection,
-    scene_scale: float,
     timing: _AnimationTiming | None,
     animate: bool,
 ) -> bpy.types.Object | None:
     if len(camera_objects) < 2:
         return None
-    radius = max(scene_scale * TRAJECTORY_RADIUS_FACTOR, TRAJECTORY_RADIUS_MIN)
+    radius = CAMERA_TRAJECTORY_RADIUS
     points = [obj.matrix_world.translation for obj in camera_objects]
     curve_data = bpy.data.curves.new(name="CameraTrajectory", type="CURVE")
     curve_data.dimensions = "3D"
@@ -105,7 +96,7 @@ def _create_camera_trajectory(
     return traj_obj
 
 
-def create_camera_object(image, camera, collection, scale=0.1, scene_scale: float | None = None):
+def create_camera_object(image, camera, collection, scale=0.1):
     """
     Create a Blender camera object from a Colmap image and camera.
     """
@@ -189,11 +180,7 @@ def create_camera_object(image, camera, collection, scale=0.1, scene_scale: floa
     cam_data.shift_x = (cx / width) - 0.5
     cam_data.shift_y = (height / 2.0 - cy) / width
     
-    # Set display size for the camera gizmo in viewport
-    if scene_scale is not None:
-        _apply_scene_scale_camera_display(cam_data, scene_scale)
-    else:
-        cam_data.display_size = scale
+    _apply_camera_viewport_display(cam_data)
     
     return cam_obj
 
@@ -384,7 +371,6 @@ def load_colmap_reconstruction(
 
     point_obj = None
     camera_objects: list[bpy.types.Object] = []
-    scene_scale = 1.0
 
     if import_cameras and ordered_images:
         print(f"Importing {len(ordered_images)} cameras...")
@@ -400,15 +386,12 @@ def load_colmap_reconstruction(
                 scale=camera_scale,
             )
             camera_objects.append(cam_obj)
-        scene_scale = _scene_scale_from_cameras(camera_objects)
-        for cam_obj in camera_objects:
-            _apply_scene_scale_camera_display(cam_obj.data, scene_scale)
         for idx, cam_obj in enumerate(camera_objects):
             cam_obj.parent = root_obj
             if timing is not None:
                 _keyframe_camera_visibility(cam_obj, timing, idx)
         if timing is not None:
-            playback = _create_playback_camera(camera_objects, cameras_col, scene_scale, timing)
+            playback = _create_playback_camera(camera_objects, cameras_col, timing)
             if playback is not None:
                 playback.parent = root_obj
         elif camera_objects:
@@ -439,7 +422,6 @@ def load_colmap_reconstruction(
         traj = _create_camera_trajectory(
             camera_objects,
             col,
-            scene_scale,
             timing,
             animate=True,
         )

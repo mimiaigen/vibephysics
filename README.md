@@ -106,68 +106,27 @@ Install backends (Python 3.11 + `bpy`). Pre-install from GitHub (see Installatio
 
 ```bash
 pip install vibephysics bpy
-```
 
-**Quick runs — pick an output goal** (same `--method` / `--input` for all three; only export flags change):
-
-**1. Compact `predictions.npz` only (default)** — smallest, fastest finish. You get a sampled colored point cloud plus camera poses (~4000 points/frame after confidence filtering). Use this when you will load results in Python, pipe into another tool, or decide later whether you need Blender or a browser viewer.
-
-```bash
+# default: compact predictions.npz (~4k pts/frame) — small, fast, good for Python/API
 ./run_feedforward.sh --method lingbot_map --input test_recording.MOV
-# writes: predictions.npz, reconstruct_config.json
-```
 
-**2. `--blend` only** — open the reconstruction directly in Blender for annotation, physics, or comparison with GLOMAP. Skip `--html` when you do not need a shareable browser view (HTML export adds wall time and a large `visual.html`).
-
-```bash
+# --blend only: open in Blender; skip HTML if you don't need a browser view
 ./run_feedforward.sh --method lingbot_map --input test_recording.MOV --blend
-# writes: predictions.npz + scene.blend (animated point cloud + cameras)
-```
 
-**3. `--html` only** — inspect or demo the cloud in a browser with Play/Pause and a trajectory overlay, without building a `.blend`. Skip `--blend` when you are not entering the Blender workflow yet (no `bpy` scene build).
-
-```bash
+# --html only: browser QA/share; skip blend if you're not in Blender yet
 ./run_feedforward.sh --method lingbot_map --input test_recording.MOV --html
-# writes: predictions.npz + visual.html
-```
 
-**Dense NPZ (optional):** drop per-frame sampling when you need full per-pixel `depth` / `world_points` for custom code — files are much larger. `--compact` still saves points+poses only if you disable sampling but want a small NPZ.
-
-```bash
+# dense npz: full depth/world_points (large); use --compact to still drop to points+poses
 ./run_feedforward.sh --method vggt_omega --input path/to/images --random_points_per_frame 0
-```
 
-Other engines: `./run_feedforward.sh --method r3 --input test_recording.MOV --max_frames 4` (Mac/MPS memory), `./run_feedforward.sh --method da3 --input path/to/images` (Map-Anything model key).
+# other engines
+./run_feedforward.sh --method r3 --input test_recording.MOV --max_frames 4
+./run_feedforward.sh --method da3 --input path/to/images
 
-```bash
-# Full example — all exports (use when you want NPZ + Blender + HTML + preprocessed frames in one run)
-# --method: choose a direct engine or Map-Anything model key
-# --input: video, image folder, or single image
-# --output_path: output directory; omit for timestamped feedforward_output/
-# --max_frames: limit frames for speed/memory
-# --max_frames_mode: first = first N frames, spread = sample across the full input
-# --min_confidence: drop low-confidence points before sampling
-# --random_points_per_frame: random point budget per frame after confidence filtering
-# --total_random_points: optional global random cap after per-frame sampling
-# --point_scale: Blender point radius when exporting .blend
-# --mode: preprocessing override for engines that support it
-# --blend: save scene.blend
-# --html: save visual.html Plotly viewer
-# --frames: save model-preprocessed RGB frames
-# --no-install: skip auto-install if you manage dependencies yourself
-./run_feedforward.sh \
-  --method r3_long \
-  --input test_recording.MOV \
-  --output_path output/r3_long_demo \
-  --max_frames 24 \
-  --max_frames_mode first \
-  --min_confidence 2.0 \
-  --random_points_per_frame 4000 \
-  --total_random_points 200000 \
-  --point_scale 0.01 \
-  --blend \
-  --html \
-  --frames
+# everything at once (npz + blend + html + preprocessed frames)
+./run_feedforward.sh --method r3_long --input test_recording.MOV \
+  --max_frames 24 --random_points_per_frame 4000 --total_random_points 200000 \
+  --blend --html --frames
 ```
 
 Configs: `src/vibephysics/feedforward/configs/`

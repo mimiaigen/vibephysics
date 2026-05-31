@@ -107,45 +107,57 @@ Install backends (Python 3.11 + `bpy`). Pre-install from GitHub (see Installatio
 ```bash
 pip install vibephysics bpy
 
-# compact (default): npz has points/colors/poses only, ~4k sampled pts/frame — small, for viz/API/blend/html
+# compact (default): ~4k pts/frame — balanced size/speed (script default if omitted)
 ./run_feedforward.sh \
   --method lingbot_map \
-  --input test_recording.MOV
+  --input test_recording.MOV \
+  --random_points_per_frame 4000
 
-# non-compact: npz keeps full per-pixel depth, conf, world_points — large, for custom dense processing
+# compact, lighter: ~1k pts/frame — faster runs / quick checks
+./run_feedforward.sh \
+  --method lingbot_map \
+  --input test_recording.MOV \
+  --random_points_per_frame 1000
+
+# non-compact: 0 disables sampling → full per-pixel depth/conf/world_points (large npz)
 ./run_feedforward.sh \
   --method lingbot_map \
   --input test_recording.MOV \
   --random_points_per_frame 0
 
-# --compact + no sampling: compact schema but all confident points (still no depth arrays)
+# compact, denser: 20k pts/frame — richer cloud, still no depth arrays (--compact optional)
 ./run_feedforward.sh \
   --method lingbot_map \
   --input test_recording.MOV \
-  --random_points_per_frame 0 \
+  --random_points_per_frame 20000 \
   --compact
 
-# --blend only: open in Blender; skip HTML if you don't need a browser view
+# --blend only: 10k pts/frame — fuller Blender scene; skip HTML if not needed
 ./run_feedforward.sh \
   --method lingbot_map \
   --input test_recording.MOV \
+  --random_points_per_frame 10000 \
   --blend
 
-# --html only: browser QA/share; skip blend if you're not in Blender yet
+# --html only: 4k/frame + 80k global cap — keeps browser viewer responsive
 ./run_feedforward.sh \
   --method lingbot_map \
   --input test_recording.MOV \
+  --random_points_per_frame 4000 \
+  --total_random_points 80000 \
   --html
 
-# other engines
+# r3 on Mac/MPS: 2k pts/frame + few frames — lower memory
 ./run_feedforward.sh \
   --method r3 \
   --input test_recording.MOV \
-  --max_frames 4
+  --max_frames 4 \
+  --random_points_per_frame 2000
 
 ./run_feedforward.sh \
   --method da3 \
-  --input path/to/images
+  --input path/to/images \
+  --random_points_per_frame 6000
 
 # everything at once (npz + blend + html + preprocessed frames)
 ./run_feedforward.sh \

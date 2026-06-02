@@ -1126,6 +1126,48 @@ def _all_bbox_visibility_spans(
     return spans
 
 
+def nms_change_bboxes_intra_frame(
+    bboxes: list[list[ChangeBBox] | ChangeBBox | None],
+    *,
+    iou_threshold: float = 0.25,
+) -> tuple[list[list[ChangeBBox] | ChangeBBox | None], int]:
+    """
+    Greedy 3D NMS within each reconstruction frame and class group.
+
+    When several same-class boxes overlap on one frame (e.g. duplicate oven
+    detections), keeps the largest by volume (then changed_voxels).
+    """
+    if iou_threshold <= 0.0:
+        return bboxes, 0
+
+    filtered: list[list[ChangeBBox] | ChangeBBox | None] = []
+    removed = 0
+    for entry in bboxes:
+        parsed = parse_frame_bbox_entry(entry)
+        if not parsed:
+            filtered.append(entry)
+            continue
+        by_class: dict[str, list[ChangeBBox]] = {}
+        for bbox in parsed:
+            by_class.setdefault(_nms_class_group(bbox.label), []).append(bbox)
+        kept: list[ChangeBBox] = []
+        for candidates in by_class.values():
+            class_kept: list[ChangeBBox] = []
+            for candidate in sorted(candidates, key=_bbox_sort_key, reverse=True):
+                if any(
+                    _bbox_suppression_score(candidate, kept_box) >= iou_threshold
+                    for kept_box in class_kept
+                ):
+                    removed += 1
+                    continue
+                class_kept.append(candidate)
+            kept.extend(class_kept)
+        filtered.append(kept if kept else None)
+    if removed == 0:
+        return bboxes, 0
+    return filtered, removed
+
+
 def resolve_progressive_bbox_spans(
     bboxes: list[list[ChangeBBox] | ChangeBBox | None],
     *,
@@ -1133,18 +1175,34 @@ def resolve_progressive_bbox_spans(
     animate: bool,
     progressive_class_nms_iou: float | None,
 ) -> list[BboxVisibilitySpan]:
-    """Spans for Blender import (progressive NMS timeline or show-all)."""
-    if timing is None or getattr(timing, "discrete", False) or not animate:
-        return _all_bbox_visibility_spans(bboxes)
+    """Spans for Blender import (intra-frame NMS + optional progressive timeline)."""
     if progressive_class_nms_iou is None:
         from .config import algo_3d_bbox_default
 
         progressive_class_nms_iou = float(
             algo_3d_bbox_default("progressive_class_nms_iou")
         )
+    iou = float(progressive_class_nms_iou)
+    if iou <= 0.0:
+        return _all_bbox_visibility_spans(bboxes)
+
+    bboxes, intra_removed = nms_change_bboxes_intra_frame(
+        bboxes, iou_threshold=iou
+    )
+    if intra_removed > 0:
+        print(
+            f"[vibephysics] algo_3d_bbox: removed {intra_removed} same-frame "
+            f"overlapping box(es) (per-class 3D IoU >= {iou:g})",
+            flush=True,
+        )
+
+    if timing is None or not animate:
+        return _all_bbox_visibility_spans(bboxes)
+    if getattr(timing, "discrete", False):
+        return _all_bbox_visibility_spans(bboxes)
     return compute_progressive_bbox_visibility_spans(
         bboxes,
-        iou_threshold=float(progressive_class_nms_iou),
+        iou_threshold=iou,
     )
 
 

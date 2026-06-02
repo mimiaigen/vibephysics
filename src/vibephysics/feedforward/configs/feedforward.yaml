@@ -116,7 +116,7 @@ algo_3d_bbox:
   padding: 0.01
   # Blender-only (change bbox / voxel layers in the .blend):
   min_visualize_changed_voxels: 350
-  progressive_class_nms_iou: 0.25   # progressive: per-class 3D IoU NMS (chair+couch share one bucket)
+  progressive_class_nms_iou: 0.25   # 3D IoU NMS: same-frame same-class always; cross-frame when progressive playback (chair+couch share one bucket)
   visualization: both          # voxels | bbox | both
   voxel_alpha: 0.1
   label_face_camera: true      # TRACK_TO scene camera so class labels face the viewer

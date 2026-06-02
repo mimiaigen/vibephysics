@@ -108,8 +108,12 @@ Feedforward 3D reconstruction from video or images via LingBot-Map, VGGT-Omega, 
 
 - **Blender point display:** `output.blend.point_display: points` (default) uses mesh vertices + geometry nodes. Set `pointcloud` for native Blender point clouds (faster on very long sequences). Tune size with `point_scale: 0.0035` (default).
 - **Adaptive sampling:** `random_points_per_frame: 0.35` keeps ~35% of confidence-filtered points **per frame** (float = ratio; scales with resolution and scene density). Prefer ratios over fixed counts like `4000`; use an integer only when you need an exact cap.
-- **2D → 3D object analysis:** `--detection_seg` runs RF-DETR instance segmentation (COCO classes), then masked 3D axis-aligned bboxes and semi-transparent **occupancy voxels** in `scene.blend`. `--algo_3d_bbox` without detection = voxel-diff change blobs vs frame 0.
+- **2D → 3D object analysis:** `--detection_seg` runs RF-DETR instance segmentation (COCO classes), then masked 3D wireframe bboxes, class labels, and semi-transparent **occupancy voxels** in `scene.blend` (see below). `--algo_3d_bbox` without detection = voxel-diff change blobs vs frame 0.
 - Optional: `pip install "vibephysics[detection_seg]"` — otherwise `run_feedforward.sh` / `reconstruct` auto-install or upgrade `transformers>=4.52` on first `--detection_seg`.
+
+![Detection + segmentation in Blender](assets/detection_seg_demo.png)
+
+*RF-DETR per-instance masks → colored 3D bbox wireframes + billboard labels (`BboxLabels` collection). Toggle `PointCloud`, `ChangeBBoxes`, `OccupancyVoxels`, and `BboxLabels` in the outliner.*
 
 <details>
 <summary>Feedforward setup & usage</summary>
@@ -144,12 +148,15 @@ pip install vibephysics bpy
   --frames \
   --blend
 
-# 5. RF-DETR segmentation + masked 3D bboxes + occupancy voxels in Blender
-#    (classes/colors in feedforward.yaml detection_seg; COCO names only)
+# 5. RF-DETR → masked 3D bboxes + class labels + occupancy voxels (assets/detection_seg_demo.png)
+#    Classes/colors: feedforward.yaml detection_seg.classes (COCO names, e.g. person, chair, couch)
+#    Blender layers: PointCloud | ChangeBBoxes | OccupancyVoxels | BboxLabels
 ./run_feedforward.sh \
   --method lingbot_map \
   --input test_recording.MOV \
   --detection_seg \
+  --random_points_per_frame 0.35 \
+  --point_scale 0.0035 \
   --frames \
   --blend
 

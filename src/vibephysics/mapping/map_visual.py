@@ -76,20 +76,22 @@ def _create_camera_trajectory(
     points = [obj.matrix_world.translation for obj in camera_objects]
     curve_data = bpy.data.curves.new(name="CameraTrajectory", type="CURVE")
     curve_data.dimensions = "3D"
-    curve_data.fill_mode = "FULL"
-    curve_data.bevel_depth = radius
-    curve_data.bevel_resolution = 2
+    curve_data.fill_mode = "NONE"
+    curve_data.bevel_depth = max(float(radius), 0.0)
+    curve_data.bevel_resolution = 0 if curve_data.bevel_depth <= 0.0 else 2
     spline = curve_data.splines.new("POLY")
     spline.points.add(len(points) - 1)
     for i, co in enumerate(points):
         spline.points[i].co = (float(co[0]), float(co[1]), float(co[2]), 1.0)
     traj_obj = bpy.data.objects.new("CameraTrajectory", curve_data)
-    mat = bpy.data.materials.new(name="CameraTrajectoryMaterial")
-    mat.use_nodes = True
-    bsdf = mat.node_tree.nodes.get("Principled BSDF")
-    if bsdf is not None:
-        bsdf.inputs["Base Color"].default_value = (0.2, 0.8, 1.0, 1.0)
+    from vibephysics.annotation.base import create_emission_material
+
+    traj_color = (0.2, 0.8, 1.0, 1.0)
+    mat = create_emission_material("CameraTrajectoryMaterial", traj_color, strength=2.5)
     curve_data.materials.append(mat)
+    traj_obj.color = traj_color
+    if hasattr(traj_obj, "display_type"):
+        traj_obj.display_type = "WIRE"
     collection.objects.link(traj_obj)
     if animate and timing is not None:
         _apply_build_animation(traj_obj, timing)

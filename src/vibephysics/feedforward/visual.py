@@ -710,6 +710,30 @@ def _keyframe_camera_visibility_discrete(
     _set_constant_interpolation(cam_obj, "hide_viewport")
 
 
+def _keyframe_trajectory_visibility(
+    traj_obj: bpy.types.Object,
+    timing: _AnimationTiming,
+) -> None:
+    """Hide camera path during playback; same idea as per-pose frustums (not the full trail)."""
+    traj_obj.hide_viewport = False
+    traj_obj.keyframe_insert(data_path="hide_viewport", frame=timing.preview_frame)
+
+    traj_obj.hide_viewport = True
+    traj_obj.keyframe_insert(data_path="hide_viewport", frame=timing.timeline_start)
+
+    if timing.playback_frame_end > timing.timeline_start:
+        traj_obj.hide_viewport = True
+        traj_obj.keyframe_insert(
+            data_path="hide_viewport",
+            frame=timing.playback_frame_end,
+        )
+
+    _set_constant_interpolation(traj_obj, "hide_viewport")
+    traj_obj.hide_render = True
+    traj_obj.keyframe_insert(data_path="hide_render", frame=timing.timeline_start)
+    _set_constant_interpolation(traj_obj, "hide_render")
+
+
 def _keyframe_change_bbox_visibility(
     obj: bpy.types.Object,
     timing: _AnimationTiming,
@@ -989,8 +1013,8 @@ def create_camera_trajectory(
     else:
         bpy.context.scene.collection.objects.link(traj_obj)
     _rotate_object_world(traj_obj, world_rotation)
-    if animate and timing is not None and timing.discrete:
-        traj_obj.hide_viewport = True
+    if animate and timing is not None:
+        _keyframe_trajectory_visibility(traj_obj, timing)
     return traj_obj
 
 

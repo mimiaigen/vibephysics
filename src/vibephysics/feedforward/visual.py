@@ -989,11 +989,8 @@ def create_camera_trajectory(
     else:
         bpy.context.scene.collection.objects.link(traj_obj)
     _rotate_object_world(traj_obj, world_rotation)
-    if animate and timing is not None:
-        if timing.discrete:
-            traj_obj.hide_viewport = True
-        else:
-            _apply_build_animation(traj_obj, timing)
+    if animate and timing is not None and timing.discrete:
+        traj_obj.hide_viewport = True
     return traj_obj
 
 

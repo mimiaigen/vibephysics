@@ -804,6 +804,8 @@ def convert_prediction_to_blender_zup(prediction) -> bool:
     wp = prediction.world_points
     flat = opencv_to_blender_points(wp.reshape(-1, 3))
     prediction.world_points = flat.astype(np.float32).reshape(wp.shape)
+    if prediction.compact_points is not None:
+        prediction.compact_points = flat.astype(np.float32)
 
     world_b = opencv_world_to_blender_matrix()
     cam_b = opencv_camera_to_blender_matrix()
@@ -820,6 +822,47 @@ def convert_prediction_to_blender_zup(prediction) -> bool:
     prediction.metadata["world_coordinates"] = WORLD_COORDS_BLENDER_Z_UP
     prediction.metadata["extrinsic_is_matrix_world"] = True
     return True
+
+
+def collect_compact_colored_point_cloud(
+    payload: dict,
+    min_confidence: float = 2.0,
+    *,
+    to_blender: bool = True,
+    with_frame_ids: bool = False,
+    total_random_points: RandomPointsLimit | None = None,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray | None]:
+    """Load filtered positions/RGB/conf from compact ``predictions.npz`` arrays."""
+    points = np.asarray(payload["points"], dtype=np.float64)
+    colors = np.asarray(payload["colors"], dtype=np.uint8)
+    conf = np.asarray(payload["conf"], dtype=np.float32).reshape(-1)
+    frame_ids_raw = payload.get("frame_ids")
+    frame_ids = (
+        np.asarray(frame_ids_raw, dtype=np.int32).reshape(-1)
+        if frame_ids_raw is not None
+        else None
+    )
+    mask = (
+        (conf >= float(min_confidence))
+        & np.isfinite(conf)
+        & np.isfinite(points).all(axis=1)
+    )
+    if not np.any(mask):
+        raise ValueError(f"No finite compact points at confidence >= {min_confidence:g}")
+    points = points[mask]
+    colors = colors[mask]
+    conf = conf[mask]
+    if frame_ids is not None:
+        frame_ids = frame_ids[mask]
+    if to_blender and not is_blender_z_up(payload):
+        points = opencv_to_blender_points(points)
+    return finalize_colored_point_cloud(
+        [points.astype(np.float32)],
+        [colors],
+        [conf],
+        [frame_ids] if frame_ids is not None and with_frame_ids else [],
+        total_random_points=total_random_points,
+    )
 
 
 def collect_colored_point_cloud(
@@ -849,6 +892,21 @@ def collect_colored_point_cloud(
         payload = predictions.to_viz_dict()
     else:
         payload = predictions
+
+    if payload.get("points") is not None and payload.get("colors") is not None:
+        if point_cloud_3d_nms:
+            print(
+                "[vibephysics] compact predictions: skipping 3D NMS on re-export "
+                "(already applied at save time)",
+                flush=True,
+            )
+        return collect_compact_colored_point_cloud(
+            payload,
+            min_confidence=min_confidence,
+            to_blender=to_blender,
+            with_frame_ids=with_frame_ids,
+            total_random_points=total_random_points,
+        )
 
     if to_blender and is_blender_z_up(predictions):
         to_blender = False

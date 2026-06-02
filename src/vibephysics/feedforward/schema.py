@@ -9,6 +9,11 @@ from pathlib import Path
 import numpy as np
 
 
+def is_compact_npz_payload(payload: dict) -> bool:
+    """True for colored-points compact saves (no dense depth/world grid)."""
+    return "points" in payload and "colors" in payload and "depth" not in payload
+
+
 @dataclass
 class FeedforwardPrediction:
     depth: np.ndarray
@@ -20,18 +25,38 @@ class FeedforwardPrediction:
     engine: str
     images: np.ndarray | None = None
     metadata: dict = field(default_factory=dict)
+    compact_points: np.ndarray | None = None
+    compact_colors: np.ndarray | None = None
+    compact_frame_ids: np.ndarray | None = None
+
+    def is_compact(self) -> bool:
+        return self.compact_points is not None
 
     def to_viz_dict(self) -> dict:
         """Convert to dict expected by feedforward.visual import helpers."""
-        payload = {
-            "depth": self.depth,
-            "conf": self.conf,
-            "extrinsic": self.extrinsic,
-            "intrinsic": self.intrinsic,
-            "world_points_from_depth": self.world_points,
-            "image_paths": self.image_paths,
-            "engine": self.engine,
-        }
+        if self.is_compact():
+            payload = {
+                "depth": self.depth,
+                "points": self.compact_points,
+                "colors": self.compact_colors,
+                "conf": self.conf,
+                "extrinsic": self.extrinsic,
+                "intrinsic": self.intrinsic,
+                "image_paths": self.image_paths,
+                "engine": self.engine,
+            }
+            if self.compact_frame_ids is not None:
+                payload["frame_ids"] = self.compact_frame_ids
+        else:
+            payload = {
+                "depth": self.depth,
+                "conf": self.conf,
+                "extrinsic": self.extrinsic,
+                "intrinsic": self.intrinsic,
+                "world_points_from_depth": self.world_points,
+                "image_paths": self.image_paths,
+                "engine": self.engine,
+            }
         if self.images is not None:
             payload["images"] = self.images
         if self.metadata:
@@ -39,7 +64,41 @@ class FeedforwardPrediction:
         return payload
 
     @classmethod
+    def from_compact_dict(cls, payload: dict) -> FeedforwardPrediction:
+        image_paths = payload.get("image_paths", [])
+        if isinstance(image_paths, np.ndarray):
+            image_paths = image_paths.tolist()
+        engine = payload.get("engine", "unknown")
+        if isinstance(engine, np.ndarray):
+            engine = engine.item() if engine.ndim == 0 else str(engine.flat[0])
+        metadata = dict(payload.get("metadata") or {})
+        metadata.setdefault("compact", True)
+        extrinsic = np.asarray(payload["extrinsic"], dtype=np.float32)
+        n_frames = len(extrinsic)
+        size = int(metadata.get("image_size") or 518)
+        points = np.asarray(payload["points"], dtype=np.float32)
+        frame_ids = payload.get("frame_ids")
+        if frame_ids is not None:
+            frame_ids = np.asarray(frame_ids, dtype=np.int32).reshape(-1)
+        return cls(
+            depth=np.zeros((n_frames, size, size, 1), dtype=np.float32),
+            conf=np.asarray(payload["conf"], dtype=np.float32).reshape(-1),
+            extrinsic=extrinsic,
+            intrinsic=np.asarray(payload["intrinsic"], dtype=np.float32),
+            world_points=points,
+            image_paths=list(image_paths),
+            engine=str(engine),
+            images=payload.get("images"),
+            metadata=metadata,
+            compact_points=points,
+            compact_colors=np.asarray(payload["colors"], dtype=np.uint8),
+            compact_frame_ids=frame_ids,
+        )
+
+    @classmethod
     def from_dict(cls, payload: dict) -> FeedforwardPrediction:
+        if is_compact_npz_payload(payload):
+            return cls.from_compact_dict(payload)
         world_points = payload.get("world_points")
         if world_points is None:
             world_points = payload.get("world_points_from_depth")

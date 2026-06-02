@@ -104,15 +104,15 @@ Feedforward 3D reconstruction from video or images via LingBot-Map, VGGT-Omega, 
 
 **v0.4 highlights**
 
-- **Faster Blender export:** `output.blend.point_display: pointcloud` (default) uses native Blender point clouds instead of per-point icosphere instancing — much quicker to open and scrub on long sequences. Tune size with `point_scale: 0.0035` (default).
+- **Blender point display:** `output.blend.point_display: points` (default) uses mesh vertices + geometry nodes. Set `pointcloud` for native Blender point clouds (faster on very long sequences). Tune size with `point_scale: 0.0035` (default).
 - **Adaptive sampling:** `random_points_per_frame: 0.35` keeps ~35% of confidence-filtered points **per frame** (float = ratio; scales with resolution and scene density). Prefer ratios over fixed counts like `4000`; use an integer only when you need an exact cap.
 - **2D → 3D object analysis:** `--detection_seg` runs RF-DETR instance segmentation (COCO classes), then masked 3D axis-aligned bboxes and semi-transparent **occupancy voxels** in `scene.blend`. `--algo_3d_bbox` without detection = voxel-diff change blobs vs frame 0.
-- Optional: `pip install "vibephysics[detection_seg]"` or let `run_feedforward.sh` auto-install transformers on first `--detection_seg`.
+- Optional: `pip install "vibephysics[detection_seg]"` — otherwise `run_feedforward.sh` / `reconstruct` auto-install or upgrade `transformers>=4.52` on first `--detection_seg`.
 
 <details>
 <summary>Feedforward setup & usage</summary>
 
-Install backends (Python 3.11 + `bpy`). Pre-install from GitHub (see Installation) or let `run_feedforward.sh` auto-install on first use. Defaults: compact `predictions.npz` with **ratio** sampling (`random_points_per_frame: 0.35`); add `--frames`, `--html`, and `--blend` as needed. Blender export uses fast `pointcloud` display unless you override `point_display` in YAML.
+Install backends (Python 3.11 + `bpy`). Pre-install from GitHub (see Installation) or let `run_feedforward.sh` auto-install on first use. Defaults: compact `predictions.npz` with **ratio** sampling (`random_points_per_frame: 0.35`); add `--frames`, `--html`, and `--blend` as needed. Blender export uses `points` display by default; set `output.blend.point_display: pointcloud` in YAML for faster native point clouds on huge scenes.
 
 Examples below build up step by step on the same base command — each step adds one thing. Omitted flags use `feedforward.yaml` defaults.
 
@@ -135,7 +135,7 @@ pip install vibephysics bpy
   --frames \
   --html
 
-# 4. + Blender export (fast native pointcloud display + point_scale 0.0035 by default)
+# 4. + Blender export (points display + point_scale 0.0035 by default)
 ./run_feedforward.sh \
   --method lingbot_map \
   --input test_recording.MOV \
@@ -207,7 +207,7 @@ output:
   algo_3d_bbox: false             # auto true when detection_seg.enabled
   blend:                          # Blender-only (when save_blend set)
     point_scale: 0.0035
-    point_display: pointcloud     # pointcloud (fast) | points | spheres (slow, round)
+    point_display: points         # points (default) | pointcloud (fast native) | spheres
     animate: true
     animation_fps: 24
     animation_mode: progressive   # progressive | discrete
@@ -279,7 +279,7 @@ r3:
 
 `run_feedforward.sh` routes direct engines (`lingbot_map`, `vggt_omega`, `vgg_ttt`, `r3`, `r3_long`, `dvlt`) and Map-Anything factory model keys (`da3`, `mapanything`, `vggt`, `mast3r`, `pi3`, etc.) through one CLI. Unknown method names are treated as Map-Anything model keys so new factory methods can be tried without changing the script.
 
-**Saved output defaults:** `predictions.npz` is compact by default: `min_confidence: 2.0` first, then `random_points_per_frame: 0.35` keeps a **ratio** of surviving points per frame (scales with input resolution — no fixed “4000 points” default). Optional `total_random_points` as a float applies a second global ratio cap. Set `--random_points_per_frame 0` for dense legacy arrays (`depth`, `conf`, `world_points`, …). Pass `--blend` for `scene.blend` (native `pointcloud` display by default), `--html` for `visual.html`, `--frames` for RGB frames, `--detection_seg` for masks + 3D bboxes + voxels (see layout below).
+**Saved output defaults:** `predictions.npz` is compact by default: `min_confidence: 2.0` first, then `random_points_per_frame: 0.35` keeps a **ratio** of surviving points per frame (scales with input resolution — no fixed “4000 points” default). Optional `total_random_points` as a float applies a second global ratio cap. Set `--random_points_per_frame 0` for dense legacy arrays (`depth`, `conf`, `world_points`, …). Pass `--blend` for `scene.blend` (`points` display by default), `--html` for `visual.html`, `--frames` for RGB frames, `--detection_seg` for masks + 3D bboxes + voxels (see layout below).
 
 **Map-Anything model keys:**
 
@@ -339,14 +339,20 @@ feedforward_output/{engine}_{timestamp}/
   reconstruct_config.json  # nested output + blend + detection_seg sections
   frames/                  # optional (--frames)
   visual.html              # optional (--html)
-  scene.blend              # optional (--blend); pointcloud display by default
+  scene.blend              # optional (--blend); points display by default
   detection_seg/           # optional (--detection_seg)
     masks/                 # per-instance PNG masks when detected
     summary.json
   algo_3d_bbox.json        # 3D bboxes + voxel_centers for Blender viz
 ```
 
-`predictions.npz` uses Blender Z-up (`metadata.world_coordinates: blender_z_up`). **Ground align** (`align_ground: true`, default) runs in OpenCV space **before** Z-up save: frame-0 camera pose sets rough up, **1D Hough voting** along that axis finds multiple floor heights, and the **lowest floor below the camera** is leveled (works on bumpy depth, not a flat-plane assumption). Metadata may include `ground_align_floor_count` and `ground_align_floor_heights`. Blender import does not re-align or re-axis-convert. Post-process an existing `.blend` with `run_postprocess_blend.sh --point_scale SIZE`.
+`predictions.npz` uses Blender Z-up (`metadata.world_coordinates: blender_z_up`). **Ground align** (`align_ground: true`, default) runs in OpenCV space **before** Z-up save: frame-0 camera pose sets rough up, **1D Hough voting** along that axis finds multiple floor heights, and the **lowest floor below the camera** is leveled (works on bumpy depth, not a flat-plane assumption). Metadata may include `ground_align_floor_count` and `ground_align_floor_heights`. Blender import does not re-align or re-axis-convert. Re-export a saved run to `.blend` without re-inference:
+
+```bash
+./run_export_blend.sh --predictions output/feedforward_output/lingbot_map_*/predictions.npz
+```
+
+Uses `reconstruct_config.json` beside the NPZ for blend settings. Post-process an existing `.blend` with `run_postprocess_blend.sh --point_scale SIZE`.
 
 Compact predictions are best when you only need a colored 3D point cloud, trajectory, and camera poses; dense mode is best when you need full per-pixel depth/confidence/world-point maps.
 
@@ -363,7 +369,7 @@ python -m vibephysics.feedforward.export plotly \
 
 The HTML viewer renders all valid points saved in `predictions.npz`; density is controlled by `random_points_per_frame` / `total_random_points` ratios (or integers for hard caps). For manual ad-hoc export, you can still pass `--max-points` to downsample a large existing prediction. It draws the camera trajectory as red dots connected by a red line and includes Play/Pause buttons (`1x` to `16x`) plus a frame slider. Install Plotly if needed:
 
-**Blender performance tips:** keep `point_display: pointcloud` (default). Use `spheres` only when you need round points. Lower `--random_points_per_frame` ratio (e.g. `0.15`) before lowering `point_scale` if the file is slow to open. `--detection_seg` adds bbox wireframes and voxel cubes per detected instance; tune `algo_3d_bbox.min_visualize_changed_voxels` in YAML to skip tiny blobs.
+**Blender performance tips:** default `point_display: points` is compatible across Blender versions. For very large compact exports, set `point_display: pointcloud` in YAML (native point clouds, faster to open/scrub). Use `spheres` only when you need round points. Lower `--random_points_per_frame` ratio (e.g. `0.15`) before lowering `point_scale` if the file is slow to open. `--detection_seg` adds bbox wireframes and voxel cubes per detected instance; tune `algo_3d_bbox.min_visualize_changed_voxels` in YAML to skip tiny blobs.
 
 ```bash
 pip install plotly

@@ -169,6 +169,70 @@ def _has_module(name: str) -> bool:
     return importlib.util.find_spec(name) is not None
 
 
+def configure_detection_seg_runtime() -> None:
+    """Keep transformers off TensorFlow (segfault if TF loads after CUDA PyTorch)."""
+    os.environ.setdefault("TRANSFORMERS_NO_TF", "1")
+    os.environ.setdefault("USE_TF", "0")
+
+
+def transformers_rf_detr_ready() -> bool:
+    """True when transformers exposes RF-DETR instance segmentation (>=4.52)."""
+    configure_detection_seg_runtime()
+    if not _has_module("transformers"):
+        return False
+    try:
+        from transformers import RfDetrForInstanceSegmentation  # noqa: F401
+
+        return True
+    except ImportError:
+        return False
+
+
+def _detection_seg_transformers_spec() -> str:
+    for import_name, pip_spec in _PYPI_DEPS["detection_seg"]:
+        if import_name == "transformers":
+            return pip_spec
+    return "transformers>=4.52.0"
+
+
+def _ensure_detection_seg_transformers(*, auto_install: bool, verbose: bool) -> bool:
+    configure_detection_seg_runtime()
+    if transformers_rf_detr_ready():
+        return True
+    if not auto_install:
+        if verbose:
+            print(
+                "[vibephysics] detection_seg needs transformers>=4.52 (RfDetr); "
+                "auto-install disabled (VIBEPHYSICS_NO_AUTO_INSTALL).",
+                flush=True,
+            )
+        return False
+    spec = _detection_seg_transformers_spec()
+    if verbose:
+        print(
+            f"--- [vibephysics] Installing/upgrading {spec} for detection_seg (RF-DETR) ---",
+            flush=True,
+        )
+    try:
+        pip_install(spec, verbose=verbose)
+    except subprocess.CalledProcessError:
+        if verbose:
+            print(f"[vibephysics] Failed to install {spec}")
+        return False
+    for mod in list(sys.modules):
+        if mod == "transformers" or mod.startswith("transformers."):
+            del sys.modules[mod]
+    if not transformers_rf_detr_ready():
+        if verbose:
+            print(
+                "[vibephysics] detection_seg still missing RfDetrForInstanceSegmentation "
+                "after install; check transformers version.",
+                flush=True,
+            )
+        return False
+    return True
+
+
 def pip_install(
     spec: str,
     *,
@@ -415,6 +479,9 @@ def ensure_engine_dependencies(engine: str, *, verbose: bool = True) -> bool:
     if engine not in _PYPI_DEPS:
         raise ValueError(f"Unknown feedforward engine: {engine}")
 
+    if engine == "detection_seg":
+        configure_detection_seg_runtime()
+
     auto_install = os.environ.get("VIBEPHYSICS_NO_AUTO_INSTALL", "").strip().lower() not in {
         "1",
         "true",
@@ -425,8 +492,15 @@ def ensure_engine_dependencies(engine: str, *, verbose: bool = True) -> bool:
     if not _ensure_torch_dependencies(engine, auto_install=auto_install, verbose=verbose):
         return False
 
+    if engine == "detection_seg" and not _ensure_detection_seg_transformers(
+        auto_install=auto_install, verbose=verbose
+    ):
+        return False
+
     for import_name, pip_spec in _PYPI_DEPS[engine]:
         if import_name in _TORCH_IMPORTS:
+            continue
+        if engine == "detection_seg" and import_name == "transformers":
             continue
         if _has_module(import_name):
             continue

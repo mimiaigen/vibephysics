@@ -794,6 +794,9 @@ def reconstruct(
         point_display = normalize_point_display(blend_default("point_display"))
     if detection_seg:
         algo_3d_bbox = True
+        from .detection_seg import ensure_detection_seg_dependencies
+
+        ensure_detection_seg_dependencies(verbose=verbose)
     if animate is None:
         animate = bool(blend_default("animate"))
     if animation_fps is None:

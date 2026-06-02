@@ -274,7 +274,7 @@ def add_point_cloud_geo_nodes(
     frames_per_slot: int = 1,
     timeline_start: float = 1.0,
     keep_start_frame_point_cloud: bool = False,
-    point_display: str = "pointcloud",
+    point_display: str = "points",
 ) -> None:
     native_pointcloud = point_display == "pointcloud"
     use_spheres = point_display == "spheres"
@@ -418,24 +418,79 @@ def add_point_cloud_geo_nodes(
     node_group.links.new(set_material_node.outputs["Geometry"], output_node.inputs["Geometry"])
 
 
-def _allocate_pointcloud_points(pc: bpy.types.PointCloud, count: int) -> None:
-    """Allocate point storage (API differs across Blender builds)."""
+_POINTCLOUD_SPAWN_NODE_GROUP = "_vibephysics_pointcloud_spawn"
+
+
+def _get_pointcloud_spawn_node_group() -> bpy.types.NodeTree:
+    """Cached Geometry Nodes tree that allocates N points (Blender 5.0+)."""
+    ng = bpy.data.node_groups.get(_POINTCLOUD_SPAWN_NODE_GROUP)
+    if ng is not None:
+        return ng
+    ng = bpy.data.node_groups.new(_POINTCLOUD_SPAWN_NODE_GROUP, "GeometryNodeTree")
+    ng.interface.new_socket(name="Geometry", in_out="INPUT", socket_type="NodeSocketGeometry")
+    count_socket = ng.interface.new_socket(name="Count", in_out="INPUT", socket_type="NodeSocketInt")
+    count_socket.default_value = 0
+    ng.interface.new_socket(name="Geometry", in_out="OUTPUT", socket_type="NodeSocketGeometry")
+    input_node = ng.nodes.new("NodeGroupInput")
+    output_node = ng.nodes.new("NodeGroupOutput")
+    points_node = ng.nodes.new("GeometryNodePoints")
+    ng.links.new(input_node.outputs["Count"], points_node.inputs["Count"])
+    ng.links.new(points_node.outputs["Points"], output_node.inputs["Geometry"])
+    return ng
+
+
+def _spawn_pointcloud_via_geometry_nodes(count: int) -> bpy.types.PointCloud:
+    """Allocate points via evaluated geometry nodes (Blender 5.0 Python API)."""
+    import uuid
+
+    ng = _get_pointcloud_spawn_node_group()
+    tag = uuid.uuid4().hex[:8]
+    seed_pc = bpy.data.pointclouds.new(f"_vibephysics_spawn_pc_{tag}")
+    obj = bpy.data.objects.new(f"_vibephysics_spawn_obj_{tag}", seed_pc)
+    collection = bpy.context.collection
+    collection.objects.link(obj)
+    try:
+        mod = obj.modifiers.new(name="_vibephysics_spawn", type="NODES")
+        mod.node_group = ng
+        for item in ng.interface.items_tree:
+            if item.name == "Count":
+                mod[item.identifier] = int(count)
+        depsgraph = bpy.context.evaluated_depsgraph_get()
+        evaluated = obj.evaluated_get(depsgraph)
+        return evaluated.data.copy()
+    finally:
+        collection.objects.unlink(obj)
+        bpy.data.objects.remove(obj, do_unlink=True)
+        bpy.data.pointclouds.remove(seed_pc)
+
+
+def _try_allocate_pointcloud_inplace(pc: bpy.types.PointCloud, count: int) -> bool:
+    """Resize in place when the build exposes resize() or points.add()."""
     n = int(count)
-    if hasattr(pc, "resize"):
-        pc.resize(n)
-        return
+    resize = getattr(pc, "resize", None)
+    if callable(resize):
+        resize(n)
+        return len(pc.points) == n
     points = pc.points
     add = getattr(points, "add", None)
     if callable(add):
         delta = n - len(points)
         if delta > 0:
             add(delta)
-        if len(points) != n:
-            raise AttributeError(
-                f"PointCloud.points.add allocated {len(points)} points, expected {n}"
-            )
-        return
-    raise AttributeError("PointCloud has no resize() or points.add()")
+        return len(points) == n
+    return False
+
+
+def _prepare_pointcloud_with_count(name: str, count: int) -> bpy.types.PointCloud:
+    """Return a PointCloud data-block with exactly *count* points."""
+    n = int(count)
+    placeholder = bpy.data.pointclouds.new(name)
+    if _try_allocate_pointcloud_inplace(placeholder, n):
+        return placeholder
+    bpy.data.pointclouds.remove(placeholder)
+    spawned = _spawn_pointcloud_via_geometry_nodes(n)
+    spawned.name = name
+    return spawned
 
 
 def _fill_pointcloud_data(
@@ -448,7 +503,8 @@ def _fill_pointcloud_data(
     frame_ids: np.ndarray | None = None,
 ) -> None:
     n = int(points.shape[0])
-    _allocate_pointcloud_points(pc, n)
+    if len(pc.points) != n:
+        raise ValueError(f"PointCloud has {len(pc.points)} points, expected {n}")
     coords = np.asarray(points, dtype=np.float32).reshape(n, 3)
     pc.attributes["position"].data.foreach_set("vector", coords.ravel())
 
@@ -482,18 +538,20 @@ def create_point_cloud_object(
     frames_per_slot: int = 1,
     timeline_start: float = 1.0,
     keep_start_frame_point_cloud: bool = False,
-    point_display: str = "pointcloud",
+    point_display: str = "points",
 ) -> bpy.types.Object:
     gn_display = point_display
     if point_display == "pointcloud":
-        pc = bpy.data.pointclouds.new(name=name)
+        pc = None
         try:
+            pc = _prepare_pointcloud_with_count(name, int(points.shape[0]))
             _fill_pointcloud_data(pc, points, colors, confs, scale=scale, frame_ids=frame_ids)
             obj = bpy.data.objects.new(name, pc)
-        except (AttributeError, KeyError, RuntimeError) as exc:
-            bpy.data.pointclouds.remove(pc)
+        except (AttributeError, KeyError, RuntimeError, ValueError) as exc:
+            if pc is not None:
+                bpy.data.pointclouds.remove(pc)
             print(
-                "[vibephysics] Native PointCloud allocation unavailable "
+                "[vibephysics] Native PointCloud setup failed "
                 f"({exc}); using mesh points display.",
                 flush=True,
             )
@@ -998,6 +1056,31 @@ def import_point_cloud(
     return obj
 
 
+def _prediction_render_resolution(predictions: dict) -> tuple[int, int]:
+    """Image height/width for camera intrinsics (dense depth or compact metadata)."""
+    depth = predictions.get("depth")
+    if depth is not None and getattr(depth, "size", 0) and depth.ndim >= 3:
+        height, width = int(depth.shape[1]), int(depth.shape[2])
+        if height > 1 and width > 1:
+            return height, width
+    meta = predictions.get("metadata") or {}
+    image_size = meta.get("image_size")
+    if image_size is not None:
+        size = int(image_size)
+        return size, size
+    image_paths = predictions.get("image_paths") or []
+    if image_paths:
+        try:
+            from PIL import Image
+
+            with Image.open(image_paths[0]) as image:
+                width, height = image.size
+            return int(height), int(width)
+        except OSError:
+            pass
+    return 518, 518
+
+
 def create_cameras(
     predictions: dict,
     collection=None,
@@ -1008,8 +1091,7 @@ def create_cameras(
     world_rotation: Matrix | None = None,
 ) -> list[bpy.types.Object]:
     scene = bpy.context.scene
-    depth = predictions["depth"]
-    image_height, image_width = depth.shape[1], depth.shape[2]
+    image_height, image_width = _prediction_render_resolution(predictions)
     num_cameras = len(predictions["extrinsic"])
     image_paths = predictions.get("image_paths")
 

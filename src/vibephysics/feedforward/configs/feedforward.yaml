@@ -51,7 +51,7 @@ output:
   # Blender .blend export only (ignored when save_blend is null)
   blend:
     point_scale: 0.0035
-    point_display: pointcloud   # pointcloud (best and fast) | points | spheres
+    point_display: points       # points (default) | pointcloud (fast native) | spheres
     animate: true
     animation_fps: 24
     animation_mode: progressive   # progressive | discrete

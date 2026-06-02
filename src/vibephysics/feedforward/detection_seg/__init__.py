@@ -10,7 +10,12 @@ from typing import Any
 
 import numpy as np
 
-from ..common import feedforward_engine_dir, feedforward_hf_hub_cache, resolve_frame_images
+from ..common import (
+    feedforward_engine_dir,
+    feedforward_hf_hub_cache,
+    resolve_frame_images,
+    to_numpy,
+)
 from ..schema import FeedforwardPrediction
 
 DEFAULT_DETECTION_SEG_MODEL = "Roboflow/rf-detr-seg-medium"
@@ -109,13 +114,29 @@ def _configure_hf_cache() -> None:
     os.environ.setdefault("HF_HOME", str(hf_home))
 
 
+def _to_int(value: Any) -> int:
+    import torch
+
+    if isinstance(value, torch.Tensor):
+        return int(value.detach().cpu().item())
+    return int(value)
+
+
+def _to_float(value: Any) -> float:
+    import torch
+
+    if isinstance(value, torch.Tensor):
+        return float(value.detach().cpu().item())
+    return float(value)
+
+
 def ensure_detection_seg_dependencies(*, verbose: bool = True) -> None:
     from ..deps import ensure_engine_dependencies
 
     if not ensure_engine_dependencies("detection_seg", verbose=verbose):
         raise RuntimeError(
-            "detection_seg dependencies missing (torch, transformers, huggingface_hub). "
-            "Install with: pip install transformers huggingface_hub"
+            "detection_seg dependencies unavailable. "
+            "Retry after auto-install completes or set VIBEPHYSICS_NO_AUTO_INSTALL=0."
         )
 
 
@@ -198,20 +219,24 @@ def _segment_frame(
         return []
 
     item = processed[0]
-    seg_map = np.asarray(item["segmentation"])
+    seg_map = to_numpy(item["segmentation"]).squeeze()
+    if seg_map.dtype.kind == "f":
+        seg_map = np.rint(seg_map).astype(np.int32)
+    else:
+        seg_map = seg_map.astype(np.int32, copy=False)
     segments = sorted(
         item.get("segments_info", []),
-        key=lambda info: float(info.get("score", 0.0)),
+        key=lambda info: _to_float(info.get("score", 0.0)),
         reverse=True,
     )
     per_class_index: dict[str, int] = {}
     instances: list[InstanceMask] = []
     for info in segments:
-        label_id = int(info["label_id"])
+        label_id = _to_int(info["label_id"])
         class_name = label_id_to_class.get(label_id)
         if class_name is None:
             continue
-        inst_id = int(info["id"])
+        inst_id = _to_int(info["id"])
         mask = seg_map == inst_id
         if not mask.any():
             continue
@@ -222,7 +247,7 @@ def _segment_frame(
                 class_name=class_name,
                 instance_index=instance_index,
                 mask=mask.copy(),
-                score=float(info.get("score", 0.0)),
+                score=_to_float(info.get("score", 0.0)),
                 segment_id=inst_id,
             )
         )

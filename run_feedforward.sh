@@ -335,12 +335,21 @@ TMP_CONFIG="$(make_runtime_config "$R3_MODEL")"
 trap 'rm -f "$TMP_CONFIG"' EXIT
 CONFIG="$TMP_CONFIG"
 
-if ! "$PYTHON" - "$ENGINE" "$CONFIG" "$MAP_MODEL" "$INSTALL_ALL" <<'PY'
+DETECTION_SEG=0
+for arg in "${ARGS[@]}"; do
+    if [ "$arg" = "--detection_seg" ]; then
+        DETECTION_SEG=1
+        break
+    fi
+done
+
+if ! "$PYTHON" - "$ENGINE" "$CONFIG" "$MAP_MODEL" "$INSTALL_ALL" "$DETECTION_SEG" <<'PY'
 import sys
 from pathlib import Path
 
-engine, config_path, map_model, install_all_raw = sys.argv[1:5]
+engine, config_path, map_model, install_all_raw, detection_seg_raw = sys.argv[1:6]
 install_all = install_all_raw == "1"
+detection_seg = detection_seg_raw == "1"
 
 if engine == "lingbot_map":
     from vibephysics.feedforward.lingbot_map import ensure_dependencies
@@ -371,6 +380,17 @@ elif engine == "map_anything":
     ok = ensure_dependencies(model_name=model, install_all=install_all)
 else:
     raise SystemExit(f"Unknown feedforward engine: {engine}")
+
+if ok:
+    if not detection_seg:
+        from vibephysics.feedforward.config import detection_seg_enabled, load_yaml_config
+
+        cfg = load_yaml_config(Path(config_path))
+        detection_seg = detection_seg_enabled(cfg.get("detection_seg"))
+    if detection_seg:
+        from vibephysics.feedforward.detection_seg import ensure_detection_seg_dependencies
+
+        ensure_detection_seg_dependencies(verbose=True)
 
 raise SystemExit(0 if ok else 1)
 PY

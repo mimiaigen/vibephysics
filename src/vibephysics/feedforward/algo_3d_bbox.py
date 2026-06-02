@@ -963,6 +963,24 @@ def _bbox_base_class(label: str | None) -> str:
     return label.split("#", 1)[0].strip().lower()
 
 
+# Overlapping COCO labels compete in bbox NMS (not only exact class match).
+_NMS_OVERLAPPING_CLASS_GROUPS: tuple[frozenset[str], ...] = (
+    frozenset({"chair", "couch"}),
+)
+_NMS_CLASS_GROUP_KEY: dict[frozenset[str], str] = {
+    group: "|".join(sorted(group)) for group in _NMS_OVERLAPPING_CLASS_GROUPS
+}
+
+
+def _nms_class_group(label: str | None) -> str:
+    """NMS bucket: same as base class unless label is in an overlapping group."""
+    base = _bbox_base_class(label)
+    for group in _NMS_OVERLAPPING_CLASS_GROUPS:
+        if base in group:
+            return _NMS_CLASS_GROUP_KEY[group]
+    return base
+
+
 def _bbox_aabb_volume(bbox: ChangeBBox) -> float:
     size = np.asarray(bbox.size, dtype=np.float64)
     return float(np.prod(np.maximum(size, 0.0)))
@@ -1021,11 +1039,14 @@ def compute_progressive_bbox_visibility_spans(
     iou_threshold: float = 0.25,
 ) -> list[BboxVisibilitySpan]:
     """
-    Frame-order same-class NMS with a visibility timeline for Blender.
+    Frame-order class-group NMS with a visibility timeline for Blender.
 
     Each kept box appears at its recon frame. When a larger overlapping box
     arrives on a later frame, earlier boxes get ``hide_frame`` set to that
     frame. Boxes suppressed on their own frame are omitted.
+
+    Classes in ``_NMS_OVERLAPPING_CLASS_GROUPS`` (e.g. chair + couch) share one
+    NMS bucket because their 3D boxes often overlap.
     """
     if iou_threshold <= 0.0:
         return _all_bbox_visibility_spans(bboxes)
@@ -1049,7 +1070,7 @@ def compute_progressive_bbox_visibility_spans(
     for frame_idx in sorted(by_frame):
         by_class: dict[str, list[ChangeBBox]] = {}
         for bbox in by_frame[frame_idx]:
-            by_class.setdefault(_bbox_base_class(bbox.label), []).append(bbox)
+            by_class.setdefault(_nms_class_group(bbox.label), []).append(bbox)
 
         for cls, candidates in by_class.items():
             class_kept = kept_by_class.setdefault(cls, [])
@@ -1174,7 +1195,7 @@ def nms_change_bboxes_per_class(
 
     by_class: dict[str, list[ChangeBBox]] = {}
     for bbox in all_boxes:
-        by_class.setdefault(_bbox_base_class(bbox.label), []).append(bbox)
+        by_class.setdefault(_nms_class_group(bbox.label), []).append(bbox)
 
     kept_ids: set[int] = set()
     removed = 0

@@ -4,12 +4,13 @@
 
 **A lightweight framework for turning real-world videos and images into 3D maps, Blender scenes, and physical simulations — bridging feedforward reconstruction, sparse mapping, robotics, and physics in one CPU-friendly workflow.**
 
-**Current release:** [v0.4.0 on PyPI](https://pypi.org/project/vibephysics/0.4.0/)
+**Current release:** [v0.4.1 on PyPI](https://pypi.org/project/vibephysics/0.4.1/)
 
 ---
 
 ## Changelog
 
+- **v0.4.1** (2026-06-02) — PyPI; GPU/CUDA feedforward fixes (`TRANSFORMERS_NO_TF`, transformers `>=4.52` auto-upgrade for RF-DETR); Blender native `pointcloud` export robustness; `run_export_blend.sh` for NPZ → `.blend`; README feedforward examples (ratio sampling, `--detection_seg`).
 - **v0.4.0** (2026-06-02) — PyPI; RF-DETR instance segmentation (`--detection_seg`) with masked 3D bboxes and Blender occupancy voxels; voxel-diff `--algo_3d_bbox` without detection; nested `output` / `blend` YAML and `reconstruct_config.json`; `point_display` modes (`pointcloud` | `points` | `spheres`); ground align shifts leveled floor to z > 0 in Blender Z-up; `random_points_per_frame` ratio defaults and shell no longer forces 4000; `pip install vibephysics[detection_seg]` optional extra.
 - **v0.3.7** (2026-05-31) — PyPI; feedforward ground align (frame-0 camera up, 1D Hough multi-floor → bottom floor, bumpy-depth tilt); fixed-size Blender camera frustums/trajectory; point cloud icosphere instancing in blend export; `SKILL.md` ground-align docs.
 - **v0.3.6** (2026-05-31) — PyPI; [DVLT](https://github.com/nv-tlabs/dvlt) feedforward (`--method dvlt`); `.vibephysics/feedforward/` weight caches; Plotly trajectory aligned with saved poses; feedforward `SKILL.md` for agents; GPU dependency fixes.
@@ -23,7 +24,7 @@
 
 ## ⚙️ Installation (macOS)
 
-Conda + `pip install vibephysics` (latest: **0.4.0**); optional feedforward backends.
+Conda + `pip install vibephysics` (latest: **0.4.1**); optional feedforward backends.
 
 <details>
 <summary>Installation steps</summary>
@@ -34,7 +35,7 @@ conda create -n vibephysics python=3.11
 conda activate vibephysics
 
 # 2. Install core package (includes COLMAP/GLOMAP mapping & Blender simulation)
-pip install "vibephysics>=0.4.0"
+pip install "vibephysics>=0.4.1"
 
 # 3. (Optional) Install feedforward backends from GitHub
 # Or skip these — run_feedforward.sh auto-installs on first run

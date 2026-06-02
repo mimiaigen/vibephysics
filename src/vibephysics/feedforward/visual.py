@@ -39,6 +39,9 @@ VIZ_COLLECTION_OCCUPANCY_VOXELS = "OccupancyVoxels"
 CAMERA_FRUSTUM_DISPLAY_SIZE = 0.02
 CAMERA_FRUSTUM_CLIP_START = 0.0005
 CAMERA_FRUSTUM_CLIP_END = 0.04
+# Playback / render camera must see the full reconstruction (meters), not the tiny gizmo frustum.
+PLAYBACK_CAMERA_CLIP_START = 0.01
+PLAYBACK_CAMERA_CLIP_END = 1000.0
 CAMERA_TRAJECTORY_RADIUS = 0.0008
 DEFAULT_POINT_RADIUS = DEFAULT_POINT_SCALE
 ANIMATION_MODES = ("progressive", "discrete")
@@ -867,7 +870,7 @@ def _create_playback_camera(
     else:
         bpy.context.scene.collection.objects.link(playback_obj)
 
-    _apply_camera_viewport_display(playback_data)
+    _apply_camera_viewport_display(playback_data, playback=True)
     playback_obj.rotation_mode = "QUATERNION"
     quats = _aligned_quaternions(camera_objects)
     first_cam = camera_objects[0]
@@ -916,12 +919,24 @@ def _apply_intrinsics_to_blender_camera(
     _apply_camera_viewport_display(cam_data)
 
 
-def _apply_camera_viewport_display(cam_data: bpy.types.Camera) -> None:
-    """Fixed-size viewport camera frustum gizmo (independent of scene extent)."""
+def _apply_camera_viewport_display(
+    cam_data: bpy.types.Camera,
+    *,
+    playback: bool = False,
+) -> None:
+    """Fixed-size frustum gizmo for pose cameras; full-scene clip for PlaybackCamera."""
+    if playback:
+        cam_data.display_size = 0.1
+        cam_data.clip_start = PLAYBACK_CAMERA_CLIP_START
+        cam_data.clip_end = PLAYBACK_CAMERA_CLIP_END
+        cam_data.show_limits = False
+        return
     cam_data.display_size = CAMERA_FRUSTUM_DISPLAY_SIZE
     cam_data.clip_start = CAMERA_FRUSTUM_CLIP_START
     cam_data.clip_end = CAMERA_FRUSTUM_CLIP_END
-    cam_data.show_limits = True
+    cam_data.show_limits = False
+    if hasattr(cam_data, "show_sensor"):
+        cam_data.show_sensor = False
 
 
 def create_camera_trajectory(
@@ -1301,6 +1316,15 @@ def _configure_scene_display_for_source_colors() -> None:
         view.look = "None"
 
 
+def _configure_viewport_overlays(space: bpy.types.SpaceView3D) -> None:
+    """Hide constraint/camera helper lines that clutter reconstruction playback."""
+    overlay = space.overlay
+    if hasattr(overlay, "show_relationship_lines"):
+        overlay.show_relationship_lines = False
+    if hasattr(overlay, "show_camera_passepartout"):
+        overlay.show_camera_passepartout = False
+
+
 def _configure_viewports_material_preview() -> None:
     """Persist Material Preview shading in saved .blend files."""
     _configure_scene_display_for_source_colors()
@@ -1317,6 +1341,7 @@ def _configure_viewports_material_preview() -> None:
                         space.shading.use_scene_lights = False
                     if hasattr(space.shading, "use_scene_lights_render"):
                         space.shading.use_scene_lights_render = False
+                    _configure_viewport_overlays(space)
 
 
 def load_reconstruction(

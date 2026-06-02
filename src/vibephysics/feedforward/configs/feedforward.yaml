@@ -119,6 +119,7 @@ algo_3d_bbox:
   progressive_class_nms_iou: 0.25   # progressive: same-class NMS vs boxes already visible (0=off)
   visualization: both          # voxels | bbox | both
   voxel_alpha: 0.1
+  label_face_camera: true      # TRACK_TO scene camera so class labels face the viewer
 
 lingbot_map:
   model: lingbot-map

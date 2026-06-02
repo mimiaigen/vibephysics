@@ -1443,6 +1443,77 @@ def _attach_bbox_label_text(
     return label_obj
 
 
+def _resolve_bbox_label_camera():
+    """Scene camera for label billboards (PlaybackCamera when animated)."""
+    import bpy
+
+    cam = bpy.context.scene.camera
+    if cam is not None:
+        return cam
+    playback = bpy.data.objects.get("PlaybackCamera")
+    if playback is not None and playback.type == "CAMERA":
+        return playback
+    for obj in bpy.data.objects:
+        if obj.type == "CAMERA":
+            return obj
+    return None
+
+
+def _add_bbox_label_track_to_camera(text_obj, camera) -> "bpy.types.Object":
+    """Billboard pivot tracks camera; text uses local -X scale to fix mirror (not Z-rotate)."""
+    import bpy
+
+    pivot = bpy.data.objects.new(f"{text_obj.name}_TrackPivot", None)
+    pivot.location = text_obj.location.copy()
+    for coll in text_obj.users_collection:
+        coll.objects.link(pivot)
+    if not pivot.users_collection:
+        bpy.context.scene.collection.objects.link(pivot)
+
+    text_obj.parent = pivot
+    text_obj.matrix_parent_inverse = pivot.matrix_world.inverted()
+    text_obj.location = (0.0, 0.0, 0.0)
+    text_obj.rotation_euler = (0.0, 0.0, 0.0)
+    # TRACK_TO aims FONT -Z at the camera; glyphs read mirrored without a local X flip.
+    # Do not rotate 180° on Z — that spins in the billboard plane and reads upside-down.
+    text_obj.scale = (-1.0, 1.0, 1.0)
+
+    track = pivot.constraints.new(type="TRACK_TO")
+    track.target = camera
+    track.track_axis = "TRACK_NEGATIVE_Z"
+    track.up_axis = "UP_Y"
+    track.owner_space = "WORLD"
+    track.target_space = "WORLD"
+    if hasattr(track, "show_expires"):
+        track.show_expires = False
+    # Do not hide_viewport on pivot — that hides child label text in the viewport.
+    pivot.empty_display_type = "PLAIN_AXES"
+    pivot.empty_display_size = 0.001
+    pivot.hide_render = True
+    return pivot
+
+
+def _finalize_bbox_label_orientation(
+    text_obj,
+    *,
+    world_rotation=None,
+    face_camera: bool = True,
+) -> None:
+    """Apply export rotation; billboard to camera when enabled."""
+    import math
+
+    from .visual import _rotate_object_world
+
+    if face_camera:
+        camera = _resolve_bbox_label_camera()
+        if camera is not None:
+            pivot = _add_bbox_label_track_to_camera(text_obj, camera)
+            _rotate_object_world(pivot, world_rotation)
+            return
+    text_obj.rotation_euler = (math.pi / 2.0, 0.0, 0.0)
+    _rotate_object_world(text_obj, world_rotation)
+
+
 def _create_bbox_label_text(
     display_label: str,
     center: np.ndarray,
@@ -1465,18 +1536,24 @@ def _create_bbox_label_text(
     curve = bpy.data.curves.new(name=f"{base_name}_LabelCurve", type="FONT")
     curve.body = display_label
     curve.size = text_height
-    curve.extrude = text_height * 0.1
+    curve.extrude = 0.0
+    curve.offset = 0.0
+    curve.bevel_depth = 0.0
+    curve.bevel_resolution = 0
     curve.align_x = "CENTER"
     curve.align_y = "BOTTOM"
 
     text_obj = bpy.data.objects.new(f"{base_name}_Label", curve)
     text_obj.location = (float(center[0]), float(center[1]), top_z + gap)
-    text_obj.rotation_euler = (1.5707963267948966, 0.0, 0.0)
     collection.objects.link(text_obj)
     text_obj.data.materials.append(material)
     text_obj.active_material = material
     text_obj.color = color
     text_obj.show_in_front = True
+    if hasattr(text_obj, "show_wire"):
+        text_obj.show_wire = False
+    if hasattr(text_obj, "display_type"):
+        text_obj.display_type = "SOLID"
     text_obj["change_bbox_label_text"] = display_label
     return text_obj
 
@@ -1493,11 +1570,16 @@ def import_detection_occupancy_voxels_to_blender(
     voxel_size: float = 0.02,
     voxel_alpha: float = 0.1,
     world_rotation=None,
+    label_face_camera: bool | None = None,
 ) -> list:
     """Semi-transparent class-colored cubes at masked occupancy voxel centers."""
     import bpy
 
+    from .config import algo_3d_bbox_default
     from .visual import _keyframe_change_bbox_visibility, _rotate_object_world
+
+    if label_face_camera is None:
+        label_face_camera = bool(algo_3d_bbox_default("label_face_camera"))
 
     spans = resolve_progressive_bbox_spans(
         bboxes,
@@ -1599,7 +1681,11 @@ def import_detection_occupancy_voxels_to_blender(
             hide_frame_index=hide_frame,
         )
         if label_obj is not None:
-            _rotate_object_world(label_obj, world_rotation)
+            _finalize_bbox_label_orientation(
+                label_obj,
+                world_rotation=world_rotation,
+                face_camera=label_face_camera,
+            )
             objects.append(label_obj)
 
     if skipped_low_change:
@@ -1633,11 +1719,16 @@ def import_change_bboxes_to_blender(
     class_colors: dict[str, tuple[float, float, float, float]] | None = None,
     progressive_class_nms_iou: float | None = None,
     world_rotation=None,
+    label_face_camera: bool | None = None,
 ) -> list:
     """Add cyan wireframe boxes for each substantial per-frame change region."""
     import bpy
 
+    from .config import algo_3d_bbox_default
     from .visual import _keyframe_change_bbox_visibility, _rotate_object_world
+
+    if label_face_camera is None:
+        label_face_camera = bool(algo_3d_bbox_default("label_face_camera"))
 
     spans = resolve_progressive_bbox_spans(
         bboxes,
@@ -1716,7 +1807,11 @@ def import_change_bboxes_to_blender(
             hide_frame_index=hide_frame,
         )
         if label_obj is not None:
-            _rotate_object_world(label_obj, world_rotation)
+            _finalize_bbox_label_orientation(
+                label_obj,
+                world_rotation=world_rotation,
+                face_camera=label_face_camera,
+            )
             objects.append(label_obj)
 
     if skipped_low_change:

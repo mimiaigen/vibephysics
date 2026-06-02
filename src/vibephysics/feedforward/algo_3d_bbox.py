@@ -1612,6 +1612,8 @@ def import_detection_occupancy_voxels_to_blender(
     bboxes: list[list[ChangeBBox] | ChangeBBox | None],
     collection,
     *,
+    labels_collection=None,
+    attach_class_labels: bool = True,
     timing=None,
     animate: bool = True,
     min_visualize_changed_voxels: int,
@@ -1630,6 +1632,7 @@ def import_detection_occupancy_voxels_to_blender(
 
     if label_face_camera is None:
         label_face_camera = bool(algo_3d_bbox_default("label_face_camera"))
+    label_coll = labels_collection if labels_collection is not None else collection
 
     spans = resolve_progressive_bbox_spans(
         bboxes,
@@ -1716,27 +1719,27 @@ def import_detection_occupancy_voxels_to_blender(
 
         objects.append(obj)
 
-        display_label = display_bbox_label(bbox.label)
-        label_obj = _attach_bbox_label_text(
-            display_label=display_label,
-            center=np.array(bbox.center, dtype=np.float64),
-            size=np.array(bbox.size, dtype=np.float64),
-            collection=collection,
-            base_name=obj_name,
-            recon_frame=recon_frame,
-            material_cache=material_cache,
-            rgba=rgba,
-            timing=timing,
-            animate=animate,
-            hide_frame_index=hide_frame,
-        )
-        if label_obj is not None:
-            _finalize_bbox_label_orientation(
-                label_obj,
-                world_rotation=world_rotation,
-                face_camera=label_face_camera,
+        if attach_class_labels:
+            display_label = display_bbox_label(bbox.label)
+            label_obj = _attach_bbox_label_text(
+                display_label=display_label,
+                center=np.array(bbox.center, dtype=np.float64),
+                size=np.array(bbox.size, dtype=np.float64),
+                collection=label_coll,
+                base_name=obj_name,
+                recon_frame=recon_frame,
+                material_cache=material_cache,
+                rgba=rgba,
+                timing=timing,
+                animate=animate,
+                hide_frame_index=hide_frame,
             )
-            objects.append(label_obj)
+            if label_obj is not None:
+                _finalize_bbox_label_orientation(
+                    label_obj,
+                    world_rotation=world_rotation,
+                    face_camera=label_face_camera,
+                )
 
     if skipped_low_change:
         print(
@@ -1763,6 +1766,7 @@ def import_change_bboxes_to_blender(
     bboxes: list[list[ChangeBBox] | ChangeBBox | None],
     collection,
     *,
+    labels_collection=None,
     timing=None,
     animate: bool = True,
     min_visualize_changed_voxels: int,
@@ -1780,6 +1784,7 @@ def import_change_bboxes_to_blender(
     if label_face_camera is None:
         label_face_camera = bool(algo_3d_bbox_default("label_face_camera"))
     wire_radius = float(algo_3d_bbox_default("bbox_wire_radius"))
+    label_coll = labels_collection if labels_collection is not None else collection
 
     spans = resolve_progressive_bbox_spans(
         bboxes,
@@ -1790,6 +1795,7 @@ def import_change_bboxes_to_blender(
 
     min_voxels = int(min_visualize_changed_voxels)
     objects = []
+    label_objects: list = []
     skipped_low_change = 0
     material_cache: dict[tuple[float, float, float, float], Any] = {}
     instance_idx = 0
@@ -1840,7 +1846,7 @@ def import_change_bboxes_to_blender(
             display_label=display_label,
             center=center,
             size=size,
-            collection=collection,
+            collection=label_coll,
             base_name=obj_name,
             recon_frame=recon_frame,
             material_cache=material_cache,
@@ -1855,7 +1861,7 @@ def import_change_bboxes_to_blender(
                 world_rotation=world_rotation,
                 face_camera=label_face_camera,
             )
-            objects.append(label_obj)
+            label_objects.append(label_obj)
 
     if skipped_low_change:
         print(
@@ -1867,5 +1873,11 @@ def import_change_bboxes_to_blender(
             f"[vibephysics] algo_3d_bbox: showing {len(objects)} box(es) with "
             f"changed_voxels > {min_voxels}"
         )
+    if label_objects:
+        print(
+            f"[vibephysics] algo_3d_bbox: {len(label_objects)} class label(s) in "
+            f"'{label_coll.name}'",
+            flush=True,
+        )
 
-    return objects
+    return objects + label_objects

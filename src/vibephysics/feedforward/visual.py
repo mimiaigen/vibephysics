@@ -34,6 +34,7 @@ VIZ_COLLECTION_CAMERA_POSES = "CameraPoses"
 VIZ_COLLECTION_CAMERA_TRAJECTORY = "CameraTrajectory"
 VIZ_COLLECTION_CHANGE_BBOXES = "ChangeBBoxes"
 VIZ_COLLECTION_OCCUPANCY_VOXELS = "OccupancyVoxels"
+VIZ_COLLECTION_BBOX_LABELS = "BboxLabels"
 
 # Fixed viewport gizmo sizes in reconstruction coordinates (not scaled to scene extent).
 CAMERA_FRUSTUM_DISPLAY_SIZE = 0.02
@@ -167,6 +168,7 @@ class VizSubcollections:
     camera_trajectory: bpy.types.Collection
     change_bboxes: bpy.types.Collection
     occupancy_voxels: bpy.types.Collection
+    bbox_labels: bpy.types.Collection
 
 
 def _configure_hidden_root_empty(root_obj: bpy.types.Object) -> None:
@@ -209,6 +211,7 @@ def setup_viz_subcollections(
         occupancy_voxels=_ensure_child_collection(
             root, VIZ_COLLECTION_OCCUPANCY_VOXELS
         ),
+        bbox_labels=_ensure_child_collection(root, VIZ_COLLECTION_BBOX_LABELS),
     )
 
 
@@ -1554,6 +1557,9 @@ def load_reconstruction(
             class_colors=bbox_class_colors,
             progressive_class_nms_iou=nms_iou,
         )
+        label_kwargs = dict(
+            labels_collection=viz_cols.bbox_labels,
+        )
         if viz_mode in ("voxels", "both"):
             voxel_size = float(algo_3d_bbox_default("voxel_size"))
             if isinstance(algo_3d_bboxes, dict) and "voxel_size" in algo_3d_bboxes:
@@ -1564,6 +1570,8 @@ def load_reconstruction(
                 voxel_size=voxel_size,
                 voxel_alpha=float(algo_3d_bbox_default("voxel_alpha")),
                 world_rotation=world_rotation,
+                attach_class_labels=viz_mode != "both",
+                **label_kwargs,
                 **blend_kwargs,
             )
         if viz_mode in ("bbox", "both"):
@@ -1571,6 +1579,7 @@ def load_reconstruction(
                 bbox_frames,
                 viz_cols.change_bboxes,
                 world_rotation=world_rotation,
+                **label_kwargs,
                 **blend_kwargs,
             )
 

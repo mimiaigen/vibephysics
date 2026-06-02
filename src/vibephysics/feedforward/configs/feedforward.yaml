@@ -120,6 +120,7 @@ algo_3d_bbox:
   visualization: both          # voxels | bbox | both
   voxel_alpha: 0.1
   label_face_camera: true      # TRACK_TO scene camera so class labels face the viewer
+  bbox_wire_radius: 0.001      # fixed world-space edge thickness (not scaled with box size)
 
 lingbot_map:
   model: lingbot-map

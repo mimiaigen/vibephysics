@@ -1331,13 +1331,42 @@ def _get_bbox_material(
     return mat
 
 
-def _add_wireframe_outline(obj, thickness: float) -> None:
-    """Wireframe modifier needs face geometry; edge-only meshes render nothing."""
-    wire = obj.modifiers.new(name="ChangeBBoxWire", type="WIREFRAME")
-    wire.thickness = max(thickness, 0.004)
-    wire.use_replace = True
-    wire.use_boundary = True
-    wire.material_offset = 0
+def _create_bbox_wireframe_object(
+    name: str,
+    verts: list[tuple[float, float, float]],
+    material,
+    rgba: tuple[float, float, float, float],
+    *,
+    wire_radius: float,
+) -> "bpy.types.Object":
+    """Colored box edges as a curve with fixed bevel (not mesh WIREFRAME scaling with size)."""
+    import bpy
+
+    curve = bpy.data.curves.new(name=f"{name}_WireCurve", type="CURVE")
+    curve.dimensions = "3D"
+    curve.bevel_depth = max(float(wire_radius), 1e-4)
+    curve.bevel_resolution = 2
+
+    while curve.splines:
+        curve.splines.remove(curve.splines[0])
+
+    for i0, i1 in _CUBE_EDGES:
+        spline = curve.splines.new(type="POLY")
+        if len(spline.points) < 2:
+            spline.points.add(2 - len(spline.points))
+        p0 = verts[i0]
+        p1 = verts[i1]
+        spline.points[0].co = (float(p0[0]), float(p0[1]), float(p0[2]), 1.0)
+        spline.points[1].co = (float(p1[0]), float(p1[1]), float(p1[2]), 1.0)
+
+    obj = bpy.data.objects.new(name, curve)
+    curve.materials.append(material)
+    obj.active_material = material
+    obj.color = rgba
+    obj.show_in_front = True
+    if hasattr(obj, "show_wire"):
+        obj.show_wire = False
+    return obj
 
 
 def _voxel_cube_corners(
@@ -1742,7 +1771,7 @@ def import_change_bboxes_to_blender(
     world_rotation=None,
     label_face_camera: bool | None = None,
 ) -> list:
-    """Add cyan wireframe boxes for each substantial per-frame change region."""
+    """Add colored fixed-thickness wireframe boxes for each detection / change region."""
     import bpy
 
     from .config import algo_3d_bbox_default
@@ -1750,6 +1779,7 @@ def import_change_bboxes_to_blender(
 
     if label_face_camera is None:
         label_face_camera = bool(algo_3d_bbox_default("label_face_camera"))
+    wire_radius = float(algo_3d_bbox_default("bbox_wire_radius"))
 
     spans = resolve_progressive_bbox_spans(
         bboxes,
@@ -1779,25 +1809,17 @@ def import_change_bboxes_to_blender(
         verts = _cube_corners(center, size)
         obj_name = f"ChangeBBox_{label_slug}_{recon_frame}_{instance_idx}"
         instance_idx += 1
-        mesh = bpy.data.meshes.new(name=f"{obj_name}_Mesh")
-        mesh.from_pydata(verts, [], list(_CUBE_FACES))
-        mesh.update()
-
-        obj = bpy.data.objects.new(obj_name, mesh)
+        mat = _get_bbox_material(material_cache, rgba)
+        obj = _create_bbox_wireframe_object(
+            obj_name, verts, mat, rgba, wire_radius=wire_radius
+        )
         collection.objects.link(obj)
-        obj.color = rgba
-        obj.show_in_front = True
         obj["change_bbox_frame"] = recon_frame
         obj["change_bbox_label"] = bbox.label or ""
         obj["changed_voxels"] = changed_voxels
         obj["change_fraction"] = bbox.change_fraction
         if hide_frame is not None:
             obj["change_bbox_hide_frame"] = int(hide_frame)
-
-        mat = _get_bbox_material(material_cache, rgba)
-        mesh.materials.append(mat)
-        obj.active_material = mat
-        _add_wireframe_outline(obj, thickness=float(np.max(size)) * 0.015)
         _rotate_object_world(obj, world_rotation)
 
         if animate and timing is not None:

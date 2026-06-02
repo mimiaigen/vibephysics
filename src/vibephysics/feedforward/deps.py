@@ -71,7 +71,17 @@ _PYPI_DEPS: dict[str, list[tuple[str, str]]] = {
         ("scipy", "scipy"),
         ("pydantic", "pydantic>=2"),
     ],
+    "detection_seg": [
+        ("torch", "torch"),
+        ("torchvision", "torchvision"),
+        ("PIL", "pillow"),
+        ("huggingface_hub", "huggingface_hub"),
+        ("transformers", "transformers>=4.52.0"),
+    ],
 }
+
+# Engines with PyPI deps only (no upstream Git package to import).
+_PYPI_ONLY_ENGINES = frozenset({"detection_seg"})
 
 _ENGINE_MODULES: dict[str, str] = {
     "lingbot_map": "lingbot_map",
@@ -432,6 +442,12 @@ def ensure_engine_dependencies(engine: str, *, verbose: bool = True) -> bool:
             if verbose:
                 print(f"[vibephysics] Failed to install {pip_spec}")
             return False
+
+    if engine in _PYPI_ONLY_ENGINES:
+        return all(
+            _has_module(import_name)
+            for import_name, _ in _PYPI_DEPS[engine]
+        )
 
     module = _ENGINE_MODULES[engine]
     if not _has_module(module):

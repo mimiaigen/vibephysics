@@ -162,16 +162,16 @@ Respect `w2c_as_camera_pose` when building c2w from `extrinsic` (same rules as Z
 
 **Multi-floor (1D Hough):**
 
-1. Project points onto `scene_up` → height histogram (96 bins, smoothed).
-2. Peaks = horizontal floor clusters (merged if too close).
-3. **Bottom floor** = highest peak still **below** frame-0 camera height (ground, not upper levels).
-4. Trim outliers above the fitted plane; SVD plane + damped normal (`_snap_floor_normal`).
-5. Rotate floor normal → canonical OpenCV up (`[0,-1,0]`); optional level passes.
-6. **Upside-down check** — after leveling, 180° flip if frame-0 camera up disagrees or fitted floor is above the camera.
+1. Pool **all frames**, subsample `_GROUND_ALIGN_SAMPLE_FRAC` once globally; optional low-height prefilter.
+2. Project onto `scene_up` → height histogram (`_FLOOR_HOUGH_BINS`, smoothed); peaks merged if closer than `_FLOOR_HOUGH_MIN_PEAK_SEP_FRAC`.
+3. Keep peaks only if ≥ `_FLOOR_MIN_CLUSTER_POINT_FRAC` of **pooled** points fall in the band.
+4. **Floor band** = peak with **largest global in-band mass** (below camera when possible); else percentile fallback (`_FLOOR_BOTTOM_PERCENTILE`).
+5. Trim outliers above plane; SVD + damped normal (`_snap_floor_normal`); rotate floor normal → OpenCV up `[0,-1,0]`; level passes.
+6. **Upside-down check** — 180° flip if frame-0 camera up disagrees or floor is above the camera.
 
-**Acceptance:** applied only if residual tilt improves by ≥ 1° and stays within loose bounds (bumpy floor OK). Logs: `scene_up`, `frame0_up`, `N Hough floor(s), bottom_h=…`. Skipped/rejected lines explain why.
+**Acceptance:** applied if residual tilt improves by ≥ `_MIN_TILT_IMPROVEMENT_DEG` (0.5°) within `_GROUND_ALIGN_MAX_RESIDUAL_TILT_DEG` / slope bounds. Logs: `scene_up`, `frame0_up`, `N Hough floor(s), dominant_h=…`.
 
-**Do not reimplement** in engine folders. Tune constants at top of `ground_align.py` (`_FLOOR_HOUGH_*`, `_FLOOR_BOTTOM_PERCENTILE`, …).
+**Do not reimplement** in engine folders. Tune constants at top of `ground_align.py` (`_FLOOR_MIN_CLUSTER_POINT_FRAC`, `_FLOOR_HOUGH_*`, `_FLOOR_BOTTOM_PERCENTILE`, …).
 
 **Blend-only re-align:** `export` may call `align_prediction_ground` when exporting with `--align-ground` on legacy NPZ; normal path is align during `reconstruct`.
 

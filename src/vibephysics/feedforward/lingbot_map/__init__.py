@@ -303,19 +303,86 @@ def _prepare_for_visualization(predictions, images=None):
     return vis_predictions
 
 
-def _load_and_preprocess_images(
+LINGBOT_PREPROCESS_MODES = ("crop", "pad", "center_square")
+
+
+def _load_center_square_images(
     image_path_list: list[str],
     *,
     image_size: int = 518,
     patch_size: int = 14,
 ) -> "torch.Tensor":
+    """
+    Scale the short side to ``image_size``, then center-crop a square.
+
+    For 1920x1080 this yields ~924x518, then a center 518x518 crop (less peripheral
+    clutter than LingBot's default ``crop`` mode, which keeps the full 16:9 frame).
+    """
     if not image_path_list:
         raise ValueError("At least 1 image is required")
+
+    from PIL import Image, ImageOps
+    from torchvision import transforms as TF
+
+    to_tensor = TF.ToTensor()
+    images = []
+    target = int(image_size)
+
+    for image_path in image_path_list:
+        img = Image.open(image_path)
+        img = ImageOps.exif_transpose(img)
+        if img.mode == "RGBA":
+            background = Image.new("RGBA", img.size, (255, 255, 255, 255))
+            img = Image.alpha_composite(background, img)
+        img = img.convert("RGB")
+
+        width, height = img.size
+        if width >= height:
+            new_height = target
+            new_width = round(width * (target / height) / patch_size) * patch_size
+        else:
+            new_width = target
+            new_height = round(height * (target / width) / patch_size) * patch_size
+
+        img = img.resize((new_width, new_height), Image.Resampling.BICUBIC)
+        left = (new_width - target) // 2
+        top = (new_height - target) // 2
+        img = img.crop((left, top, left + target, top + target))
+        images.append(to_tensor(img))
+
+    import torch
+
+    stacked = torch.stack(images)
+    if len(image_path_list) == 1 and stacked.dim() == 3:
+        stacked = stacked.unsqueeze(0)
+    return stacked
+
+
+def _load_and_preprocess_images(
+    image_path_list: list[str],
+    *,
+    preprocess_mode: str = "center_square",
+    image_size: int = 518,
+    patch_size: int = 14,
+) -> "torch.Tensor":
+    if not image_path_list:
+        raise ValueError("At least 1 image is required")
+    if preprocess_mode not in LINGBOT_PREPROCESS_MODES:
+        raise ValueError(
+            f"preprocess_mode must be one of {LINGBOT_PREPROCESS_MODES}, got {preprocess_mode!r}"
+        )
+    if preprocess_mode == "center_square":
+        return _load_center_square_images(
+            image_path_list,
+            image_size=image_size,
+            patch_size=patch_size,
+        )
+
     from lingbot_map.utils.load_fn import load_and_preprocess_images as official_load
 
     return official_load(
         image_path_list,
-        mode="crop",
+        mode=preprocess_mode,
         image_size=image_size,
         patch_size=patch_size,
     )
@@ -601,6 +668,7 @@ def run_lingbot_map(
     use_sdpa: bool = False,
     image_size: int = 518,
     patch_size: int = 14,
+    preprocess_mode: str = "center_square",
     max_frames: int | None = None,
     max_frames_mode: str = "first",
     verbose: bool = True,
@@ -628,11 +696,16 @@ def run_lingbot_map(
     if verbose:
         print(
             f"--- [vibephysics] LingBot-Map: loading {len(paths)} images "
-            f"(preprocess=crop, size={image_size}) ---",
+            f"(preprocess={preprocess_mode}, size={image_size}) ---",
             flush=True,
         )
 
-    images = _load_and_preprocess_images(paths, image_size=image_size, patch_size=patch_size)
+    images = _load_and_preprocess_images(
+        paths,
+        preprocess_mode=preprocess_mode,
+        image_size=image_size,
+        patch_size=patch_size,
+    )
     h, w = images.shape[-2], images.shape[-1]
     num_frames = images.shape[0]
     if verbose:
@@ -793,7 +866,7 @@ def run_lingbot_map(
             "use_sdpa": use_sdpa,
             "inference_device": device_info.device,
             "vram_gb": get_vram_gb(),
-            "preprocess_mode": "crop",
+            "preprocess_mode": preprocess_mode,
             "image_size": image_size,
             "input_hw": [int(h), int(w)],
             "w2c_as_camera_pose": True,

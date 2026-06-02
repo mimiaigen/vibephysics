@@ -5,12 +5,65 @@ from __future__ import annotations
 import os
 import subprocess
 import warnings
+from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TypeAlias
 
 import numpy as np
 
+VoxelKey: TypeAlias = tuple[int, int, int]
+RandomPointsLimit: TypeAlias = int | float
+
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".tif", ".tiff", ".JPG", ".PNG"}
+
+
+def parse_random_points_limit(value: object, *, name: str) -> RandomPointsLimit | None:
+    """
+    Parse subsample limit: ``0``/empty = off; ``int >= 1`` = max count; ``float`` in (0, 1] = ratio.
+
+    YAML ``1`` is one point; YAML ``1.0`` / ``0.5`` are ratios (100% / 50%).
+    """
+    if value is None or value == "":
+        return None
+    if isinstance(value, str):
+        text = value.strip().lower()
+        if text in ("", "none", "null"):
+            return None
+        if "." in text or "e" in text:
+            value = float(text)
+        else:
+            value = int(text)
+    if isinstance(value, bool):
+        raise ValueError(f"{name} must be a number, not a boolean")
+    if isinstance(value, int):
+        return None if value <= 0 else value
+    num = float(value)
+    if num <= 0:
+        return None
+    if isinstance(value, float) and num <= 1.0:
+        return num
+    if num > 1.0 and num == int(num):
+        return int(num)
+    raise ValueError(
+        f"{name} must be 0 (off), a float ratio in (0, 1], or an integer count >= 1; got {value!r}"
+    )
+
+
+def random_points_limit_enabled(limit: RandomPointsLimit | None) -> bool:
+    return limit is not None
+
+
+def resolve_random_sample_count(limit: RandomPointsLimit, num_points: int) -> int:
+    """How many points to keep after random subsampling (``<= num_points``)."""
+    if num_points <= 0:
+        return 0
+    if isinstance(limit, float):
+        if limit >= 1.0:
+            return num_points
+        keep = max(1, int(round(limit * num_points)))
+        return min(keep, num_points)
+    return min(int(limit), num_points)
 
 DEFAULT_LINGBOT_MAP_MODEL = "lingbot-map"
 
@@ -700,6 +753,40 @@ def is_blender_z_up(predictions) -> bool:
     return resolve_world_coordinates(predictions) == WORLD_COORDS_BLENDER_Z_UP
 
 
+def apply_only_start_frame_pose(
+    prediction,
+    *,
+    reference_frame: int = 0,
+) -> None:
+    """
+    Reproject every frame with the reference camera pose.
+
+    Depth and intrinsics stay per frame; all extrinsics become the reference pose.
+    """
+    from .schema import FeedforwardPrediction
+
+    if not isinstance(prediction, FeedforwardPrediction):
+        raise TypeError("apply_only_start_frame_pose expects FeedforwardPrediction")
+
+    num_frames = int(prediction.depth.shape[0])
+    if not (0 <= reference_frame < num_frames):
+        raise ValueError(
+            f"reference_frame {reference_frame} out of range for {num_frames} frames"
+        )
+
+    ref_extrinsic = prediction.extrinsic[reference_frame].copy()
+    shared_extrinsics = np.repeat(ref_extrinsic[None, ...], num_frames, axis=0)
+    prediction.world_points = unproject_depth_map_to_point_map(
+        prediction.depth,
+        shared_extrinsics,
+        prediction.intrinsic,
+    )
+    prediction.extrinsic = shared_extrinsics.astype(np.float32)
+    prediction.metadata = dict(prediction.metadata)
+    prediction.metadata["only_start_frame_pose"] = True
+    prediction.metadata["only_start_frame_pose_index"] = int(reference_frame)
+
+
 def convert_prediction_to_blender_zup(prediction) -> bool:
     """
     Convert ``world_points`` and ``extrinsic`` to Blender Z-up in place.
@@ -741,8 +828,11 @@ def collect_colored_point_cloud(
     *,
     to_blender: bool = True,
     with_frame_ids: bool = False,
-    random_points_per_frame: int | None = None,
-    total_random_points: int | None = None,
+    random_points_per_frame: RandomPointsLimit | None = None,
+    total_random_points: RandomPointsLimit | None = None,
+    point_cloud_3d_nms: bool = False,
+    point_cloud_3d_nms_radius: float = 0.03,
+    point_cloud_3d_nms_min_neighbors: int = 3,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray | None]:
     """
     Return filtered positions/RGB/conf.
@@ -750,7 +840,8 @@ def collect_colored_point_cloud(
     Filtering order is intentional:
       1. drop points below min_confidence within each frame,
       2. if random_points_per_frame is set, randomly sample within each frame,
-      3. if total_random_points is set, randomly sample globally.
+      3. optional per-frame 3D density NMS (isolated sparse points),
+      4. if total_random_points is set, randomly sample globally.
     """
     from .schema import FeedforwardPrediction
 
@@ -766,55 +857,177 @@ def collect_colored_point_cloud(
     images = resolve_frame_images(payload)
     conf = payload["conf"]
 
+    if point_cloud_3d_nms:
+        from .frame_postprocess import run_per_frame_postprocess
+
+        post = run_per_frame_postprocess(
+            predictions,
+            min_confidence=min_confidence,
+            point_cloud_3d_nms=True,
+            point_cloud_3d_nms_radius=point_cloud_3d_nms_radius,
+            point_cloud_3d_nms_min_neighbors=point_cloud_3d_nms_min_neighbors,
+            to_blender=to_blender,
+            with_frame_ids=with_frame_ids,
+            random_points_per_frame=random_points_per_frame,
+            algo_3d_bbox=False,
+        )
+        return finalize_colored_point_cloud(
+            post.point_chunks,
+            post.color_chunks,
+            post.conf_chunks,
+            post.frame_id_chunks,
+            total_random_points=total_random_points,
+        )
+
     point_chunks: list[np.ndarray] = []
     color_chunks: list[np.ndarray] = []
     conf_chunks: list[np.ndarray] = []
     frame_id_chunks: list[np.ndarray] = []
 
     for frame_idx in range(points.shape[0]):
-        frame_points = points[frame_idx].reshape(-1, 3)
-        frame_colors = images[frame_idx].reshape(-1, 3)
-        frame_conf = conf[frame_idx].reshape(-1)
-        valid_mask = np.isfinite(frame_points).all(axis=1)
-        if min_confidence > 0:
-            valid_mask &= frame_conf >= min_confidence
-        if not np.any(valid_mask):
+        chunk = collect_single_frame_point_chunk(
+            predictions,
+            frame_idx,
+            min_confidence=min_confidence,
+            point_cloud_3d_nms=False,
+            random_points_per_frame=random_points_per_frame,
+            rng_seed=frame_idx,
+        )
+        if chunk is None:
             continue
-        pts = frame_points[valid_mask]
-        rgb = np.clip(frame_colors[valid_mask], 0.0, 1.0)
-        frame_conf_valid = frame_conf[valid_mask].astype(np.float32)
-
-        if random_points_per_frame is not None:
-            random_frame = int(random_points_per_frame)
-            if random_frame <= 0:
-                raise ValueError("random_points_per_frame must be positive when provided")
-            if random_frame < len(frame_conf_valid):
-                rng = np.random.default_rng(frame_idx)
-                frame_idx_keep = rng.choice(len(frame_conf_valid), size=random_frame, replace=False)
-                pts = pts[frame_idx_keep]
-                rgb = rgb[frame_idx_keep]
-                frame_conf_valid = frame_conf_valid[frame_idx_keep]
-
+        pts, rgb, frame_conf_valid, _ = chunk
         if to_blender:
             pts = opencv_to_blender_points(pts)
-        point_chunks.append(pts.astype(np.float32))
-        color_chunks.append((rgb * 255.0).astype(np.uint8))
+        point_chunks.append(pts)
+        color_chunks.append(rgb)
         conf_chunks.append(frame_conf_valid)
         if with_frame_ids:
             frame_id_chunks.append(np.full(len(frame_conf_valid), frame_idx, dtype=np.int32))
 
+    return finalize_colored_point_cloud(
+        point_chunks,
+        color_chunks,
+        conf_chunks,
+        frame_id_chunks,
+        total_random_points=total_random_points,
+    )
+
+
+def collect_single_frame_point_chunk(
+    prediction,
+    frame_idx: int,
+    *,
+    min_confidence: float = 2.0,
+    point_cloud_3d_nms: bool = False,
+    point_cloud_3d_nms_radius: float = 0.03,
+    point_cloud_3d_nms_min_neighbors: int = 3,
+    random_points_per_frame: RandomPointsLimit | None = None,
+    rng_seed: int | None = None,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, int] | None:
+    """Extract one frame's colored points; returns (pts, rgb_u8, conf, nms_removed)."""
+    from .schema import FeedforwardPrediction
+
+    if isinstance(prediction, FeedforwardPrediction):
+        payload = prediction.to_viz_dict()
+    else:
+        payload = prediction
+
+    points = payload.get("world_points_from_depth", payload.get("world_points"))
+    images = resolve_frame_images(payload)
+    conf = payload["conf"]
+
+    frame_points = points[frame_idx].reshape(-1, 3)
+    frame_colors = images[frame_idx].reshape(-1, 3)
+    frame_conf = conf[frame_idx].reshape(-1)
+    valid_mask = np.isfinite(frame_points).all(axis=1)
+    if min_confidence > 0:
+        valid_mask &= frame_conf >= min_confidence
+    if not np.any(valid_mask):
+        return None
+
+    pts = frame_points[valid_mask]
+    rgb = np.clip(frame_colors[valid_mask], 0.0, 1.0)
+    frame_conf_valid = frame_conf[valid_mask].astype(np.float32)
+    nms_removed = 0
+
+    if random_points_per_frame is not None:
+        random_frame = resolve_random_sample_count(
+            random_points_per_frame, len(frame_conf_valid)
+        )
+        if random_frame < len(frame_conf_valid):
+            seed = frame_idx if rng_seed is None else int(rng_seed)
+            rng = np.random.default_rng(seed)
+            keep = rng.choice(len(frame_conf_valid), size=random_frame, replace=False)
+            pts = pts[keep]
+            rgb = rgb[keep]
+            frame_conf_valid = frame_conf_valid[keep]
+
+    if point_cloud_3d_nms:
+        nms_keep = filter_points_3d_nms(
+            pts,
+            radius=point_cloud_3d_nms_radius,
+            min_neighbors=point_cloud_3d_nms_min_neighbors,
+        )
+        nms_removed = int((~nms_keep).sum())
+        pts = pts[nms_keep]
+        rgb = rgb[nms_keep]
+        frame_conf_valid = frame_conf_valid[nms_keep]
+        if len(pts) == 0:
+            return None
+
+    return (
+        pts.astype(np.float32),
+        (rgb * 255.0).astype(np.uint8),
+        frame_conf_valid,
+        nms_removed,
+    )
+
+
+def collect_single_frame_world_points(
+    prediction,
+    frame_idx: int,
+    *,
+    min_confidence: float = 2.0,
+    point_cloud_3d_nms: bool = False,
+    point_cloud_3d_nms_radius: float = 0.03,
+    point_cloud_3d_nms_min_neighbors: int = 3,
+    random_points_per_frame: RandomPointsLimit | None = None,
+    rng_seed: int | None = None,
+) -> np.ndarray | None:
+    """World-space points after confidence / subsample / optional 3D NMS (for bbox, etc.)."""
+    chunk = collect_single_frame_point_chunk(
+        prediction,
+        frame_idx,
+        min_confidence=min_confidence,
+        point_cloud_3d_nms=point_cloud_3d_nms,
+        point_cloud_3d_nms_radius=point_cloud_3d_nms_radius,
+        point_cloud_3d_nms_min_neighbors=point_cloud_3d_nms_min_neighbors,
+        random_points_per_frame=random_points_per_frame,
+        rng_seed=rng_seed,
+    )
+    if chunk is None:
+        return None
+    return chunk[0]
+
+
+def finalize_colored_point_cloud(
+    point_chunks: list[np.ndarray],
+    color_chunks: list[np.ndarray],
+    conf_chunks: list[np.ndarray],
+    frame_id_chunks: list[np.ndarray],
+    *,
+    total_random_points: int | None = None,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray | None]:
     if not point_chunks:
         raise ValueError("No points passed confidence threshold.")
 
     points_out = np.concatenate(point_chunks, axis=0)
     colors_out = np.concatenate(color_chunks, axis=0)
     conf_out = np.concatenate(conf_chunks, axis=0)
-    frame_ids = np.concatenate(frame_id_chunks, axis=0) if with_frame_ids else None
+    frame_ids = np.concatenate(frame_id_chunks, axis=0) if frame_id_chunks else None
 
     if total_random_points is not None:
-        total_random = int(total_random_points)
-        if total_random <= 0:
-            raise ValueError("total_random_points must be positive when provided")
+        total_random = resolve_random_sample_count(total_random_points, len(conf_out))
         if total_random < len(conf_out):
             rng = np.random.default_rng(0)
             idx = rng.choice(len(conf_out), size=total_random, replace=False)
@@ -825,3 +1038,114 @@ def collect_colored_point_cloud(
                 frame_ids = frame_ids[idx]
 
     return points_out, colors_out, conf_out, frame_ids
+
+
+def _voxel_key(point: np.ndarray, voxel_size: float) -> VoxelKey:
+    cell = np.floor(point / voxel_size).astype(np.int64)
+    return int(cell[0]), int(cell[1]), int(cell[2])
+
+
+def _build_voxel_index(points: np.ndarray, voxel_size: float) -> dict[VoxelKey, list[int]]:
+    index: dict[VoxelKey, list[int]] = defaultdict(list)
+    for i in range(len(points)):
+        index[_voxel_key(points[i], voxel_size)].append(i)
+    return index
+
+
+def _filter_points_3d_nms_voxel(
+    points: np.ndarray,
+    *,
+    radius: float,
+    min_neighbors: int,
+) -> np.ndarray:
+    """
+    O(n) voxel-grid density filter (scipy fallback).
+
+    With ``voxel_size == radius``, any neighbor within ``radius`` lies in the
+    point's cell or one of the 26 adjacent cells; only those candidates need
+    distance checks.
+    """
+    n = len(points)
+    min_neighbors = int(min_neighbors)
+    if n == 0:
+        return np.zeros(0, dtype=bool)
+
+    r2 = float(radius) ** 2
+    voxel_size = float(radius)
+    cells = np.floor(points / voxel_size).astype(np.int64)
+    voxel_index = _build_voxel_index(points, voxel_size)
+
+    keep = np.zeros(n, dtype=bool)
+    offsets = (
+        (dx, dy, dz)
+        for dx in (-1, 0, 1)
+        for dy in (-1, 0, 1)
+        for dz in (-1, 0, 1)
+    )
+    for i in range(n):
+        cx, cy, cz = cells[i]
+        count = 0
+        pi = points[i]
+        for dx, dy, dz in offsets:
+            for j in voxel_index.get((int(cx + dx), int(cy + dy), int(cz + dz)), ()):
+                if j == i:
+                    continue
+                delta = pi - points[j]
+                if float(delta @ delta) <= r2:
+                    count += 1
+                    if count >= min_neighbors:
+                        keep[i] = True
+                        break
+            if keep[i]:
+                break
+    return keep
+
+
+def filter_points_3d_nms(
+    points: np.ndarray,
+    *,
+    radius: float,
+    min_neighbors: int,
+) -> np.ndarray:
+    """
+    Per-frame density filter: keep points with >= ``min_neighbors`` others within ``radius``.
+
+    Removes sparse airborne outliers that lack a local dense neighborhood.
+    """
+    n = len(points)
+    if n == 0 or min_neighbors <= 0:
+        return np.ones(n, dtype=bool)
+
+    radius = float(radius)
+    if radius <= 0:
+        return np.ones(n, dtype=bool)
+
+    min_neighbors = int(min_neighbors)
+    if n <= min_neighbors:
+        return np.zeros(n, dtype=bool)
+
+    try:
+        from scipy.spatial import cKDTree
+
+        tree = cKDTree(points)
+        try:
+            neighbor_counts = tree.query_ball_point(
+                points,
+                r=radius,
+                return_length=True,
+                workers=-1,
+            )
+        except TypeError:
+            neighbor_counts = tree.query_ball_point(
+                points,
+                r=radius,
+                return_length=True,
+            )
+        neighbor_counts = np.asarray(neighbor_counts, dtype=np.int64).reshape(-1)
+        return (neighbor_counts - 1) >= min_neighbors
+    except ImportError:
+        return _filter_points_3d_nms_voxel(
+            points,
+            radius=radius,
+            min_neighbors=min_neighbors,
+        )

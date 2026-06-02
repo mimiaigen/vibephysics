@@ -25,7 +25,12 @@ usage() {
     echo "Common args are forwarded, including:"
     echo "  --input/--image_path, --output_path, --point_scale, --max_frames,"
     echo "  --max_frames_mode, --min_confidence, --random_points_per_frame, --total_random_points,"
-    echo "  --compact, --mode, --config,"
+    echo "  --compact, --animation_mode, --only_start_frame_pose,"
+    echo "  --keep_start_frame_point_cloud,"
+    echo "  --point_cloud_3d_nms, --point_cloud_3d_nms_radius, --point_cloud_3d_nms_min_neighbors,"
+    echo "  --detection_seg (masks + 3D bboxes + voxels), --detection_seg_classes,"
+    echo "  --algo_3d_bbox (voxel-diff only, without RF-DETR),"
+    echo "  --mode, --config,"
     echo "  --blend, --html, --frames, --no-install, --install-all"
     exit 1
 }
@@ -39,7 +44,7 @@ INSTALL_ALL=0
 BLEND=0
 HTML=0
 FRAMES=0
-RANDOM_POINTS_PER_FRAME="4000"
+RANDOM_POINTS_PER_FRAME=""
 TOTAL_RANDOM_POINTS=""
 COMPACT=0
 ARGS=()
@@ -247,11 +252,11 @@ output["save_html"] = "visual.html" if html else None
 output["save_frames"] = frames
 if random_points_per_frame.lower() not in {"", "none", "null"}:
     output["random_points_per_frame"] = (
-        None if random_points_per_frame == "0" else int(random_points_per_frame)
+        None if random_points_per_frame == "0" else float(random_points_per_frame)
     )
 if total_random_points.lower() not in {"", "none", "null"}:
     output["total_random_points"] = (
-        None if total_random_points == "0" else int(total_random_points)
+        None if total_random_points == "0" else float(total_random_points)
     )
 output["compact"] = compact
 

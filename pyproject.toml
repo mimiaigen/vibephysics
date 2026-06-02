@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "vibephysics"
-version = "0.3.7"
+version = "0.4.0"
 description = "Physics simulation and annotation tools for Blender"
 readme = "README.md"
 requires-python = ">=3.11,<3.12"
@@ -76,6 +76,13 @@ map_anything = [
     "huggingface_hub",
     "hydra-core",
     "omegaconf",
+]
+detection_seg = [
+    "torch; platform_system != 'Linux'",
+    "torchvision; platform_system != 'Linux'",
+    "pillow",
+    "huggingface_hub",
+    "transformers>=4.52.0",
 ]
 dev = [
     "pytest>=7.0",

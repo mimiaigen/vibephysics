@@ -49,12 +49,13 @@ def main():
         return
 
     if args.predictions:
-        from vibephysics.feedforward.config import load_yaml_config
+        from vibephysics.feedforward.config import load_yaml_config, resolve_blend_settings
         from vibephysics.feedforward.ground_align import align_prediction_ground
         from vibephysics.feedforward.schema import load_prediction
 
         cfg = load_yaml_config(args.config)
         output = cfg.get("output") or {}
+        blend = resolve_blend_settings(output if isinstance(output, dict) else {})
         predictions_path = Path(args.predictions).absolute()
         if not predictions_path.exists():
             print(f"Error: predictions file not found: {predictions_path}")
@@ -69,7 +70,12 @@ def main():
         feedforward.load_reconstruction(
             prediction,
             min_confidence=output.get("min_confidence", 0.5),
-            point_scale=output.get("point_scale", 0.001),
+            point_scale=float(blend["point_scale"]),
+            point_display=str(blend["point_display"]),
+            animate=bool(blend["animate"]),
+            animation_fps=int(blend["animation_fps"]),
+            animation_mode=str(blend["animation_mode"]),
+            keep_start_frame_point_cloud=bool(blend["keep_start_frame_point_cloud"]),
         )
         save_path = Path(output.get("save_blend", "output/feedforward_scene.blend")).absolute()
         save_blend(str(save_path))

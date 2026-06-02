@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import math
 import os
+from dataclasses import dataclass
 from pathlib import Path
 
 import bpy
@@ -16,6 +17,7 @@ from mathutils import Matrix
 
 from .common import is_lingbot_map_engine, is_vgg_ttt_engine, is_vggt_omega_engine
 from .common import collect_colored_point_cloud, resolve_confidence_threshold
+from .config import DEFAULT_POINT_SCALE
 from .schema import FeedforwardPrediction, load_prediction
 
 ENGINE_COLLECTION_NAMES = {
@@ -26,35 +28,105 @@ ENGINE_COLLECTION_NAMES = {
     "vggt": "VGGT_Omega_Result",
 }
 
+# Child collections under each engine result (Outliner eye icon toggles whole layer).
+VIZ_COLLECTION_POINT_CLOUD = "PointCloud"
+VIZ_COLLECTION_CAMERA_POSES = "CameraPoses"
+VIZ_COLLECTION_CAMERA_TRAJECTORY = "CameraTrajectory"
+VIZ_COLLECTION_CHANGE_BBOXES = "ChangeBBoxes"
+VIZ_COLLECTION_OCCUPANCY_VOXELS = "OccupancyVoxels"
+
 # Fixed viewport gizmo sizes in reconstruction coordinates (not scaled to scene extent).
 CAMERA_FRUSTUM_DISPLAY_SIZE = 0.02
 CAMERA_FRUSTUM_CLIP_START = 0.0005
 CAMERA_FRUSTUM_CLIP_END = 0.04
 CAMERA_TRAJECTORY_RADIUS = 0.0008
-DEFAULT_POINT_RADIUS = 0.001
+DEFAULT_POINT_RADIUS = DEFAULT_POINT_SCALE
+ANIMATION_MODES = ("progressive", "discrete")
+
+
+def _srgb_to_linear(rgb: np.ndarray) -> np.ndarray:
+    """Decode display-referred JPEG/sRGB colors for Blender's linear color pipeline."""
+    rgb = np.clip(rgb, 0.0, 1.0).astype(np.float32)
+    low = rgb <= 0.04045
+    linear = np.empty_like(rgb)
+    linear[low] = rgb[low] / 12.92
+    linear[~low] = ((rgb[~low] + 0.055) / 1.055) ** 2.4
+    return linear
 
 
 class _AnimationTiming:
     """Map reconstruction frames onto a Blender timeline that matches source video duration."""
 
-    def __init__(self, num_frames: int, animation_fps: float, video_fps: float):
+    def __init__(
+        self,
+        num_frames: int,
+        animation_fps: float,
+        video_fps: float,
+        *,
+        mode: str = "progressive",
+    ):
         self.num_frames = max(int(num_frames), 1)
         self.animation_fps = max(float(animation_fps), 1.0)
         self.video_fps = max(float(video_fps), 1e-6)
+        self.mode = _normalize_animation_mode(mode)
         self.frames_per_recon = self.animation_fps / self.video_fps
+        self.frames_per_slot = max(int(round(self.frames_per_recon)), 1)
         self.timeline_start = 1
         self.preview_frame = 0
-        self.timeline_end = (
-            self.timeline_start
-            if self.num_frames <= 1
-            else int(round(self.timeline_start + (self.num_frames - 1) * self.frames_per_recon))
-        )
+        if self.discrete:
+            self.timeline_end = (
+                self.timeline_start
+                if self.num_frames <= 1
+                else int(round(self.timeline_start + (self.num_frames - 1) * self.frames_per_recon))
+            )
+            self.duration_seconds = (
+                (self.num_frames - 1) / self.video_fps if self.num_frames > 1 else 0.0
+            )
+        else:
+            self.timeline_end = (
+                self.timeline_start
+                if self.num_frames <= 1
+                else int(round(self.timeline_start + (self.num_frames - 1) * self.frames_per_recon))
+            )
+            self.duration_seconds = (
+                (self.num_frames - 1) / self.video_fps if self.num_frames > 1 else 0.0
+            )
         self.build_duration = max(self.timeline_end - self.timeline_start, 1)
         self.recon_time_scale = self.video_fps / self.animation_fps
-        self.duration_seconds = (self.num_frames - 1) / self.video_fps if self.num_frames > 1 else 0.0
+
+    @property
+    def discrete(self) -> bool:
+        return self.mode == "discrete"
 
     def blender_frame(self, recon_index: int) -> int:
         return self.timeline_start + int(round(recon_index * self.frames_per_recon))
+
+    def slot_end(self, recon_index: int) -> int:
+        """Last Blender frame (inclusive) for a discrete recon slot."""
+        if recon_index + 1 < self.num_frames:
+            return self.blender_frame(recon_index + 1) - 1
+        return self.playback_frame_end
+
+    @property
+    def playback_frame_end(self) -> int:
+        """Scene timeline end; last recon frame/bbox stay visible for a full slot."""
+        if self.num_frames <= 1:
+            return self.timeline_start
+        last_show = self.blender_frame(self.num_frames - 1)
+        return int(last_show + self.frames_per_slot - 1)
+
+    def equal_slot_timeline_end(self) -> int:
+        """Timeline end for visibility keyframes and scene playback."""
+        return self.playback_frame_end
+
+
+def _normalize_animation_mode(mode: str) -> str:
+    normalized = str(mode).strip().lower()
+    if normalized not in ANIMATION_MODES:
+        raise ValueError(
+            f"Unknown animation_mode '{mode}'. Choose one of: {', '.join(ANIMATION_MODES)}"
+        )
+    return normalized
 
 
 def _ensure_collection(name: str, parent=None) -> bpy.types.Collection:
@@ -69,9 +141,80 @@ def _ensure_collection(name: str, parent=None) -> bpy.types.Collection:
     return col
 
 
+def _ensure_child_collection(
+    parent: bpy.types.Collection,
+    child_name: str,
+) -> bpy.types.Collection:
+    """Named subcollection under *parent* (stable across re-import)."""
+    for child in parent.children:
+        if child.name == child_name:
+            return child
+    col = bpy.data.collections.new(child_name)
+    parent.children.link(col)
+    return col
+
+
+@dataclass
+class VizSubcollections:
+    """Toggleable layers under the engine result collection."""
+
+    root: bpy.types.Collection
+    point_cloud: bpy.types.Collection
+    camera_poses: bpy.types.Collection
+    camera_trajectory: bpy.types.Collection
+    change_bboxes: bpy.types.Collection
+    occupancy_voxels: bpy.types.Collection
+
+
+def _configure_hidden_root_empty(root_obj: bpy.types.Object) -> None:
+    """Hide the transform empty; must not have visible children parented to it."""
+    root_obj.hide_viewport = True
+    root_obj.hide_render = True
+    root_obj.hide_select = True
+    root_obj.show_name = False
+    root_obj.empty_display_size = 0.001
+
+
+def _export_rotation_matrix(
+    rotation_degrees: tuple[float, float, float],
+) -> Matrix | None:
+    """World-space rotation applied to viz objects (degrees, XYZ)."""
+    euler = [math.radians(a) for a in rotation_degrees]
+    if all(abs(x) < 1e-12 for x in euler):
+        return None
+    from mathutils import Euler
+
+    return Euler(euler, "XYZ").to_matrix().to_4x4()
+
+
+def _rotate_object_world(obj: bpy.types.Object | None, rot_mat: Matrix | None) -> None:
+    if obj is not None and rot_mat is not None:
+        obj.matrix_world = rot_mat @ obj.matrix_world
+
+
+def setup_viz_subcollections(
+    root: bpy.types.Collection,
+) -> VizSubcollections:
+    return VizSubcollections(
+        root=root,
+        point_cloud=_ensure_child_collection(root, VIZ_COLLECTION_POINT_CLOUD),
+        camera_poses=_ensure_child_collection(root, VIZ_COLLECTION_CAMERA_POSES),
+        camera_trajectory=_ensure_child_collection(
+            root, VIZ_COLLECTION_CAMERA_TRAJECTORY
+        ),
+        change_bboxes=_ensure_child_collection(root, VIZ_COLLECTION_CHANGE_BBOXES),
+        occupancy_voxels=_ensure_child_collection(
+            root, VIZ_COLLECTION_OCCUPANCY_VOXELS
+        ),
+    )
+
+
 def get_or_create_point_material(name: str = "FeedforwardPointMaterial") -> bpy.types.Material:
     if name in bpy.data.materials:
-        return bpy.data.materials[name]
+        mat = bpy.data.materials[name]
+        if mat.use_nodes and any(node.type == "EMISSION" for node in mat.node_tree.nodes):
+            return mat
+        bpy.data.materials.remove(mat)
 
     mat = bpy.data.materials.new(name=name)
     mat.use_nodes = True
@@ -106,15 +249,16 @@ def get_or_create_point_material(name: str = "FeedforwardPointMaterial") -> bpy.
     mix_node = nodes.new("ShaderNodeMix")
     mix_node.data_type = "RGBA"
     mix_node.inputs["Factor"].default_value = 0.0
-    bsdf = nodes.new("ShaderNodeBsdfPrincipled")
+    emission = nodes.new("ShaderNodeEmission")
+    emission.inputs["Strength"].default_value = 1.0
     output_node_material = nodes.new("ShaderNodeOutputMaterial")
 
     links.new(conf_attr_node.outputs["Fac"], map_range.inputs["Value"])
     links.new(map_range.outputs["Result"], color_ramp.inputs["Fac"])
     links.new(attr_node.outputs["Color"], mix_node.inputs["A"])
     links.new(color_ramp.outputs["Color"], mix_node.inputs["B"])
-    links.new(mix_node.outputs["Result"], bsdf.inputs["Base Color"])
-    links.new(bsdf.outputs["BSDF"], output_node_material.inputs["Surface"])
+    links.new(mix_node.outputs["Result"], emission.inputs["Color"])
+    links.new(emission.outputs["Emission"], output_node_material.inputs["Surface"])
     return mat
 
 
@@ -126,7 +270,14 @@ def add_point_cloud_geo_nodes(
     min_confidence: float = 2.0,
     animate_frames: bool = False,
     recon_time_scale: float = 1.0,
+    discrete_frames: bool = False,
+    frames_per_slot: int = 1,
+    timeline_start: float = 1.0,
+    keep_start_frame_point_cloud: bool = False,
+    point_display: str = "pointcloud",
 ) -> None:
+    native_pointcloud = point_display == "pointcloud"
+    use_spheres = point_display == "spheres"
     geo_mod = obj.modifiers.new(name="GeometryNodes", type="NODES")
     node_group = bpy.data.node_groups.new(name=f"FeedforwardPointCloud_{obj.name}", type="GeometryNodeTree")
 
@@ -149,16 +300,11 @@ def add_point_cloud_geo_nodes(
 
     input_node = node_group.nodes.new("NodeGroupInput")
     output_node = node_group.nodes.new("NodeGroupOutput")
-    mesh_to_points = node_group.nodes.new("GeometryNodeMeshToPoints")
-    if hasattr(mesh_to_points, "mode"):
-        mesh_to_points.mode = "VERTICES"
-    instance_on_points = node_group.nodes.new("GeometryNodeInstanceOnPoints")
-    ico_sphere = node_group.nodes.new("GeometryNodeMeshIcoSphere")
-    ico_sphere.inputs["Subdivisions"].default_value = 1
-    realize_instances = node_group.nodes.new("GeometryNodeRealizeInstances")
-    math_node = node_group.nodes.new("ShaderNodeMath")
-    math_node.operation = "MULTIPLY"
-    math_node.inputs[1].default_value = 1.0
+    mesh_to_points = None
+    if not native_pointcloud:
+        mesh_to_points = node_group.nodes.new("GeometryNodeMeshToPoints")
+        if hasattr(mesh_to_points, "mode"):
+            mesh_to_points.mode = "VERTICES"
     named_attr = node_group.nodes.new("GeometryNodeInputNamedAttribute")
     named_attr.inputs["Name"].default_value = "conf"
     named_attr.data_type = "FLOAT"
@@ -170,10 +316,13 @@ def add_point_cloud_geo_nodes(
     set_material_node = node_group.nodes.new("GeometryNodeSetMaterial")
     set_material_node.inputs["Material"].default_value = mat
 
-    node_group.links.new(input_node.outputs["Geometry"], mesh_to_points.inputs["Mesh"])
-    node_group.links.new(input_node.outputs["Scale"], math_node.inputs[0])
-    node_group.links.new(math_node.outputs["Value"], ico_sphere.inputs["Radius"])
-    node_group.links.new(mesh_to_points.outputs["Points"], delete_geo.inputs["Geometry"])
+    if native_pointcloud:
+        node_group.links.new(input_node.outputs["Geometry"], delete_geo.inputs["Geometry"])
+    else:
+        node_group.links.new(input_node.outputs["Geometry"], mesh_to_points.inputs["Mesh"])
+        if not use_spheres and "Radius" in mesh_to_points.inputs:
+            node_group.links.new(input_node.outputs["Scale"], mesh_to_points.inputs["Radius"])
+        node_group.links.new(mesh_to_points.outputs["Points"], delete_geo.inputs["Geometry"])
     node_group.links.new(named_attr.outputs["Attribute"], compare.inputs["A"])
     node_group.links.new(input_node.outputs["Threshold"], compare.inputs["B"])
     node_group.links.new(compare.outputs["Result"], delete_geo.inputs["Selection"])
@@ -188,41 +337,135 @@ def add_point_cloud_geo_nodes(
         frame_floor.operation = "FLOOR"
         frame_offset = node_group.nodes.new("ShaderNodeMath")
         frame_offset.operation = "SUBTRACT"
-        frame_offset.inputs[1].default_value = 1.0
-        recon_scale = node_group.nodes.new("ShaderNodeMath")
-        recon_scale.operation = "MULTIPLY"
-        recon_scale.inputs[1].default_value = float(recon_time_scale)
+        frame_offset.inputs[1].default_value = float(timeline_start)
         recon_max = node_group.nodes.new("ShaderNodeMath")
         recon_max.operation = "FLOOR"
+        recon_index_source = frame_offset.outputs["Value"]
+        if discrete_frames:
+            frame_offset_min = node_group.nodes.new("ShaderNodeMath")
+            frame_offset_min.operation = "MAXIMUM"
+            frame_offset_min.inputs[1].default_value = 0.0
+            node_group.links.new(frame_offset.outputs["Value"], frame_offset_min.inputs[0])
+            recon_index_source = frame_offset_min.outputs["Value"]
+            slot_div = node_group.nodes.new("ShaderNodeMath")
+            slot_div.operation = "DIVIDE"
+            slot_div.inputs[1].default_value = float(max(frames_per_slot, 1))
+            node_group.links.new(recon_index_source, slot_div.inputs[0])
+            node_group.links.new(slot_div.outputs["Value"], recon_max.inputs[0])
+        else:
+            recon_scale = node_group.nodes.new("ShaderNodeMath")
+            recon_scale.operation = "MULTIPLY"
+            recon_scale.inputs[1].default_value = float(recon_time_scale)
+            node_group.links.new(frame_offset.outputs["Value"], recon_scale.inputs[0])
+            node_group.links.new(recon_scale.outputs["Value"], recon_max.inputs[0])
         frame_compare = node_group.nodes.new("FunctionNodeCompare")
         frame_compare.data_type = "INT"
-        frame_compare.operation = "GREATER_THAN"
+        frame_compare.operation = "NOT_EQUAL" if discrete_frames else "GREATER_THAN"
         delete_frames = node_group.nodes.new("GeometryNodeDeleteGeometry")
         delete_frames.domain = "POINT"
         node_group.links.new(scene_time.outputs["Frame"], frame_floor.inputs[0])
         node_group.links.new(frame_floor.outputs["Value"], frame_offset.inputs[0])
-        node_group.links.new(frame_offset.outputs["Value"], recon_scale.inputs[0])
-        node_group.links.new(recon_scale.outputs["Value"], recon_max.inputs[0])
         node_group.links.new(frame_attr.outputs["Attribute"], frame_compare.inputs["A"])
         node_group.links.new(recon_max.outputs["Value"], frame_compare.inputs["B"])
-        in_animation = node_group.nodes.new("FunctionNodeCompare")
-        in_animation.data_type = "FLOAT"
-        in_animation.operation = "GREATER_EQUAL"
-        in_animation.inputs[1].default_value = 1.0
-        frame_delete_mask = node_group.nodes.new("FunctionNodeBooleanMath")
-        frame_delete_mask.operation = "AND"
-        node_group.links.new(scene_time.outputs["Frame"], in_animation.inputs[0])
-        node_group.links.new(in_animation.outputs["Result"], frame_delete_mask.inputs[0])
-        node_group.links.new(frame_compare.outputs["Result"], frame_delete_mask.inputs[1])
+        if discrete_frames:
+            delete_selection = frame_compare.outputs["Result"]
+        else:
+            in_animation = node_group.nodes.new("FunctionNodeCompare")
+            in_animation.data_type = "FLOAT"
+            in_animation.operation = "GREATER_EQUAL"
+            in_animation.inputs[1].default_value = 1.0
+            frame_delete_mask = node_group.nodes.new("FunctionNodeBooleanMath")
+            frame_delete_mask.operation = "AND"
+            node_group.links.new(scene_time.outputs["Frame"], in_animation.inputs[0])
+            node_group.links.new(in_animation.outputs["Result"], frame_delete_mask.inputs[0])
+            node_group.links.new(frame_compare.outputs["Result"], frame_delete_mask.inputs[1])
+            delete_selection = frame_delete_mask.outputs["Boolean"]
+        if keep_start_frame_point_cloud:
+            start_frame_cmp = node_group.nodes.new("FunctionNodeCompare")
+            start_frame_cmp.data_type = "INT"
+            start_frame_cmp.operation = "EQUAL"
+            start_frame_cmp.inputs[1].default_value = 0
+            not_start_frame = node_group.nodes.new("FunctionNodeBooleanMath")
+            not_start_frame.operation = "NOT"
+            keep_start_mask = node_group.nodes.new("FunctionNodeBooleanMath")
+            keep_start_mask.operation = "AND"
+            node_group.links.new(frame_attr.outputs["Attribute"], start_frame_cmp.inputs["A"])
+            node_group.links.new(start_frame_cmp.outputs["Result"], not_start_frame.inputs[0])
+            node_group.links.new(delete_selection, keep_start_mask.inputs[0])
+            node_group.links.new(not_start_frame.outputs["Boolean"], keep_start_mask.inputs[1])
+            delete_selection = keep_start_mask.outputs["Boolean"]
         node_group.links.new(last_geo, delete_frames.inputs["Geometry"])
-        node_group.links.new(frame_delete_mask.outputs["Boolean"], delete_frames.inputs["Selection"])
+        node_group.links.new(delete_selection, delete_frames.inputs["Selection"])
         last_geo = delete_frames.outputs["Geometry"]
 
-    node_group.links.new(last_geo, instance_on_points.inputs["Points"])
-    node_group.links.new(ico_sphere.outputs["Mesh"], instance_on_points.inputs["Instance"])
-    node_group.links.new(instance_on_points.outputs["Instances"], realize_instances.inputs["Geometry"])
-    node_group.links.new(realize_instances.outputs["Geometry"], set_material_node.inputs["Geometry"])
+    if use_spheres:
+        math_node = node_group.nodes.new("ShaderNodeMath")
+        math_node.operation = "MULTIPLY"
+        math_node.inputs[1].default_value = 1.0
+        instance_on_points = node_group.nodes.new("GeometryNodeInstanceOnPoints")
+        ico_sphere = node_group.nodes.new("GeometryNodeMeshIcoSphere")
+        ico_sphere.inputs["Subdivisions"].default_value = 1
+        realize_instances = node_group.nodes.new("GeometryNodeRealizeInstances")
+        node_group.links.new(input_node.outputs["Scale"], math_node.inputs[0])
+        node_group.links.new(math_node.outputs["Value"], ico_sphere.inputs["Radius"])
+        node_group.links.new(last_geo, instance_on_points.inputs["Points"])
+        node_group.links.new(ico_sphere.outputs["Mesh"], instance_on_points.inputs["Instance"])
+        node_group.links.new(
+            instance_on_points.outputs["Instances"], realize_instances.inputs["Geometry"]
+        )
+        last_geo = realize_instances.outputs["Geometry"]
+    node_group.links.new(last_geo, set_material_node.inputs["Geometry"])
     node_group.links.new(set_material_node.outputs["Geometry"], output_node.inputs["Geometry"])
+
+
+def _allocate_pointcloud_points(pc: bpy.types.PointCloud, count: int) -> None:
+    """Allocate point storage (API differs across Blender builds)."""
+    n = int(count)
+    if hasattr(pc, "resize"):
+        pc.resize(n)
+        return
+    points = pc.points
+    add = getattr(points, "add", None)
+    if callable(add):
+        delta = n - len(points)
+        if delta > 0:
+            add(delta)
+        if len(points) != n:
+            raise AttributeError(
+                f"PointCloud.points.add allocated {len(points)} points, expected {n}"
+            )
+        return
+    raise AttributeError("PointCloud has no resize() or points.add()")
+
+
+def _fill_pointcloud_data(
+    pc: bpy.types.PointCloud,
+    points: np.ndarray,
+    colors: np.ndarray,
+    confs: np.ndarray,
+    *,
+    scale: float,
+    frame_ids: np.ndarray | None = None,
+) -> None:
+    n = int(points.shape[0])
+    _allocate_pointcloud_points(pc, n)
+    coords = np.asarray(points, dtype=np.float32).reshape(n, 3)
+    pc.attributes["position"].data.foreach_set("vector", coords.ravel())
+
+    color_attr = pc.attributes.new(name="point_color", type="FLOAT_COLOR", domain="POINT")
+    color_attr.data.foreach_set("color", colors.reshape(n, 4).astype(np.float32).ravel().tolist())
+
+    conf_attr = pc.attributes.new(name="conf", type="FLOAT", domain="POINT")
+    conf_attr.data.foreach_set("value", np.asarray(confs, dtype=np.float32).reshape(-1).tolist())
+
+    if frame_ids is not None:
+        frame_attr = pc.attributes.new(name="frame_id", type="INT", domain="POINT")
+        frame_attr.data.foreach_set("value", np.asarray(frame_ids, dtype=np.int32).reshape(-1).tolist())
+
+    radius_attr = pc.attributes.get("radius")
+    if radius_attr is None:
+        radius_attr = pc.attributes.new(name="radius", type="FLOAT", domain="POINT")
+    radius_attr.data.foreach_set("value", np.full(n, float(scale), dtype=np.float32).tolist())
 
 
 def create_point_cloud_object(
@@ -235,25 +478,50 @@ def create_point_cloud_object(
     min_confidence: float = 2.0,
     frame_ids: np.ndarray | None = None,
     recon_time_scale: float = 1.0,
+    discrete_frames: bool = False,
+    frames_per_slot: int = 1,
+    timeline_start: float = 1.0,
+    keep_start_frame_point_cloud: bool = False,
+    point_display: str = "pointcloud",
 ) -> bpy.types.Object:
-    mesh = bpy.data.meshes.new(name=name)
-    mesh.from_pydata(points.tolist(), [], [])
-    color_attr = mesh.attributes.new(name="point_color", type="FLOAT_COLOR", domain="POINT")
-    color_attr.data.foreach_set("color", colors.flatten().tolist())
-    conf_attr = mesh.attributes.new(name="conf", type="FLOAT", domain="POINT")
-    conf_attr.data.foreach_set("value", confs.tolist())
-    if frame_ids is not None:
-        frame_attr = mesh.attributes.new(name="frame_id", type="INT", domain="POINT")
-        frame_attr.data.foreach_set("value", frame_ids.tolist())
+    gn_display = point_display
+    if point_display == "pointcloud":
+        pc = bpy.data.pointclouds.new(name=name)
+        try:
+            _fill_pointcloud_data(pc, points, colors, confs, scale=scale, frame_ids=frame_ids)
+            obj = bpy.data.objects.new(name, pc)
+        except (AttributeError, KeyError, RuntimeError) as exc:
+            bpy.data.pointclouds.remove(pc)
+            print(
+                "[vibephysics] Native PointCloud allocation unavailable "
+                f"({exc}); using mesh points display.",
+                flush=True,
+            )
+            gn_display = "points"
+            point_display = "points"
 
-    obj = bpy.data.objects.new(name, mesh)
+    if point_display != "pointcloud":
+        n = int(points.shape[0])
+        mesh = bpy.data.meshes.new(name=name)
+        mesh.vertices.add(n)
+        mesh.vertices.foreach_set("co", np.asarray(points, dtype=np.float32).reshape(n, 3).ravel())
+        color_attr = mesh.attributes.new(name="point_color", type="FLOAT_COLOR", domain="POINT")
+        color_attr.data.foreach_set("color", colors.flatten().tolist())
+        conf_attr = mesh.attributes.new(name="conf", type="FLOAT", domain="POINT")
+        conf_attr.data.foreach_set("value", confs.tolist())
+        if frame_ids is not None:
+            frame_attr = mesh.attributes.new(name="frame_id", type="INT", domain="POINT")
+            frame_attr.data.foreach_set("value", frame_ids.tolist())
+        mesh.update()
+        obj = bpy.data.objects.new(name, mesh)
     if collection is not None:
         collection.objects.link(obj)
     else:
         bpy.context.collection.objects.link(obj)
 
     mat = get_or_create_point_material(f"FeedforwardPointMaterial_{name}")
-    obj.data.materials.append(mat)
+    if hasattr(obj.data, "materials"):
+        obj.data.materials.append(mat)
     add_point_cloud_geo_nodes(
         obj,
         mat,
@@ -261,6 +529,11 @@ def create_point_cloud_object(
         min_confidence=min_confidence,
         animate_frames=frame_ids is not None,
         recon_time_scale=recon_time_scale,
+        discrete_frames=discrete_frames,
+        frames_per_slot=frames_per_slot,
+        timeline_start=timeline_start,
+        keep_start_frame_point_cloud=keep_start_frame_point_cloud,
+        point_display=gn_display,
     )
     return obj
 
@@ -326,7 +599,11 @@ def _apply_build_animation(obj: bpy.types.Object, timing: _AnimationTiming) -> N
 
 
 def _keyframe_camera_visibility(cam_obj: bpy.types.Object, timing: _AnimationTiming, frame_index: int) -> None:
-    """Static preview shows all frustums; playback reveals them one by one from frame 1."""
+    """Keyframe camera frustum visibility for progressive or discrete playback."""
+    if timing.discrete:
+        _keyframe_camera_visibility_discrete(cam_obj, timing, frame_index)
+        return
+
     show_frame = timing.blender_frame(frame_index)
 
     cam_obj.hide_viewport = False
@@ -342,6 +619,127 @@ def _keyframe_camera_visibility(cam_obj: bpy.types.Object, timing: _AnimationTim
     cam_obj.hide_viewport = False
     cam_obj.keyframe_insert(data_path="hide_viewport", frame=show_frame)
     _set_constant_interpolation(cam_obj, "hide_viewport")
+
+
+def _keyframe_camera_visibility_discrete(
+    cam_obj: bpy.types.Object,
+    timing: _AnimationTiming,
+    frame_index: int,
+) -> None:
+    """Show one camera frustum at a time; preview frame shows recon frame 0 only."""
+    show_frame = timing.blender_frame(frame_index)
+    hide_frame = timing.slot_end(frame_index) + 1
+
+    cam_obj.hide_viewport = frame_index != 0
+    cam_obj.keyframe_insert(data_path="hide_viewport", frame=timing.preview_frame)
+
+    cam_obj.hide_viewport = True
+    cam_obj.keyframe_insert(data_path="hide_viewport", frame=timing.timeline_start)
+    if show_frame > timing.timeline_start:
+        cam_obj.hide_viewport = True
+        cam_obj.keyframe_insert(data_path="hide_viewport", frame=show_frame - 1)
+
+    cam_obj.hide_viewport = False
+    cam_obj.keyframe_insert(data_path="hide_viewport", frame=show_frame)
+
+    if hide_frame <= timing.timeline_end + 1:
+        cam_obj.hide_viewport = True
+        cam_obj.keyframe_insert(data_path="hide_viewport", frame=hide_frame)
+
+    _set_constant_interpolation(cam_obj, "hide_viewport")
+
+
+def _keyframe_change_bbox_visibility(
+    obj: bpy.types.Object,
+    timing: _AnimationTiming,
+    frame_index: int,
+    *,
+    hide_frame_index: int | None = None,
+) -> None:
+    """
+    Progressive: show at *frame_index*; optional *hide_frame_index* when NMS replaces
+    the box on a later recon frame. Discrete: one slot only.
+    """
+    if timing.discrete:
+        _keyframe_change_bbox_visibility_discrete(obj, timing, frame_index)
+        return
+
+    show_frame = timing.blender_frame(frame_index)
+
+    obj.hide_viewport = False
+    obj.keyframe_insert(data_path="hide_viewport", frame=timing.preview_frame)
+    obj.hide_render = False
+    obj.keyframe_insert(data_path="hide_render", frame=timing.preview_frame)
+
+    obj.hide_viewport = True
+    obj.keyframe_insert(data_path="hide_viewport", frame=timing.timeline_start)
+    obj.hide_render = True
+    obj.keyframe_insert(data_path="hide_render", frame=timing.timeline_start)
+    if show_frame > timing.timeline_start:
+        obj.hide_viewport = True
+        obj.keyframe_insert(data_path="hide_viewport", frame=show_frame - 1)
+        obj.hide_render = True
+        obj.keyframe_insert(data_path="hide_render", frame=show_frame - 1)
+
+    obj.hide_viewport = False
+    obj.keyframe_insert(data_path="hide_viewport", frame=show_frame)
+    obj.hide_render = False
+    obj.keyframe_insert(data_path="hide_render", frame=show_frame)
+
+    if hide_frame_index is not None and int(hide_frame_index) > int(frame_index):
+        hide_blender_frame = timing.blender_frame(int(hide_frame_index))
+        if hide_blender_frame > show_frame:
+            obj.hide_viewport = False
+            obj.keyframe_insert(data_path="hide_viewport", frame=hide_blender_frame - 1)
+            obj.hide_render = False
+            obj.keyframe_insert(data_path="hide_render", frame=hide_blender_frame - 1)
+            obj.hide_viewport = True
+            obj.keyframe_insert(data_path="hide_viewport", frame=hide_blender_frame)
+            obj.hide_render = True
+            obj.keyframe_insert(data_path="hide_render", frame=hide_blender_frame)
+
+    _set_constant_interpolation(obj, "hide_viewport")
+    _set_constant_interpolation(obj, "hide_render")
+
+
+def _keyframe_change_bbox_visibility_discrete(
+    obj: bpy.types.Object,
+    timing: _AnimationTiming,
+    frame_index: int,
+) -> None:
+    """Match camera discrete visibility: frame 0 visible at preview_frame."""
+    show_frame = timing.blender_frame(frame_index)
+    hide_frame = timing.slot_end(frame_index) + 1
+
+    visible_at_preview = frame_index == 0
+    obj.hide_viewport = not visible_at_preview
+    obj.keyframe_insert(data_path="hide_viewport", frame=timing.preview_frame)
+    obj.hide_render = not visible_at_preview
+    obj.keyframe_insert(data_path="hide_render", frame=timing.preview_frame)
+
+    obj.hide_viewport = True
+    obj.keyframe_insert(data_path="hide_viewport", frame=timing.timeline_start)
+    obj.hide_render = True
+    obj.keyframe_insert(data_path="hide_render", frame=timing.timeline_start)
+    if show_frame > timing.timeline_start:
+        obj.hide_viewport = True
+        obj.keyframe_insert(data_path="hide_viewport", frame=show_frame - 1)
+        obj.hide_render = True
+        obj.keyframe_insert(data_path="hide_render", frame=show_frame - 1)
+
+    obj.hide_viewport = False
+    obj.keyframe_insert(data_path="hide_viewport", frame=show_frame)
+    obj.hide_render = False
+    obj.keyframe_insert(data_path="hide_render", frame=show_frame)
+
+    if hide_frame <= timing.timeline_end + 1:
+        obj.hide_viewport = True
+        obj.keyframe_insert(data_path="hide_viewport", frame=hide_frame)
+        obj.hide_render = True
+        obj.keyframe_insert(data_path="hide_render", frame=hide_frame)
+
+    _set_constant_interpolation(obj, "hide_viewport")
+    _set_constant_interpolation(obj, "hide_render")
 
 
 def _iter_action_fcurves(action):
@@ -432,11 +830,11 @@ def _create_playback_camera(
     return playback_obj
 
 
-def _configure_scene_timeline(timing: _AnimationTiming) -> None:
+def _configure_scene_timeline(timing: _AnimationTiming, *, frame_end: int | None = None) -> None:
     scene = bpy.context.scene
     scene.render.fps = int(round(timing.animation_fps))
     scene.frame_start = timing.preview_frame
-    scene.frame_end = timing.timeline_end
+    scene.frame_end = frame_end if frame_end is not None else timing.timeline_end
     scene.frame_current = timing.preview_frame
 
 
@@ -475,6 +873,7 @@ def create_camera_trajectory(
     w2c_as_camera_pose: bool = False,
     animate: bool = False,
     timing: _AnimationTiming | None = None,
+    world_rotation: Matrix | None = None,
 ) -> bpy.types.Object | None:
     """Polyline through camera centers."""
     extrinsics = predictions["extrinsic"]
@@ -516,8 +915,12 @@ def create_camera_trajectory(
         collection.objects.link(traj_obj)
     else:
         bpy.context.scene.collection.objects.link(traj_obj)
+    _rotate_object_world(traj_obj, world_rotation)
     if animate and timing is not None:
-        _apply_build_animation(traj_obj, timing)
+        if timing.discrete:
+            traj_obj.hide_viewport = True
+        else:
+            _apply_build_animation(traj_obj, timing)
     return traj_obj
 
 
@@ -530,27 +933,52 @@ def import_point_cloud(
     total_random_points: int | None = None,
     animate: bool = False,
     timing: _AnimationTiming | None = None,
+    keep_start_frame_point_cloud: bool = False,
+    point_cloud_3d_nms: bool | None = None,
+    point_cloud_3d_nms_radius: float | None = None,
+    point_cloud_3d_nms_min_neighbors: int | None = None,
+    precomputed_points: tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray | None] | None = None,
+    world_rotation: Matrix | None = None,
+    point_display: str | None = None,
 ) -> bpy.types.Object | None:
     from .common import collect_colored_point_cloud
+    from .config import blend_default, normalize_point_display
+
+    if point_display is None:
+        point_display = normalize_point_display(blend_default("point_display"))
+    if point_cloud_3d_nms is None:
+        point_cloud_3d_nms = bool(output_default("point_cloud_3d_nms"))
+    if point_cloud_3d_nms_radius is None:
+        point_cloud_3d_nms_radius = float(output_default("point_cloud_3d_nms_radius"))
+    if point_cloud_3d_nms_min_neighbors is None:
+        point_cloud_3d_nms_min_neighbors = int(output_default("point_cloud_3d_nms_min_neighbors"))
 
     try:
-        points_batch, colors_u8, conf_batch, frame_ids = collect_colored_point_cloud(
-            predictions,
-            min_confidence=min_confidence,
-            to_blender=True,
-            with_frame_ids=animate,
-            random_points_per_frame=random_points_per_frame,
-            total_random_points=total_random_points,
-        )
+        if precomputed_points is not None:
+            points_batch, colors_u8, conf_batch, frame_ids = precomputed_points
+        else:
+            points_batch, colors_u8, conf_batch, frame_ids = collect_colored_point_cloud(
+                predictions,
+                min_confidence=min_confidence,
+                to_blender=True,
+                with_frame_ids=animate,
+                random_points_per_frame=random_points_per_frame,
+                total_random_points=total_random_points,
+                point_cloud_3d_nms=point_cloud_3d_nms,
+                point_cloud_3d_nms_radius=point_cloud_3d_nms_radius,
+                point_cloud_3d_nms_min_neighbors=point_cloud_3d_nms_min_neighbors,
+            )
     except ValueError:
         print("[vibephysics] No points passed confidence threshold.")
         return None
 
+    colors_srgb = colors_u8.astype(np.float32) / 255.0
+    colors_linear = _srgb_to_linear(colors_srgb)
     colors_batch = np.hstack(
-        (colors_u8.astype(np.float32) / 255.0, np.ones((len(colors_u8), 1), dtype=np.float32))
+        (colors_linear, np.ones((len(colors_linear), 1), dtype=np.float32))
     )
 
-    return create_point_cloud_object(
+    obj = create_point_cloud_object(
         "Points",
         points_batch,
         colors_batch,
@@ -560,7 +988,14 @@ def import_point_cloud(
         min_confidence=min_confidence,
         frame_ids=frame_ids,
         recon_time_scale=timing.recon_time_scale if timing is not None else 1.0,
+        discrete_frames=timing.discrete if timing is not None else False,
+        frames_per_slot=timing.frames_per_slot if timing is not None else 1,
+        timeline_start=float(timing.timeline_start) if timing is not None else 1.0,
+        keep_start_frame_point_cloud=keep_start_frame_point_cloud,
+        point_display=point_display,
     )
+    _rotate_object_world(obj, world_rotation)
+    return obj
 
 
 def create_cameras(
@@ -570,6 +1005,7 @@ def create_cameras(
     w2c_as_camera_pose: bool = False,
     animate: bool = False,
     timing: _AnimationTiming | None = None,
+    world_rotation: Matrix | None = None,
 ) -> list[bpy.types.Object]:
     scene = bpy.context.scene
     depth = predictions["depth"]
@@ -578,10 +1014,6 @@ def create_cameras(
     image_paths = predictions.get("image_paths")
 
     target_collection = collection
-    if collection is not None:
-        cameras_col = bpy.data.collections.new("Cameras")
-        collection.children.link(cameras_col)
-        target_collection = cameras_col
 
     camera_objects: list[bpy.types.Object] = []
 
@@ -610,6 +1042,7 @@ def create_cameras(
             w2c_as_camera_pose=w2c_as_camera_pose,
             predictions=predictions,
         )
+        _rotate_object_world(cam_obj, world_rotation)
 
         if target_collection is not None:
             target_collection.objects.link(cam_obj)
@@ -624,7 +1057,12 @@ def create_cameras(
     if camera_objects and not animate:
         scene.camera = camera_objects[0]
     elif animate and timing is not None:
-        playback = _create_playback_camera(camera_objects, target_collection, timing)
+        playback = _create_playback_camera(
+            camera_objects,
+            target_collection,
+            timing,
+            smooth=not timing.discrete,
+        )
         if playback is not None:
             camera_objects.append(playback)
     return camera_objects
@@ -770,8 +1208,20 @@ def _frame_viewports_on_point_cloud(point_obj: bpy.types.Object | None, *, fill:
             _fit_view3d_to_bounds(rv3d, region, center, radius, fill=fill)
 
 
+def _configure_scene_display_for_source_colors() -> None:
+    """Match source JPEG colors instead of Filmic/AgX highlight wash."""
+    scene = bpy.context.scene
+    view = scene.view_settings
+    view.view_transform = "Standard"
+    view.exposure = 0.0
+    view.gamma = 1.0
+    if hasattr(view, "look"):
+        view.look = "None"
+
+
 def _configure_viewports_material_preview() -> None:
     """Persist Material Preview shading in saved .blend files."""
+    _configure_scene_display_for_source_colors()
     for screen in bpy.data.screens:
         for area in screen.areas:
             if area.type != "VIEW_3D":
@@ -780,6 +1230,11 @@ def _configure_viewports_material_preview() -> None:
                 if space.type == "VIEW_3D":
                     space.shading.type = "MATERIAL"
                     space.shading.background_type = "VIEWPORT"
+                    space.shading.use_scene_world = False
+                    if hasattr(space.shading, "use_scene_lights"):
+                        space.shading.use_scene_lights = False
+                    if hasattr(space.shading, "use_scene_lights_render"):
+                        space.shading.use_scene_lights_render = False
 
 
 def load_reconstruction(
@@ -787,8 +1242,8 @@ def load_reconstruction(
     collection_name: str | None = None,
     min_confidence: float = 2.0,
     point_scale: float = DEFAULT_POINT_RADIUS,
-    point_random_points_per_frame: int | None = None,
-    point_total_random_points: int | None = None,
+    random_points_per_frame: int | float | None = None,
+    total_random_points: int | float | None = None,
     import_cameras: bool = True,
     import_trajectory: bool = True,
     import_points: bool = True,
@@ -797,7 +1252,17 @@ def load_reconstruction(
     frame_viewports: bool = True,
     animate: bool = True,
     animation_fps: int = 24,
+    animation_mode: str = "progressive",
     video_fps: float | None = None,
+    algo_3d_bboxes: list | None = None,
+    algo_3d_bbox_min_visualize_changed_voxels: int | None = None,
+    algo_3d_bbox_class_colors: dict[str, tuple[float, float, float, float]] | None = None,
+    keep_start_frame_point_cloud: bool = False,
+    point_cloud_3d_nms: bool | None = None,
+    point_cloud_3d_nms_radius: float | None = None,
+    point_cloud_3d_nms_min_neighbors: int | None = None,
+    precomputed_points: tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray | None] | None = None,
+    point_display: str | None = None,
 ) -> bpy.types.Object | None:
     if isinstance(predictions, FeedforwardPrediction):
         engine = predictions.engine
@@ -840,17 +1305,36 @@ def load_reconstruction(
             num_frames=num_frames,
             animation_fps=animation_fps,
             video_fps=_resolve_video_fps(predictions, video_fps),
+            mode=animation_mode,
         )
-        _configure_scene_timeline(timing)
+        scene_end = (
+            timing.playback_frame_end
+            if timing.discrete or algo_3d_bboxes
+            else timing.timeline_end
+        )
+        _configure_scene_timeline(timing, frame_end=scene_end)
+        if timing.discrete:
+            preview_note = (
+                f"frame {timing.preview_frame}=recon frame 0 only, "
+                f"{timing.timeline_start}-{timing.playback_frame_end} discrete "
+                f"({timing.frames_per_slot} blender frames / recon frame)"
+            )
+        else:
+            preview_note = (
+                f"frames {timing.preview_frame}=full preview, "
+                f"{timing.timeline_start}-{timing.timeline_end} progressive"
+            )
         print(
             f"[vibephysics] Animation: {timing.duration_seconds:.1f}s "
-            f"(frames {timing.preview_frame}=full preview, "
-            f"{timing.timeline_start}-{timing.timeline_end} progressive @ "
-            f"{int(round(timing.animation_fps))} fps, source {timing.video_fps:g} fps)"
+            f"({preview_note} @ {int(round(timing.animation_fps))} fps, "
+            f"source {timing.video_fps:g} fps)"
         )
+        if keep_start_frame_point_cloud:
+            print("[vibephysics] Point cloud: keeping reconstruction frame 0 visible during playback")
 
     col_name = _collection_name_for_prediction(predictions, collection_name)
     col = _ensure_collection(col_name)
+    viz_cols = setup_viz_subcollections(col)
     root_name = f"{col_name}_Root"
     root_obj = bpy.data.objects.get(root_name)
     if root_obj is None:
@@ -859,8 +1343,8 @@ def load_reconstruction(
     elif not root_obj.users_collection:
         col.objects.link(root_obj)
     root_obj.rotation_mode = "XYZ"
-    user_euler = [math.radians(a) for a in rotation]
-    root_obj.rotation_euler = user_euler
+    world_rotation = _export_rotation_matrix(rotation)
+    _configure_hidden_root_empty(root_obj)
 
     point_obj = None
     camera_objects: list[bpy.types.Object] = []
@@ -868,37 +1352,99 @@ def load_reconstruction(
     if import_points:
         point_obj = import_point_cloud(
             payload,
-            collection=col,
+            collection=viz_cols.point_cloud,
             min_confidence=min_confidence,
             point_scale=point_scale,
-            random_points_per_frame=point_random_points_per_frame,
-            total_random_points=point_total_random_points,
+            random_points_per_frame=random_points_per_frame,
+            total_random_points=total_random_points,
             animate=animate,
             timing=timing,
+            keep_start_frame_point_cloud=keep_start_frame_point_cloud,
+            point_cloud_3d_nms=point_cloud_3d_nms,
+            point_cloud_3d_nms_radius=point_cloud_3d_nms_radius,
+            point_cloud_3d_nms_min_neighbors=point_cloud_3d_nms_min_neighbors,
+            precomputed_points=precomputed_points,
+            world_rotation=world_rotation,
+            point_display=point_display,
         )
-        if point_obj is not None:
-            point_obj.parent = root_obj
     if import_cameras:
         camera_objects = create_cameras(
             payload,
-            collection=col,
+            collection=viz_cols.camera_poses,
             global_indices=global_indices,
             w2c_as_camera_pose=w2c_as_camera_pose,
             animate=animate,
             timing=timing,
+            world_rotation=world_rotation,
         )
-        for cam_obj in camera_objects:
-            cam_obj.parent = root_obj
     if import_trajectory and import_cameras:
         traj = create_camera_trajectory(
             payload,
-            collection=col,
+            collection=viz_cols.camera_trajectory,
             w2c_as_camera_pose=w2c_as_camera_pose,
             animate=animate,
             timing=timing,
+            world_rotation=world_rotation,
         )
-        if traj is not None:
-            traj.parent = root_obj
+
+    if algo_3d_bboxes:
+        from .algo_3d_bbox import (
+            import_change_bboxes_to_blender,
+            import_detection_occupancy_voxels_to_blender,
+        )
+        from .config import (
+            DEFAULT_FEEDFORWARD_CONFIG,
+            algo_3d_bbox_default,
+            load_yaml_config,
+            parse_detection_seg_classes,
+        )
+
+        min_bbox_voxels = (
+            int(algo_3d_bbox_min_visualize_changed_voxels)
+            if algo_3d_bbox_min_visualize_changed_voxels is not None
+            else int(algo_3d_bbox_default("min_visualize_changed_voxels"))
+        )
+        bbox_class_colors = algo_3d_bbox_class_colors
+        if not bbox_class_colors:
+            section = load_yaml_config(DEFAULT_FEEDFORWARD_CONFIG).get(
+                "detection_seg", {}
+            )
+            _, bbox_class_colors = parse_detection_seg_classes(
+                section.get("classes", ["person"])
+            )
+        viz_mode = str(algo_3d_bbox_default("visualization")).strip().lower()
+        nms_iou = float(algo_3d_bbox_default("progressive_class_nms_iou"))
+        bbox_frames = (
+            algo_3d_bboxes.get("frames", algo_3d_bboxes)
+            if isinstance(algo_3d_bboxes, dict) and "frames" in algo_3d_bboxes
+            else algo_3d_bboxes
+        )
+        blend_kwargs = dict(
+            timing=timing,
+            animate=animate and timing is not None,
+            min_visualize_changed_voxels=min_bbox_voxels,
+            class_colors=bbox_class_colors,
+            progressive_class_nms_iou=nms_iou,
+        )
+        if viz_mode in ("voxels", "both"):
+            voxel_size = float(algo_3d_bbox_default("voxel_size"))
+            if isinstance(algo_3d_bboxes, dict) and "voxel_size" in algo_3d_bboxes:
+                voxel_size = float(algo_3d_bboxes["voxel_size"])
+            vox_objs = import_detection_occupancy_voxels_to_blender(
+                bbox_frames,
+                viz_cols.occupancy_voxels,
+                voxel_size=voxel_size,
+                voxel_alpha=float(algo_3d_bbox_default("voxel_alpha")),
+                world_rotation=world_rotation,
+                **blend_kwargs,
+            )
+        if viz_mode in ("bbox", "both"):
+            import_change_bboxes_to_blender(
+                bbox_frames,
+                viz_cols.change_bboxes,
+                world_rotation=world_rotation,
+                **blend_kwargs,
+            )
 
     _configure_viewports_material_preview()
     if frame_viewports:

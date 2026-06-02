@@ -4,12 +4,13 @@
 
 **A lightweight framework for turning real-world videos and images into 3D maps, Blender scenes, and physical simulations — bridging feedforward reconstruction, sparse mapping, robotics, and physics in one CPU-friendly workflow.**
 
-**Current release:** [v0.3.7 on PyPI](https://pypi.org/project/vibephysics/0.3.7/)
+**Current release:** [v0.4.0 on PyPI](https://pypi.org/project/vibephysics/0.4.0/)
 
 ---
 
 ## Changelog
 
+- **v0.4.0** (2026-06-02) — PyPI; RF-DETR instance segmentation (`--detection_seg`) with masked 3D bboxes and Blender occupancy voxels; voxel-diff `--algo_3d_bbox` without detection; nested `output` / `blend` YAML and `reconstruct_config.json`; `point_display` modes (`pointcloud` | `points` | `spheres`); ground align shifts leveled floor to z > 0 in Blender Z-up; `random_points_per_frame` ratio defaults and shell no longer forces 4000; `pip install vibephysics[detection_seg]` optional extra.
 - **v0.3.7** (2026-05-31) — PyPI; feedforward ground align (frame-0 camera up, 1D Hough multi-floor → bottom floor, bumpy-depth tilt); fixed-size Blender camera frustums/trajectory; point cloud icosphere instancing in blend export; `SKILL.md` ground-align docs.
 - **v0.3.6** (2026-05-31) — PyPI; [DVLT](https://github.com/nv-tlabs/dvlt) feedforward (`--method dvlt`); `.vibephysics/feedforward/` weight caches; Plotly trajectory aligned with saved poses; feedforward `SKILL.md` for agents; GPU dependency fixes.
 - **v0.3.5** (2026-05-31) — PyPI; feedforward stage timing/RSS; compact NPZ defaults (`min_confidence`, per-frame/global sampling); Plotly frame-balanced sampling; R3 Mac/MPS kill warning.
@@ -22,7 +23,7 @@
 
 ## ⚙️ Installation (macOS)
 
-Conda + `pip install vibephysics` (latest: **0.3.7**); optional feedforward backends.
+Conda + `pip install vibephysics` (latest: **0.4.0**); optional feedforward backends.
 
 <details>
 <summary>Installation steps</summary>
@@ -33,7 +34,7 @@ conda create -n vibephysics python=3.11
 conda activate vibephysics
 
 # 2. Install core package (includes COLMAP/GLOMAP mapping & Blender simulation)
-pip install "vibephysics>=0.3.7"
+pip install "vibephysics>=0.4.0"
 
 # 3. (Optional) Install feedforward backends from GitHub
 # Or skip these — run_feedforward.sh auto-installs on first run
@@ -101,17 +102,24 @@ Output: `sparse/0/` plus `visualize.blend` (unless `--no-blend`).
 
 Feedforward 3D reconstruction from video or images via LingBot-Map, VGGT-Omega, VGG-TTT, Map-Anything, R3/R3-Long, and DVLT. By default, `predictions.npz` stores a compact colored point cloud plus camera poses; dense depth/world-point tensors are opt-in.
 
+**v0.4 highlights**
+
+- **Faster Blender export:** `output.blend.point_display: pointcloud` (default) uses native Blender point clouds instead of per-point icosphere instancing — much quicker to open and scrub on long sequences. Tune size with `point_scale: 0.0035` (default).
+- **Adaptive sampling:** `random_points_per_frame: 0.35` keeps ~35% of confidence-filtered points **per frame** (float = ratio; scales with resolution and scene density). Prefer ratios over fixed counts like `4000`; use an integer only when you need an exact cap.
+- **2D → 3D object analysis:** `--detection_seg` runs RF-DETR instance segmentation (COCO classes), then masked 3D axis-aligned bboxes and semi-transparent **occupancy voxels** in `scene.blend`. `--algo_3d_bbox` without detection = voxel-diff change blobs vs frame 0.
+- Optional: `pip install "vibephysics[detection_seg]"` or let `run_feedforward.sh` auto-install transformers on first `--detection_seg`.
+
 <details>
 <summary>Feedforward setup & usage</summary>
 
-Install backends (Python 3.11 + `bpy`). Pre-install from GitHub (see Installation) or let `run_feedforward.sh` auto-install on first use. The default output is compact `predictions.npz` only (~4k points/frame); add `--frames`, `--html`, and `--blend` as needed.
+Install backends (Python 3.11 + `bpy`). Pre-install from GitHub (see Installation) or let `run_feedforward.sh` auto-install on first use. Defaults: compact `predictions.npz` with **ratio** sampling (`random_points_per_frame: 0.35`); add `--frames`, `--html`, and `--blend` as needed. Blender export uses fast `pointcloud` display unless you override `point_display` in YAML.
 
-Examples below build up step by step on the same base command — each step adds one thing.
+Examples below build up step by step on the same base command — each step adds one thing. Omitted flags use `feedforward.yaml` defaults.
 
 ```bash
 pip install vibephysics bpy
 
-# 1. Simplest — compact predictions.npz only (~4k pts/frame)
+# 1. Simplest — compact npz (default ~35% pts/frame after confidence filter)
 ./run_feedforward.sh --method lingbot_map --input test_recording.MOV
 
 # 2. + preprocessed RGB frames folder
@@ -127,84 +135,44 @@ pip install vibephysics bpy
   --frames \
   --html
 
-# 4. + Blender scene export
+# 4. + Blender export (fast native pointcloud display + point_scale 0.0035 by default)
 ./run_feedforward.sh \
   --method lingbot_map \
   --input test_recording.MOV \
-  --frames \
-  --html \
-  --blend
-
-# 5. + limit frame count (quick test on a short clip)
-./run_feedforward.sh \
-  --method lingbot_map \
-  --input test_recording.MOV \
-  --max_frames 12 \
-  --max_frames_mode first \
-  --frames \
-  --html \
-  --blend
-
-# 6. + lighter point cloud (faster HTML / smaller npz)
-./run_feedforward.sh \
-  --method lingbot_map \
-  --input test_recording.MOV \
-  --random_points_per_frame 1000 \
-  --frames \
-  --html
-
-# 7. + denser compact cloud for Blender
-./run_feedforward.sh \
-  --method lingbot_map \
-  --input test_recording.MOV \
-  --random_points_per_frame 20000 \
-  --compact \
-  --point_scale 0.02 \
   --frames \
   --blend
 
-# 8. Long input — spread sampling + global point cap
-./run_feedforward.sh \
-  --method vggt_omega \
-  --input path/to/images \
-  --max_frames 30 \
-  --max_frames_mode spread \
-  --random_points_per_frame 5000 \
-  --total_random_points 120000 \
-  --frames \
-  --html
-
-# 9. Dense legacy arrays — full depth/conf/world_points (not compact sampling)
+# 5. RF-DETR segmentation + masked 3D bboxes + occupancy voxels in Blender
+#    (classes/colors in feedforward.yaml detection_seg; COCO names only)
 ./run_feedforward.sh \
   --method lingbot_map \
   --input test_recording.MOV \
-  --random_points_per_frame 0 \
-  --min_confidence 1.5
+  --detection_seg \
+  --frames \
+  --blend
 
-# 10. Alternate engine — R3 on Mac/MPS (small batch)
+# 6. Alternate engine — R3 on Mac/MPS (small batch; defaults otherwise)
 ./run_feedforward.sh \
   --method r3 \
   --input test_recording.MOV \
   --max_frames 4 \
-  --random_points_per_frame 2000 \
   --frames
 
-# 11. Map-Anything factory method — e.g. Depth Anything 3
+# 7. Map-Anything factory — e.g. Depth Anything 3
 ./run_feedforward.sh \
   --method da3 \
   --input path/to/images \
-  --random_points_per_frame 6000 \
   --blend
 
-# 12. Full custom — custom output dir, caps, all exports
+# 8. Full custom — output dir, frame limits, ratio caps, all exports
 ./run_feedforward.sh \
-  --method r3_long \
+  --method lingbot_map \
   --input test_recording.MOV \
-  --output_path output/r3_long_demo \
+  --output_path output/lingbot_map_demo \
   --max_frames 24 \
   --max_frames_mode first \
-  --random_points_per_frame 4000 \
-  --total_random_points 200000 \
+  --random_points_per_frame 0.4 \
+  --detection_seg \
   --frames \
   --html \
   --blend
@@ -214,7 +182,7 @@ Configs: `src/vibephysics/feedforward/configs/`
 
 `feedforward.yaml` is the single feedforward config. It includes sections for all engines; `run_feedforward.sh --method ...` selects the active engine and patches runtime output flags.
 
-**Config (`feedforward.yaml`):** one file for all engines. `run_feedforward.sh` sets `engine` from `--method` and patches `output.save_blend`, `output.save_html`, `output.save_frames`, `output.random_points_per_frame`, `output.total_random_points`, and `output.compact` from CLI flags. For R3, `--method r3` / `r3_long` also sets `r3.model`.
+**Config (`feedforward.yaml`):** one file for all engines. `run_feedforward.sh` sets `engine` from `--method` and patches `output.*`, `output.blend.*`, `detection_seg.*`, and `algo_3d_bbox.*` from CLI flags (`--blend`, `--detection_seg`, `--point_scale`, `--random_points_per_frame`, …). For R3, `--method r3` / `r3_long` also sets `r3.model`.
 
 ```yaml
 engine: lingbot_map       # lingbot_map | vggt_omega | vgg_ttt | map_anything | r3 | dvlt
@@ -230,17 +198,30 @@ video:
 
 output:
   save_blend: null         # scene.blend path, or set by --blend
-  save_html: null          # e.g. visual.html, or set by --html
-  save_frames: false       # true = save model-preprocessed RGB frames
+  save_html: null
+  save_frames: false
   min_confidence: 2.0
-  filter_edges: true
-  point_scale: 0.001
-  random_points_per_frame: 4000  # per-frame random sample after confidence filter; null/0 = dense
-  total_random_points: null      # optional global random cap after per-frame sampling
-  compact: false           # true = force compact points + poses only
-  animate: true
-  animation_fps: 24
-  align_ground: true       # frame-0 camera up + Hough floor peaks → bottom floor (OpenCV, pre-save)
+  random_points_per_frame: 0.35   # float in (0,1] = ratio; int = max pts/frame; 0 = dense
+  total_random_points: 0          # float = global ratio cap; int = global max; 0 = off
+  align_ground: true
+  algo_3d_bbox: false             # auto true when detection_seg.enabled
+  blend:                          # Blender-only (when save_blend set)
+    point_scale: 0.0035
+    point_display: pointcloud     # pointcloud (fast) | points | spheres (slow, round)
+    animate: true
+    animation_fps: 24
+    animation_mode: progressive   # progressive | discrete
+
+detection_seg:
+  enabled: false                  # --detection_seg
+  model: Roboflow/rf-detr-seg-medium
+  classes: [person, cyan, chair, red, ...]   # COCO names; "name, color" per line
+  threshold: 0.25
+
+algo_3d_bbox:
+  voxel_size: 0.02
+  min_changed_voxels: 12
+  # masked_cluster_aabb when detection_seg on; voxel_diff_blob with --algo_3d_bbox alone
 
 lingbot_map:
   model: lingbot-map
@@ -298,7 +279,7 @@ r3:
 
 `run_feedforward.sh` routes direct engines (`lingbot_map`, `vggt_omega`, `vgg_ttt`, `r3`, `r3_long`, `dvlt`) and Map-Anything factory model keys (`da3`, `mapanything`, `vggt`, `mast3r`, `pi3`, etc.) through one CLI. Unknown method names are treated as Map-Anything model keys so new factory methods can be tried without changing the script.
 
-**Saved output defaults:** `predictions.npz` is compact by default because `--random_points_per_frame` defaults to `4000`, with `min_confidence: 2.0` filtering low-confidence points first. It stores `points`, `colors`, `conf`, `frame_ids`, camera `extrinsic`/`intrinsic`, `trajectory`, `engine`, and `metadata`. Filtering order is: first apply `--min_confidence`, then randomly keep up to `--random_points_per_frame K` points within each frame, then apply `--total_random_points K` globally if provided. Set `--random_points_per_frame 0` to disable per-frame random sampling and save dense legacy arrays (`depth`, `conf`, `world_points`, etc.) unless `--compact` or `--total_random_points` is set. Pass `--blend` to additionally export `scene.blend`, `--html` to export `visual.html`, and `--frames` to save the model-preprocessed RGB frames folder.
+**Saved output defaults:** `predictions.npz` is compact by default: `min_confidence: 2.0` first, then `random_points_per_frame: 0.35` keeps a **ratio** of surviving points per frame (scales with input resolution — no fixed “4000 points” default). Optional `total_random_points` as a float applies a second global ratio cap. Set `--random_points_per_frame 0` for dense legacy arrays (`depth`, `conf`, `world_points`, …). Pass `--blend` for `scene.blend` (native `pointcloud` display by default), `--html` for `visual.html`, `--frames` for RGB frames, `--detection_seg` for masks + 3D bboxes + voxels (see layout below).
 
 **Map-Anything model keys:**
 
@@ -354,11 +335,15 @@ map_output_dir = feedforward.reconstruct_from_config(
 **Output layout:**
 ```
 feedforward_output/{engine}_{timestamp}/
-  predictions.npz          # compact points+poses by default; dense arrays if --random_points_per_frame 0
-  reconstruct_config.json
-  frames/                  # optional, only when --frames is passed
-  visual.html              # optional, only when --html is passed
-  scene.blend              # optional, only when --blend is passed
+  predictions.npz          # compact points+poses (ratio sampling by default)
+  reconstruct_config.json  # nested output + blend + detection_seg sections
+  frames/                  # optional (--frames)
+  visual.html              # optional (--html)
+  scene.blend              # optional (--blend); pointcloud display by default
+  detection_seg/           # optional (--detection_seg)
+    masks/                 # per-instance PNG masks when detected
+    summary.json
+  algo_3d_bbox.json        # 3D bboxes + voxel_centers for Blender viz
 ```
 
 `predictions.npz` uses Blender Z-up (`metadata.world_coordinates: blender_z_up`). **Ground align** (`align_ground: true`, default) runs in OpenCV space **before** Z-up save: frame-0 camera pose sets rough up, **1D Hough voting** along that axis finds multiple floor heights, and the **lowest floor below the camera** is leveled (works on bumpy depth, not a flat-plane assumption). Metadata may include `ground_align_floor_count` and `ground_align_floor_heights`. Blender import does not re-align or re-axis-convert. Post-process an existing `.blend` with `run_postprocess_blend.sh --point_scale SIZE`.
@@ -376,7 +361,9 @@ python -m vibephysics.feedforward.export plotly \
   --trajectory
 ```
 
-The HTML viewer renders all valid points saved in `predictions.npz`; point count is normally controlled by `random_points_per_frame` and `total_random_points` during reconstruction. For manual ad-hoc export, you can still pass `--max-points` to downsample a large existing prediction. It draws the camera trajectory as red dots connected by a red line and includes Play/Pause buttons (`1x` to `16x`) plus a frame slider. Install Plotly if needed:
+The HTML viewer renders all valid points saved in `predictions.npz`; density is controlled by `random_points_per_frame` / `total_random_points` ratios (or integers for hard caps). For manual ad-hoc export, you can still pass `--max-points` to downsample a large existing prediction. It draws the camera trajectory as red dots connected by a red line and includes Play/Pause buttons (`1x` to `16x`) plus a frame slider. Install Plotly if needed:
+
+**Blender performance tips:** keep `point_display: pointcloud` (default). Use `spheres` only when you need round points. Lower `--random_points_per_frame` ratio (e.g. `0.15`) before lowering `point_scale` if the file is slow to open. `--detection_seg` adds bbox wireframes and voxel cubes per detected instance; tune `algo_3d_bbox.min_visualize_changed_voxels` in YAML to skip tiny blobs.
 
 ```bash
 pip install plotly

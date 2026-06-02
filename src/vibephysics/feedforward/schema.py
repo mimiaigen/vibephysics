@@ -83,20 +83,30 @@ def save_compact_prediction(
     prediction: FeedforwardPrediction,
     *,
     min_confidence: float = 2.0,
-    random_points_per_frame: int | None = None,
-    total_random_points: int | None = None,
+    random_points_per_frame: int | float | None = None,
+    total_random_points: int | float | None = None,
+    point_cloud_3d_nms: bool = False,
+    point_cloud_3d_nms_radius: float = 0.03,
+    point_cloud_3d_nms_min_neighbors: int = 3,
+    precomputed_points: tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray] | None = None,
 ) -> None:
     """Save filtered colored 3D points plus camera pose/trajectory data."""
     from .common import collect_colored_point_cloud
 
-    points, colors, conf, frame_ids = collect_colored_point_cloud(
-        prediction,
-        min_confidence=min_confidence,
-        to_blender=True,
-        with_frame_ids=True,
-        random_points_per_frame=random_points_per_frame,
-        total_random_points=total_random_points,
-    )
+    if precomputed_points is not None:
+        points, colors, conf, frame_ids = precomputed_points
+    else:
+        points, colors, conf, frame_ids = collect_colored_point_cloud(
+            prediction,
+            min_confidence=min_confidence,
+            to_blender=True,
+            with_frame_ids=True,
+            random_points_per_frame=random_points_per_frame,
+            total_random_points=total_random_points,
+            point_cloud_3d_nms=point_cloud_3d_nms,
+            point_cloud_3d_nms_radius=point_cloud_3d_nms_radius,
+            point_cloud_3d_nms_min_neighbors=point_cloud_3d_nms_min_neighbors,
+        )
     trajectory = prediction.extrinsic[:, :3, 3].astype(np.float32)
     metadata = dict(prediction.metadata)
     metadata.update(
@@ -104,8 +114,8 @@ def save_compact_prediction(
             "compact": True,
             "compact_schema": "colored_points_pose_v1",
             "compact_min_confidence": float(min_confidence),
-            "compact_random_points_per_frame": None if random_points_per_frame is None else int(random_points_per_frame),
-            "compact_total_random_points": None if total_random_points is None else int(total_random_points),
+            "random_points_per_frame": random_points_per_frame,
+            "total_random_points": total_random_points,
             "compact_point_count": int(points.shape[0]),
             "color_format": "uint8_rgb",
         }

@@ -3,24 +3,40 @@
 from __future__ import annotations
 
 import math
+from pathlib import Path
 
 import numpy as np
 
 from .schema import FeedforwardPrediction
 
-_GROUND_ALIGN_MAX_POINTS = 80_000
-# OpenCV world is Y-down; physical "up" is -Y (same frame ground align rotates in).
+# OpenCV world is Y-down; physical "up" is -Y (ground align rotates into this frame).
 _OPENCV_UP = np.array([0.0, -1.0, 0.0], dtype=np.float64)
-# Depth reconstructions are bumpy — Hough clusters along scene_up, fit the bottom floor.
+
+# Point subsampling for floor fit (single global pool; fraction of all valid points).
+_GROUND_ALIGN_SAMPLE_FRAC = 0.20
+_GROUND_ALIGN_DEFAULT_MIN_CONFIDENCE = 2.0
+_GROUND_ALIGN_PREFILTER_LOW_PERCENTILE = 28.0
+_GROUND_ALIGN_PREFILTER_MIN_FRAC = 0.04  # apply low-band prefilter only if enough mass there
+
+# 1D Hough on height along scene_up → horizontal floor slabs.
+_FLOOR_HOUGH_BINS = 96
+_FLOOR_HOUGH_SMOOTH_BINS = 7
+_FLOOR_HOUGH_MIN_PEAK_SEP_FRAC = 0.05
+_FLOOR_HOUGH_MIN_PEAK_VOTE_FRAC = 0.012  # loose histogram peak gate (see in-band frac below)
+_FLOOR_CLUSTER_HALF_WIDTH_FRAC = 0.03
+_FLOOR_MIN_CLUSTER_POINT_FRAC = 0.15  # keep peak only if this fraction of points lie in band
+
+# Fallback low band when Hough finds no qualifying peak.
 _FLOOR_BOTTOM_PERCENTILE = 22.0
+_FLOOR_BOTTOM_PERCENTILE_WIDE = 35.0
+
+# Plane fit on the chosen low band (bumpy depth — damp tilt, trim outliers above plane).
 _FLOOR_TRIM_PASSES = 3
 _FLOOR_TRIM_KEEP_PERCENTILE = 88.0
 _FLOOR_NORMAL_HORIZ_KEEP = 0.25
-_FLOOR_HOUGH_BINS = 96
-_FLOOR_HOUGH_SMOOTH_BINS = 7
-_FLOOR_HOUGH_MIN_PEAK_VOTE_FRAC = 0.012
-_FLOOR_HOUGH_MIN_PEAK_SEP_FRAC = 0.05
-_FLOOR_CLUSTER_HALF_WIDTH_FRAC = 0.03
+# After leveling, translate so the floor band sits above z=0 (Blender Z-up).
+_GROUND_Z_CLEARANCE = 0.01
+_FLOOR_HEIGHT_PERCENTILE = 8.0
 
 
 def _heights(points: np.ndarray, up: np.ndarray = _OPENCV_UP) -> np.ndarray:
@@ -90,18 +106,52 @@ def _up_from_point_axes(points: np.ndarray) -> np.ndarray:
     return _normalize(best_up)
 
 
+def _collect_frame0_points(
+    predictions: dict | FeedforwardPrediction,
+    *,
+    max_points: int = 30_000,
+) -> np.ndarray | None:
+    """Finite world points from frame 0 only (reference view for gravity/up)."""
+    if isinstance(predictions, FeedforwardPrediction):
+        world_points = predictions.world_points
+    else:
+        world_points = predictions.get("world_points_from_depth", predictions.get("world_points"))
+    if world_points is None or len(world_points) == 0:
+        return None
+
+    frame0 = np.asarray(world_points[0], dtype=np.float64).reshape(-1, 3)
+    valid = np.isfinite(frame0).all(axis=1)
+    pts = frame0[valid]
+    if pts.shape[0] < 50:
+        return None
+    if pts.shape[0] > max_points:
+        rng = np.random.default_rng(0)
+        idx = rng.choice(pts.shape[0], max_points, replace=False)
+        pts = pts[idx]
+    return pts
+
+
+def _scene_bulk_below_camera(
+    points: np.ndarray,
+    cam_pos: np.ndarray,
+    up: np.ndarray,
+    *,
+    min_below_frac: float = 0.52,
+) -> bool:
+    """True when most of the scene lies below the camera along ``up``."""
+    relative = (points - cam_pos) @ _normalize(up)
+    return float(np.mean(relative < 0.0)) >= min_below_frac
+
+
 def _orient_scene_up_from_first_camera(
     points: np.ndarray,
     up: np.ndarray,
     cam_pos: np.ndarray,
     cam_up: np.ndarray,
 ) -> np.ndarray:
-    """Match frame-0 camera up; keep scene bulk below the first camera."""
-    up = _normalize(up)
-    if float(up @ cam_up) < 0.0:
-        up = -up
-    relative = (points - cam_pos) @ up
-    if float(np.percentile(relative, 40.0)) > 0.0:
+    """Use frame-0 camera up; flip if the reference view bulk sits above the camera."""
+    up = _normalize(cam_up if float(up @ cam_up) >= 0.0 else -up)
+    if not _scene_bulk_below_camera(points, cam_pos, up):
         up = -up
     return _normalize(up)
 
@@ -111,20 +161,20 @@ def _estimate_scene_up(
     extrinsics: np.ndarray,
     *,
     w2c_as_camera_pose: bool,
+    frame0_points: np.ndarray | None = None,
 ) -> np.ndarray:
-    """Gravity-up from frame-0 camera (refined by consensus / points when needed)."""
+    """Gravity-up from frame-0 camera pose and frame-0 scene geometry."""
     cam_pos, first_up = _first_frame_camera(extrinsics, w2c_as_camera_pose=w2c_as_camera_pose)
+    orient_pts = frame0_points
+    if orient_pts is None or orient_pts.shape[0] < 50:
+        orient_pts = points
+    up = _orient_scene_up_from_first_camera(orient_pts, first_up, cam_pos, first_up)
+
     if len(extrinsics) >= 3:
         cam_up, agree = _camera_up_consensus(extrinsics, w2c_as_camera_pose=w2c_as_camera_pose)
-        if agree >= 0.6:
-            up = cam_up
-        else:
-            up = first_up
-    else:
-        up = first_up
-    if float(up @ first_up) < 0.0:
-        up = -up
-    return _orient_scene_up_from_first_camera(points, up, cam_pos, first_up)
+        if agree >= 0.6 and float(cam_up @ first_up) >= 0.0:
+            up = _orient_scene_up_from_first_camera(orient_pts, cam_up, cam_pos, first_up)
+    return up
 
 
 def _plane_distances(points: np.ndarray, normal: np.ndarray, offset: float) -> np.ndarray:
@@ -291,31 +341,57 @@ def _flip_upside_down_rotation(
     flip = _rotation_matrix_align_normal(-up, up)
     c2w = _c2w_after_rotation(extrinsics[0], rot, w2c_as_camera_pose=w2c_as_camera_pose)
     cam_up = _normalize(-c2w[:3, 1])
-    cam_h = float(c2w[:3, 3] @ up)
+    cam_pos = c2w[:3, 3]
+    cam_h = float(cam_pos @ up)
     aligned = (rot @ points.T).T
     floor_h = float(np.median(_heights(aligned[inlier_mask], up))) if np.any(inlier_mask) else cam_h
-    if float(cam_up @ up) < 0.0 or floor_h >= cam_h:
+    rel = (aligned - cam_pos) @ up
+    frac_below = float(np.mean(rel < 0.0))
+    if float(cam_up @ up) < 0.0 or floor_h >= cam_h or frac_below < 0.45:
         return flip @ rot
     return rot
 
 
-_GROUND_ALIGN_MAX_RESIDUAL_TILT_DEG = 15.0
-_GROUND_ALIGN_MAX_FLOOR_SLOPE = 0.10
-_MIN_TILT_IMPROVEMENT_DEG = 1.0
+_GROUND_ALIGN_MAX_RESIDUAL_TILT_DEG = 20.0
+_GROUND_ALIGN_MAX_FLOOR_SLOPE = 0.12
+_MIN_TILT_IMPROVEMENT_DEG = 0.15
+_LEVEL_GROUND_PASSES = 6
 
 
 def _is_acceptable_ground_rotation(rotation: np.ndarray, points: np.ndarray) -> tuple[bool, float, float, float]:
-    """Accept when alignment clearly improves tilt (floor need not be geometrically flat)."""
+    """Accept when alignment reduces low-band tilt (bumpy floor; slopes stay loose)."""
     tilt, slope_x, slope_y = _residual_floor_slopes(rotation, points)
     tilt_before, _, _ = _residual_floor_slopes(np.eye(3), points)
     improved = (tilt_before - tilt) >= _MIN_TILT_IMPROVEMENT_DEG
-    ok = (
-        improved
-        and tilt <= _GROUND_ALIGN_MAX_RESIDUAL_TILT_DEG
-        and abs(slope_x) <= _GROUND_ALIGN_MAX_FLOOR_SLOPE
-        and abs(slope_y) <= _GROUND_ALIGN_MAX_FLOOR_SLOPE
-    )
+    ok = improved and tilt <= _GROUND_ALIGN_MAX_RESIDUAL_TILT_DEG
     return ok, tilt, slope_x, slope_y
+
+
+def _record_ground_align_metadata(
+    prediction: FeedforwardPrediction,
+    *,
+    status: str,
+    tilt_before: float | None = None,
+    tilt_after: float | None = None,
+    slope_x: float | None = None,
+    slope_y: float | None = None,
+    euler_deg: tuple[float, float, float] | None = None,
+    floor_clusters: list[tuple[float, int]] | None = None,
+) -> None:
+    prediction.metadata = dict(prediction.metadata)
+    prediction.metadata["ground_align_status"] = status
+    if tilt_before is not None:
+        prediction.metadata["ground_align_tilt_before_deg"] = float(tilt_before)
+    if tilt_after is not None:
+        prediction.metadata["ground_align_tilt_after_deg"] = float(tilt_after)
+    if slope_x is not None:
+        prediction.metadata["ground_align_slope_x"] = float(slope_x)
+    if slope_y is not None:
+        prediction.metadata["ground_align_slope_y"] = float(slope_y)
+    if euler_deg is not None:
+        prediction.metadata["ground_align_euler_deg"] = list(euler_deg)
+    if floor_clusters is not None:
+        _store_floor_cluster_metadata(prediction, floor_clusters)
 
 
 def _matrix_to_euler_xyz(rotation: np.ndarray) -> tuple[float, float, float]:
@@ -373,23 +449,80 @@ def _hough_floor_clusters(heights: np.ndarray) -> list[tuple[float, int]]:
     return merged
 
 
-def _bottom_floor_cluster(
+def _cluster_band_fraction(
+    heights: np.ndarray,
+    center: float,
+    *,
+    span: float | None = None,
+) -> float:
+    """Fraction of all heights that lie in the band around a Hough peak."""
+    heights = np.asarray(heights, dtype=np.float64)
+    if span is None:
+        span = max(float(np.ptp(heights)), 1e-6)
+    half_w = max(span * _FLOOR_CLUSTER_HALF_WIDTH_FRAC, span * 0.008)
+    return float(np.mean(np.abs(heights - center) <= half_w))
+
+
+def _filter_floor_clusters_by_point_fraction(
     heights: np.ndarray,
     clusters: list[tuple[float, int]],
     *,
+    min_frac: float = _FLOOR_MIN_CLUSTER_POINT_FRAC,
+) -> list[tuple[float, int, float]]:
+    """Keep height bands with enough global point mass; attach in-band fraction."""
+    if not clusters:
+        return []
+    heights = np.asarray(heights, dtype=np.float64)
+    span = max(float(np.ptp(heights)), 1e-6)
+    kept: list[tuple[float, int, float]] = []
+    for center, votes in clusters:
+        frac = _cluster_band_fraction(heights, center, span=span)
+        if frac >= min_frac:
+            kept.append((center, votes, frac))
+    return kept
+
+
+def _dominant_floor_cluster(
+    heights: np.ndarray,
+    clusters: list[tuple[float, int, float]],
+    *,
     cam_height: float | None = None,
 ) -> tuple[float, int]:
-    """Pick the ground floor: highest Hough peak still below frame-0 camera height."""
+    """
+    Pick the globally dominant floor slab (largest in-band point fraction).
+
+    Among Hough peaks that pass the minimum mass threshold, choose the band
+    that contains the most points in the pooled multi-frame sample. When
+    ``cam_height`` is set, prefer peaks below the camera if any qualify.
+    """
     if not clusters:
         return float(np.percentile(heights, _FLOOR_BOTTOM_PERCENTILE)), 0
 
-    if cam_height is not None:
-        below = [(center, votes) for center, votes in clusters if center < cam_height]
-        if below:
-            return max(below, key=lambda item: item[0])
-        return min(clusters, key=lambda item: abs(item[0] - cam_height))
+    heights = np.asarray(heights, dtype=np.float64)
+    span = max(float(np.ptp(heights)), 1e-6)
+    cam_margin = 0.02 * span
 
-    return min(clusters, key=lambda item: item[0])
+    pool = clusters
+    if cam_height is not None:
+        below = [
+            item for item in clusters if item[0] < float(cam_height) - cam_margin
+        ]
+        if below:
+            pool = below
+
+    center, votes, _frac = max(pool, key=lambda item: (item[2], item[1]))
+    return center, votes
+
+
+def _ground_align_min_confidence(predictions: dict | FeedforwardPrediction) -> float:
+    if isinstance(predictions, FeedforwardPrediction):
+        meta = predictions.metadata
+    else:
+        meta = predictions.get("metadata") or {}
+    for key in ("compact_min_confidence", "min_confidence"):
+        if key in meta and meta[key] is not None:
+            return float(meta[key])
+    return _GROUND_ALIGN_DEFAULT_MIN_CONFIDENCE
 
 
 def _collect_ground_align_points(
@@ -398,31 +531,53 @@ def _collect_ground_align_points(
     up: np.ndarray = _OPENCV_UP,
     prefilter_floor: bool = True,
 ) -> tuple[np.ndarray, int]:
-    """Collect finite world points for floor tilt estimation (subsampled)."""
+    """Pool all frames, subsample once globally, then Hough/fit on that cloud."""
     if isinstance(predictions, FeedforwardPrediction):
         world_points = predictions.world_points
+        conf = predictions.conf
     else:
         world_points = predictions.get("world_points_from_depth", predictions.get("world_points"))
+        conf = predictions.get("conf")
 
-    flat = np.asarray(world_points, dtype=np.float64).reshape(-1, 3)
-    valid = np.isfinite(flat).all(axis=1)
-    out = flat[valid]
-    total = int(out.shape[0])
-    if total < 3:
+    wp = np.asarray(world_points, dtype=np.float64)
+    if wp.ndim < 3:
         raise ValueError("Not enough finite points for ground alignment.")
 
-    if out.shape[0] > _GROUND_ALIGN_MAX_POINTS:
+    min_conf = _ground_align_min_confidence(predictions)
+    cf = np.asarray(conf, dtype=np.float64)
+    n_frames = int(wp.shape[0])
+    pooled: list[np.ndarray] = []
+    total_finite = 0
+
+    for fi in range(n_frames):
+        pts = wp[fi].reshape(-1, 3)
+        frame_conf = cf[fi].reshape(-1) if cf.size else np.ones(pts.shape[0])
+        valid = np.isfinite(pts).all(axis=1)
+        if min_conf > 0:
+            valid &= frame_conf >= min_conf
+        pts = pts[valid]
+        total_finite += int(pts.shape[0])
+        if pts.shape[0] >= 1:
+            pooled.append(pts)
+
+    if not pooled:
+        raise ValueError("Not enough finite points for ground alignment.")
+
+    out = np.vstack(pooled)
+    n_keep = max(3, int(round(out.shape[0] * _GROUND_ALIGN_SAMPLE_FRAC)))
+    if out.shape[0] > n_keep:
         rng = np.random.default_rng(0)
-        idx = rng.choice(out.shape[0], _GROUND_ALIGN_MAX_POINTS, replace=False)
+        idx = rng.choice(out.shape[0], n_keep, replace=False)
         out = out[idx]
 
     if prefilter_floor:
         heights = _heights(out, up)
-        h_cut = float(np.percentile(heights, 30))
+        h_cut = float(np.percentile(heights, _GROUND_ALIGN_PREFILTER_LOW_PERCENTILE))
         floor_pts = out[heights <= h_cut]
-        if floor_pts.shape[0] >= 3000:
+        min_floor = max(3, int(round(out.shape[0] * _GROUND_ALIGN_PREFILTER_MIN_FRAC)))
+        if floor_pts.shape[0] >= min_floor:
             out = floor_pts
-    return out, total
+    return out, total_finite
 
 
 def fit_floor_plane_low_band(
@@ -432,7 +587,7 @@ def fit_floor_plane_low_band(
     cam_height: float | None = None,
 ) -> tuple[np.ndarray, float, np.ndarray, list[tuple[float, int]]] | None:
     """
-    Estimate floor tilt from the bottom Hough floor cluster (multi-floor safe).
+    Estimate floor tilt from the globally dominant Hough height cluster.
 
     Returns (unit_normal, offset, inlier_mask, floor_clusters).
     """
@@ -441,15 +596,18 @@ def fit_floor_plane_low_band(
         return None
 
     heights = _heights(points, up)
-    clusters = _hough_floor_clusters(heights)
-    bottom_h, _ = _bottom_floor_cluster(heights, clusters, cam_height=cam_height)
+    scored = _filter_floor_clusters_by_point_fraction(
+        heights, _hough_floor_clusters(heights)
+    )
+    floor_clusters = [(center, votes) for center, votes, _frac in scored]
+    floor_h, _ = _dominant_floor_cluster(heights, scored, cam_height=cam_height)
     span = max(float(np.ptp(heights)), 1e-6)
     half_w = max(span * _FLOOR_CLUSTER_HALF_WIDTH_FRAC, span * 0.008)
-    band = points[np.abs(heights - bottom_h) <= half_w]
+    band = points[np.abs(heights - floor_h) <= half_w]
     if band.shape[0] < 100:
         band = points[heights <= float(np.percentile(heights, _FLOOR_BOTTOM_PERCENTILE))]
     if band.shape[0] < 100:
-        band = points[heights <= float(np.percentile(heights, 35.0))]
+        band = points[heights <= float(np.percentile(heights, _FLOOR_BOTTOM_PERCENTILE_WIDE))]
 
     mask = np.ones(band.shape[0], dtype=bool)
     normal = up.copy()
@@ -473,7 +631,78 @@ def fit_floor_plane_low_band(
     normal = _orient_ground_normal(normal, points=points, inlier_mask=inliers, up=up)
     offset = -float(np.dot(normal, points[inliers].mean(axis=0)))
     inliers = _plane_distances(points, normal, offset) <= float(np.percentile(dist_all, 45.0))
-    return normal, offset, inliers, clusters
+    return normal, offset, inliers, floor_clusters
+
+
+def _floor_height_reference(
+    points: np.ndarray,
+    up: np.ndarray,
+    *,
+    inlier_mask: np.ndarray | None = None,
+    percentile: float = _FLOOR_HEIGHT_PERCENTILE,
+) -> float:
+    """Robust floor height along ``up`` after the plane is leveled."""
+    heights = _heights(np.asarray(points, dtype=np.float64), up)
+    if inlier_mask is not None and np.any(inlier_mask):
+        heights = heights[np.asarray(inlier_mask, dtype=bool)]
+    elif len(heights) > 0:
+        heights = heights[heights <= float(np.percentile(heights, percentile))]
+    if len(heights) == 0:
+        return float(np.percentile(_heights(np.asarray(points, dtype=np.float64), up), percentile))
+    return float(np.median(heights))
+
+
+def shift_prediction_ground_above_z(
+    prediction: FeedforwardPrediction,
+    clearance: float = _GROUND_Z_CLEARANCE,
+    *,
+    inlier_mask: np.ndarray | None = None,
+    sample_points: np.ndarray | None = None,
+) -> float:
+    """
+    Translate so the fitted floor sits at ``z = clearance`` (Blender Z-up).
+
+    Call after ``convert_prediction_to_blender_zup``. Returns the Z shift applied (m).
+    """
+    from .common import is_blender_z_up
+
+    if not is_blender_z_up(prediction):
+        return 0.0
+
+    wp = prediction.world_points
+    flat = np.asarray(wp, dtype=np.float64).reshape(-1, 3)
+    valid = np.isfinite(flat).all(axis=1)
+    if not np.any(valid):
+        return 0.0
+
+    ref_pts = sample_points if sample_points is not None else flat[valid]
+    floor_z = _floor_height_reference(ref_pts, np.array([0.0, 0.0, 1.0]))
+    dz = float(clearance) - floor_z
+    if abs(dz) < 1e-6:
+        return 0.0
+
+    shift = np.array([0.0, 0.0, dz], dtype=np.float64)
+    flat = flat.copy()
+    flat[valid] += shift
+    prediction.world_points = flat.astype(np.float32).reshape(wp.shape)
+
+    w2c_as_camera_pose = bool(prediction.metadata.get("w2c_as_camera_pose"))
+    new_ext = np.empty_like(prediction.extrinsic)
+    for i, w2c in enumerate(prediction.extrinsic):
+        w2c4 = np.vstack([w2c, [0.0, 0.0, 0.0, 1.0]])
+        if w2c_as_camera_pose:
+            pose = w2c4.copy()
+            pose[:3, 3] += shift
+            new_ext[i] = pose[:3, :4]
+        else:
+            c2w = np.linalg.inv(w2c4)
+            c2w[:3, 3] += shift
+            new_ext[i] = np.linalg.inv(c2w)[:3, :4]
+    prediction.extrinsic = new_ext.astype(np.float32)
+
+    prediction.metadata = dict(prediction.metadata)
+    prediction.metadata["ground_align_z_shift"] = float(dz)
+    return float(dz)
 
 
 def _apply_world_rotation_opencv(
@@ -543,6 +772,59 @@ def _residual_floor_slopes(rotation: np.ndarray, points: np.ndarray) -> tuple[fl
     return tilt, float(coef[0]), float(coef[1])
 
 
+def _fit_ground_with_scene_up(
+    predictions: dict | FeedforwardPrediction,
+    extrinsics: np.ndarray,
+    *,
+    w2c_as_camera_pose: bool,
+    scene_up: np.ndarray,
+    cam_pos: np.ndarray,
+) -> tuple[np.ndarray | None, np.ndarray | None, list[tuple[float, int]], np.ndarray]:
+    """Fit floor plane for a candidate scene-up; returns rotation, points, clusters, scene_up."""
+    cam_height = float(cam_pos @ scene_up)
+    try:
+        points, _ = _collect_ground_align_points(predictions, up=scene_up)
+    except ValueError:
+        return None, None, [], scene_up
+
+    fit = fit_floor_plane_low_band(points, up=scene_up, cam_height=cam_height)
+    if fit is None:
+        return None, points, [], scene_up
+
+    normal, _offset, inliers, floor_clusters = fit
+    heights = _heights(points, scene_up)
+    span = max(float(np.ptp(heights)), 1e-6)
+    scored = [
+        (center, votes, _cluster_band_fraction(heights, center, span=span))
+        for center, votes in floor_clusters
+    ]
+    floor_h, _ = _dominant_floor_cluster(heights, scored, cam_height=cam_height)
+    floor_below_camera = floor_h < float(cam_height) - 0.005 * span
+
+    rotation = _rotation_matrix_align_normal(normal, _OPENCV_UP)
+    rotation = _level_ground_rotation(
+        rotation, points, passes=_LEVEL_GROUND_PASSES, up=_OPENCV_UP
+    )
+    rotation = _flip_upside_down_rotation(
+        rotation,
+        points,
+        inliers,
+        extrinsics,
+        w2c_as_camera_pose=w2c_as_camera_pose,
+        up=_OPENCV_UP,
+    )
+    rotation = _level_ground_rotation(
+        rotation, points, passes=_LEVEL_GROUND_PASSES, up=_OPENCV_UP
+    )
+
+    if not floor_below_camera:
+        # Handheld / low camera: still level to the lowest band we found.
+        lowest_h = float(np.percentile(heights, 8.0))
+        if floor_h > lowest_h + 0.08 * span:
+            return None, points, floor_clusters, scene_up
+    return rotation, points, floor_clusters, scene_up
+
+
 def _estimate_ground_rotation_matrix_opencv(
     predictions: dict | FeedforwardPrediction,
 ) -> tuple[np.ndarray | None, np.ndarray | None, list[tuple[float, int]]]:
@@ -560,53 +842,226 @@ def _estimate_ground_rotation_matrix_opencv(
         probe, total_finite = _collect_ground_align_points(
             predictions, prefilter_floor=False
         )
+        frame0_points = _collect_frame0_points(predictions)
         scene_up = _estimate_scene_up(
-            probe, extrinsics, w2c_as_camera_pose=w2c_as_camera_pose
+            probe,
+            extrinsics,
+            w2c_as_camera_pose=w2c_as_camera_pose,
+            frame0_points=frame0_points,
         )
         cam_pos, first_up = _first_frame_camera(
             extrinsics, w2c_as_camera_pose=w2c_as_camera_pose
         )
-        cam_height = float(cam_pos @ scene_up)
-        points, _ = _collect_ground_align_points(predictions, up=scene_up)
     except ValueError:
         return None, None, []
 
-    fit = fit_floor_plane_low_band(points, up=scene_up, cam_height=cam_height)
-    if fit is None:
-        return None, None, []
-
-    normal, _offset, inliers, floor_clusters = fit
-    rotation = _rotation_matrix_align_normal(normal, _OPENCV_UP)
-    rotation = _level_ground_rotation(rotation, points, up=_OPENCV_UP)
-    rotation = _flip_upside_down_rotation(
-        rotation,
-        points,
-        inliers,
+    rotation, points, floor_clusters, scene_up_used = _fit_ground_with_scene_up(
+        predictions,
         extrinsics,
         w2c_as_camera_pose=w2c_as_camera_pose,
-        up=_OPENCV_UP,
+        scene_up=scene_up,
+        cam_pos=cam_pos,
     )
-    rotation = _level_ground_rotation(rotation, points, up=_OPENCV_UP)
+    up_flipped = False
+    if rotation is None:
+        up_flipped = True
+        rotation, points, floor_clusters, scene_up_used = _fit_ground_with_scene_up(
+            predictions,
+            extrinsics,
+            w2c_as_camera_pose=w2c_as_camera_pose,
+            scene_up=-scene_up,
+            cam_pos=cam_pos,
+        )
 
+    if rotation is None or points is None:
+        return None, None, []
+
+    fit = fit_floor_plane_low_band(
+        points,
+        up=scene_up_used,
+        cam_height=float(cam_pos @ scene_up_used),
+    )
+    if fit is None:
+        return None, None, []
+    normal, _offset, inliers, floor_clusters = fit
     inlier_count = int(inliers.sum())
     euler = _matrix_to_euler_xyz(rotation)
     residual_tilt, slope_x, slope_y = _residual_floor_slopes(rotation, points)
+    heights_log = _heights(points, scene_up_used)
+    scored_log = _filter_floor_clusters_by_point_fraction(
+        heights_log, [(c, v) for c, v in floor_clusters]
+    )
+    dominant_h, _ = _dominant_floor_cluster(
+        heights_log,
+        scored_log,
+        cam_height=float(cam_pos @ scene_up_used),
+    )
     floor_info = (
-        f"{len(floor_clusters)} Hough floor(s), bottom_h={floor_clusters[0][0]:.3f}"
+        f"{len(floor_clusters)} Hough floor(s), dominant_h={dominant_h:.3f} (global mass)"
         if floor_clusters
         else "Hough fallback percentile"
     )
+    flip_note = ", up flipped from frame-0 check" if up_flipped else ""
     print(
         f"[vibephysics] Ground align: {inlier_count}/{len(points)} inliers "
         f"({total_finite} finite pts), {floor_info}, "
-        f"scene_up=({scene_up[0]:.3f}, {scene_up[1]:.3f}, {scene_up[2]:.3f}), "
-        f"frame0_up=({first_up[0]:.3f}, {first_up[1]:.3f}, {first_up[2]:.3f}), "
+        f"scene_up=({scene_up_used[0]:.3f}, {scene_up_used[1]:.3f}, {scene_up_used[2]:.3f}), "
+        f"frame0_up=({first_up[0]:.3f}, {first_up[1]:.3f}, {first_up[2]:.3f}){flip_note}, "
         f"normal=({normal[0]:.3f}, {normal[1]:.3f}, {normal[2]:.3f}), "
         f"euler=({math.degrees(euler[0]):.1f}°, {math.degrees(euler[1]):.1f}°, "
         f"{math.degrees(euler[2]):.1f}°), "
         f"residual tilt={residual_tilt:.2f}° (dz/dx={slope_x:.4f}, dz/dy={slope_y:.4f})"
     )
     return rotation, points, floor_clusters
+
+
+def _rotate_extrinsic_blender_zup(
+    extrinsic: np.ndarray,
+    rotation: np.ndarray,
+    *,
+    w2c_as_camera_pose: bool,
+) -> np.ndarray:
+    """Apply the same world rotation used for Blender Z-up points to camera matrices."""
+    rotation = np.asarray(rotation, dtype=np.float64)
+    out = np.empty_like(extrinsic, dtype=np.float32)
+    for i, w2c in enumerate(extrinsic):
+        w2c4 = np.vstack([w2c, [0.0, 0.0, 0.0, 1.0]])
+        if w2c_as_camera_pose:
+            pose = w2c4.copy()
+            pose[:3, :3] = rotation @ pose[:3, :3]
+            pose[:3, 3] = rotation @ pose[:3, 3]
+            out[i] = pose[:3, :4]
+        else:
+            c2w = np.linalg.inv(w2c4)
+            c2w[:3, :3] = rotation @ c2w[:3, :3]
+            c2w[:3, 3] = rotation @ c2w[:3, 3]
+            out[i] = np.linalg.inv(c2w)[:3, :4]
+    return out
+
+
+def align_blender_zup_colored_cloud(
+    points: np.ndarray,
+    extrinsic: np.ndarray,
+    *,
+    w2c_as_camera_pose: bool = True,
+) -> tuple[np.ndarray, np.ndarray, bool]:
+    """
+    Level a compact Blender Z-up point cloud using global Hough floor clustering on Z.
+
+    Use when ``predictions.npz`` was saved without ``ground_align_applied``.
+    """
+    points = np.asarray(points, dtype=np.float64)
+    if points.shape[0] < 50 or points.ndim != 2 or points.shape[1] != 3:
+        return points.astype(np.float32), np.asarray(extrinsic, dtype=np.float32), False, 0.0
+
+    n_fit = max(3, int(round(points.shape[0] * _GROUND_ALIGN_SAMPLE_FRAC)))
+    if points.shape[0] > n_fit:
+        rng = np.random.default_rng(0)
+        fit_idx = rng.choice(points.shape[0], n_fit, replace=False)
+        fit_pts = points[fit_idx]
+    else:
+        fit_pts = points
+
+    up = np.array([0.0, 0.0, 1.0], dtype=np.float64)
+    heights = fit_pts[:, 2]
+    cam_height = float(np.percentile(heights, 90))
+    if extrinsic is not None and len(extrinsic) > 0:
+        w2c = np.asarray(extrinsic[0], dtype=np.float64)
+        w2c4 = np.vstack([w2c, [0.0, 0.0, 0.0, 1.0]])
+        if w2c_as_camera_pose:
+            c2w = w2c4
+        else:
+            c2w = np.linalg.inv(w2c4)
+        cam_height = float(c2w[2, 3])
+
+    scored = _filter_floor_clusters_by_point_fraction(heights, _hough_floor_clusters(heights))
+    floor_h, _ = _dominant_floor_cluster(heights, scored, cam_height=cam_height)
+    span = max(float(np.ptp(heights)), 1e-6)
+    half_w = max(span * _FLOOR_CLUSTER_HALF_WIDTH_FRAC, span * 0.008)
+    band = fit_pts[np.abs(heights - floor_h) <= half_w]
+    if band.shape[0] < 100:
+        band = fit_pts[heights <= float(np.percentile(heights, _FLOOR_BOTTOM_PERCENTILE))]
+
+    normal, _ = _refine_plane(band, np.ones(band.shape[0], dtype=bool))
+    normal = _orient_ground_normal(normal, up=up)
+    if not np.isfinite(normal).all() or float(np.linalg.norm(normal)) < 1e-8:
+        return points.astype(np.float32), np.asarray(extrinsic, dtype=np.float32), False, 0.0
+    rotation = _rotation_matrix_align_normal(normal, up)
+    rotation = _level_ground_rotation(
+        rotation, fit_pts, passes=_LEVEL_GROUND_PASSES, up=up, height_percentile=20.0
+    )
+    points_out = (rotation @ points.T).T.astype(np.float32)
+    ext_out = _rotate_extrinsic_blender_zup(
+        extrinsic, rotation, w2c_as_camera_pose=w2c_as_camera_pose
+    )
+    floor_z = _floor_height_reference(points_out, up)
+    dz = float(_GROUND_Z_CLEARANCE) - floor_z
+    if abs(dz) >= 1e-6:
+        shift = np.array([0.0, 0.0, dz], dtype=np.float64)
+        points_out = points_out + shift.astype(np.float32)
+        ext_out = _translate_extrinsic_blender_zup(
+            ext_out, shift, w2c_as_camera_pose=w2c_as_camera_pose
+        )
+    z_shift = 0.0
+    if abs(dz) >= 1e-6:
+        z_shift = float(dz)
+    return points_out, ext_out, True, z_shift
+
+
+def _translate_extrinsic_blender_zup(
+    extrinsic: np.ndarray,
+    translation: np.ndarray,
+    *,
+    w2c_as_camera_pose: bool,
+) -> np.ndarray:
+    translation = np.asarray(translation, dtype=np.float64).reshape(3)
+    out = np.asarray(extrinsic, dtype=np.float32).copy()
+    for i, w2c in enumerate(out):
+        w2c4 = np.vstack([w2c, [0.0, 0.0, 0.0, 1.0]])
+        if w2c_as_camera_pose:
+            pose = w2c4.copy()
+            pose[:3, 3] += translation
+            out[i] = pose[:3, :4].astype(np.float32)
+        else:
+            c2w = np.linalg.inv(w2c4)
+            c2w[:3, 3] += translation
+            out[i] = np.linalg.inv(c2w)[:3, :4].astype(np.float32)
+    return out
+
+
+def realign_compact_predictions_file(path: Path | str) -> bool:
+    """Re-level a saved compact ``predictions.npz`` in place (Blender Z-up)."""
+    path = Path(path)
+    data = dict(np.load(path, allow_pickle=True))
+    if "points" not in data:
+        print(f"[vibephysics] {path}: not a compact predictions.npz (no points array)")
+        return False
+    meta = data["metadata"][0] if "metadata" in data and len(data["metadata"]) else {}
+    if isinstance(meta, dict) and meta.get("ground_align_applied"):
+        print(f"[vibephysics] {path}: ground_align_applied already set")
+        return False
+    w2c_pose = bool(meta.get("w2c_as_camera_pose", True))
+    points_out, ext_out, ok, z_shift = align_blender_zup_colored_cloud(
+        data["points"],
+        data["extrinsic"],
+        w2c_as_camera_pose=w2c_pose,
+    )
+    if not ok:
+        print(f"[vibephysics] {path}: compact realign failed")
+        return False
+    data["points"] = points_out
+    data["extrinsic"] = ext_out
+    if "trajectory" in data:
+        data["trajectory"] = ext_out[:, :3, 3].astype(np.float32)
+    meta = dict(meta)
+    meta["ground_align_applied"] = True
+    meta["ground_align_status"] = "applied_compact_realign"
+    if abs(z_shift) >= 1e-6:
+        meta["ground_align_z_shift"] = float(z_shift)
+    data["metadata"] = np.array([meta], dtype=object)
+    np.savez_compressed(path, **data)
+    print(f"[vibephysics] Re-leveled compact predictions: {path}")
+    return True
 
 
 def apply_world_rotation_to_prediction(
@@ -644,21 +1099,64 @@ def align_prediction_ground(prediction: FeedforwardPrediction) -> bool:
 
     rotation, align_points, floor_clusters = _estimate_ground_rotation_matrix_opencv(prediction)
     if rotation is None or align_points is None:
+        _record_ground_align_metadata(prediction, status="skipped_no_fit")
         print("[vibephysics] Ground align skipped: could not estimate floor tilt from low points.")
         return False
 
+    tilt_before, _, _ = _residual_floor_slopes(np.eye(3), align_points)
     ok, tilt, slope_x, slope_y = _is_acceptable_ground_rotation(rotation, align_points)
     if not ok:
         euler = _matrix_to_euler_xyz(rotation)
+        _record_ground_align_metadata(
+            prediction,
+            status="rejected",
+            tilt_before=tilt_before,
+            tilt_after=tilt,
+            slope_x=slope_x,
+            slope_y=slope_y,
+            floor_clusters=floor_clusters,
+        )
         print(
             "[vibephysics] Ground align rejected: floor still tilted after fit "
-            f"(residual={tilt:.2f}°, dz/dx={slope_x:.4f}, dz/dy={slope_y:.4f}; "
+            f"(before={tilt_before:.2f}° after={tilt:.2f}°, dz/dx={slope_x:.4f}, dz/dy={slope_y:.4f}; "
             f"euler=({math.degrees(euler[0]):.1f}°, {math.degrees(euler[1]):.1f}°, "
-            f"{math.degrees(euler[2]):.1f}°)) — no clear improvement from low-band fit."
+            f"{math.degrees(euler[2]):.1f}°)) — need ≥ {_MIN_TILT_IMPROVEMENT_DEG:g}° improvement."
         )
         return False
 
     euler_deg = tuple(math.degrees(a) for a in _matrix_to_euler_xyz(rotation))
     apply_world_rotation_to_prediction(prediction, rotation, euler_deg=euler_deg)
-    _store_floor_cluster_metadata(prediction, floor_clusters)
+    _record_ground_align_metadata(
+        prediction,
+        status="applied",
+        tilt_before=tilt_before,
+        tilt_after=tilt,
+        slope_x=slope_x,
+        slope_y=slope_y,
+        euler_deg=euler_deg,
+        floor_clusters=floor_clusters,
+    )
+    print(
+        f"[vibephysics] Ground align applied: tilt {tilt_before:.2f}° → {tilt:.2f}° "
+        f"(dz/dx={slope_x:.4f}, dz/dy={slope_y:.4f})",
+        flush=True,
+    )
     return True
+
+
+def finalize_ground_align_z_shift(prediction: FeedforwardPrediction) -> float:
+    """
+    After Blender Z-up conversion, raise the leveled floor to ``z > 0``.
+
+    Call when ``ground_align_applied`` is set. Returns the Z shift (m), or 0.
+    """
+    if not prediction.metadata.get("ground_align_applied"):
+        return 0.0
+    dz = shift_prediction_ground_above_z(prediction)
+    if abs(dz) >= 1e-6:
+        print(
+            f"[vibephysics] Ground align: shifted floor to z={_GROUND_Z_CLEARANCE:g} m "
+            f"(Δz={dz:.3f} m)",
+            flush=True,
+        )
+    return dz

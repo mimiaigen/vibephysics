@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ctypes
+import json
 import os
 import subprocess
 import sys
@@ -64,10 +65,39 @@ def read_extract_fps(frames_dir: Path) -> float | None:
         return None
 
 
+EXTRACT_META_FILE = ".vibephysics_extract_meta"
+
+
+def read_effective_fps_from_extract_meta(frames_dir: Path) -> float | None:
+    """Effective sampling rate for evenly spaced frame extraction (animation timing)."""
+    meta_path = Path(frames_dir) / EXTRACT_META_FILE
+    if not meta_path.is_file():
+        return None
+    try:
+        meta = json.loads(meta_path.read_text())
+    except (OSError, ValueError, json.JSONDecodeError):
+        return None
+    if meta.get("mode") != "num_frames":
+        return None
+    if meta.get("effective_fps") is not None:
+        try:
+            return float(meta["effective_fps"])
+        except (TypeError, ValueError):
+            pass
+    num_frames = meta.get("num_frames")
+    duration = meta.get("duration")
+    if num_frames and num_frames > 1 and duration and duration > 0:
+        return (num_frames - 1) / float(duration)
+    return None
+
+
 def resolve_source_video_fps(image_path: Path, config_fps: float | None = None) -> float:
     """FPS used when the source video was sampled into frames (for animation timing)."""
     image_path = Path(image_path).absolute()
     if image_path.is_dir():
+        meta_fps = read_effective_fps_from_extract_meta(image_path)
+        if meta_fps is not None:
+            return meta_fps
         recorded = read_extract_fps(image_path)
         if recorded is not None:
             return recorded
@@ -402,6 +432,12 @@ class RunProfiler:
                 )
             )
 
+    def record_stage(self, name: str, elapsed_s: float) -> None:
+        """Append a timed stage (e.g. estimated CPU time from parallel work)."""
+        if not self.enabled:
+            return
+        self.stages.append(StageRecord(name=name, elapsed_s=float(elapsed_s)))
+
     def print_summary(
         self,
         *,
@@ -484,6 +520,25 @@ _INSTALL_HINTS = {
 }
 
 
+def _precomputed_points_from_post(
+    post_result,
+    *,
+    total_random_points: int | float | None,
+) -> tuple | None:
+    """Merge parallel per-frame NMS chunks for compact export / Blender."""
+    if post_result is None or not post_result.point_chunks:
+        return None
+    from .common import finalize_colored_point_cloud
+
+    return finalize_colored_point_cloud(
+        post_result.point_chunks,
+        post_result.color_chunks,
+        post_result.conf_chunks,
+        post_result.frame_id_chunks,
+        total_random_points=total_random_points,
+    )
+
+
 def _require_bpy() -> None:
     try:
         import bpy  # noqa: F401
@@ -503,11 +558,21 @@ def _export_blend_scene(
     *,
     min_confidence: float,
     point_scale: float,
-    point_random_points_per_frame: int | None,
-    point_total_random_points: int | None,
+    point_display: str,
+    random_points_per_frame: int | float | None,
+    total_random_points: int | float | None,
     animate: bool,
     animation_fps: int,
+    animation_mode: str,
     video_fps: float | None,
+    algo_3d_bboxes: list | None,
+    algo_3d_bbox_min_visualize_changed_voxels: int,
+    algo_3d_bbox_class_colors: dict[str, tuple[float, float, float, float]] | None,
+    keep_start_frame_point_cloud: bool,
+    point_cloud_3d_nms: bool,
+    point_cloud_3d_nms_radius: float,
+    point_cloud_3d_nms_min_neighbors: int,
+    precomputed_points: tuple | None = None,
     verbose: bool,
 ) -> Path:
     _require_bpy()
@@ -525,12 +590,22 @@ def _export_blend_scene(
         prediction,
         min_confidence=min_confidence,
         point_scale=point_scale,
-        point_random_points_per_frame=point_random_points_per_frame,
-        point_total_random_points=point_total_random_points,
+        point_display=point_display,
+        random_points_per_frame=random_points_per_frame,
+        total_random_points=total_random_points,
         global_indices=prediction.metadata.get("selected_indices"),
         animate=animate,
         animation_fps=animation_fps,
+        animation_mode=animation_mode,
         video_fps=video_fps,
+        algo_3d_bboxes=algo_3d_bboxes,
+        algo_3d_bbox_min_visualize_changed_voxels=algo_3d_bbox_min_visualize_changed_voxels,
+        algo_3d_bbox_class_colors=algo_3d_bbox_class_colors,
+        keep_start_frame_point_cloud=keep_start_frame_point_cloud,
+        point_cloud_3d_nms=point_cloud_3d_nms,
+        point_cloud_3d_nms_radius=point_cloud_3d_nms_radius,
+        point_cloud_3d_nms_min_neighbors=point_cloud_3d_nms_min_neighbors,
+        precomputed_points=precomputed_points,
     )
     save_blend_file(str(blend_path))
 
@@ -618,13 +693,41 @@ def reconstruct(
     save_frames: bool = False,
     min_confidence: float = 2.0,
     filter_edges: bool = True,
-    point_scale: float = 0.001,
-    point_random_points_per_frame: int | None = 4000,
-    point_total_random_points: int | None = 400_000,
+    point_scale: float | None = None,
+    point_display: str | None = None,
+    random_points_per_frame: int | float | None = None,
+    total_random_points: int | float | None = None,
     compact: bool = False,
-    animate: bool = True,
-    animation_fps: int = 24,
+    animate: bool | None = None,
+    animation_fps: int | None = None,
+    animation_mode: str | None = None,
     align_ground: bool = True,
+    only_start_frame_pose: bool = False,
+    keep_start_frame_point_cloud: bool | None = None,
+    point_cloud_3d_nms: bool | None = None,
+    point_cloud_3d_nms_radius: float | None = None,
+    point_cloud_3d_nms_min_neighbors: int | None = None,
+    algo_3d_bbox: bool = False,
+    algo_3d_bbox_reference_frame: int = 0,
+    algo_3d_bbox_voxel_size: float = 0.02,
+    algo_3d_bbox_min_changed_voxels: int = 12,
+    algo_3d_bbox_min_change_fraction: float = 0.03,
+    algo_3d_bbox_min_cluster_voxels: int = 8,
+    algo_3d_bbox_cluster_gap_close: int = 1,
+    algo_3d_bbox_min_points_per_voxel: int = 1,
+    algo_3d_bbox_shell_min_new_neighbors: int = 1,
+    algo_3d_bbox_min_interior_voxels: int = 2,
+    algo_3d_bbox_min_interior_fraction: float = 0.04,
+    algo_3d_bbox_bbox_dense_min_neighbors: int = 3,
+    algo_3d_bbox_bbox_min_dense_voxels: int = 4,
+    algo_3d_bbox_padding: float = 0.01,
+    algo_3d_bbox_min_visualize_changed_voxels: int | None = None,
+    detection_seg: bool = False,
+    detection_seg_model: str = "Roboflow/rf-detr-seg-medium",
+    detection_seg_classes: list[str] | None = None,
+    detection_seg_class_colors: dict[str, tuple[float, float, float, float]] | None = None,
+    detection_seg_threshold: float = 0.5,
+    detection_seg_save_masks: bool = True,
     max_frames: int | None = None,
     max_frames_mode: str = "first",
     keyframe_interval: int | None = None,
@@ -638,6 +741,7 @@ def reconstruct(
     lingbot_map_model: str = DEFAULT_LINGBOT_MAP_MODEL,
     lingbot_map_checkpoint: str | Path | None = None,
     lingbot_map_image_size: int = 518,
+    lingbot_map_preprocess_mode: str = "center_square",
     vggt_omega_checkpoint: str | Path | None = None,
     vggt_omega_checkpoint_name: str = "vggt-omega-1b-512",
     vggt_omega_resolution: int = 512,
@@ -677,6 +781,53 @@ def reconstruct(
     video_quality: int = 2,
     verbose: bool = True,
 ) -> Path:
+    from .config import (
+        algo_3d_bbox_default,
+        blend_default,
+        normalize_point_display,
+        output_default,
+    )
+
+    if point_scale is None:
+        point_scale = float(blend_default("point_scale"))
+    if point_display is None:
+        point_display = normalize_point_display(blend_default("point_display"))
+    if detection_seg:
+        algo_3d_bbox = True
+    if animate is None:
+        animate = bool(blend_default("animate"))
+    if animation_fps is None:
+        animation_fps = int(blend_default("animation_fps"))
+    if animation_mode is None:
+        animation_mode = str(blend_default("animation_mode"))
+    if keep_start_frame_point_cloud is None:
+        keep_start_frame_point_cloud = bool(blend_default("keep_start_frame_point_cloud"))
+    from .common import parse_random_points_limit
+
+    if random_points_per_frame is None:
+        random_points_per_frame = parse_random_points_limit(
+            output_default("random_points_per_frame"),
+            name="output.random_points_per_frame",
+        )
+    if total_random_points is None:
+        total_random_points = parse_random_points_limit(
+            output_default("total_random_points"),
+            name="output.total_random_points",
+        )
+    from .visual import _normalize_animation_mode
+
+    if algo_3d_bbox_min_visualize_changed_voxels is None:
+        algo_3d_bbox_min_visualize_changed_voxels = int(
+            algo_3d_bbox_default("min_visualize_changed_voxels")
+        )
+    if point_cloud_3d_nms is None:
+        point_cloud_3d_nms = bool(output_default("point_cloud_3d_nms"))
+    if point_cloud_3d_nms_radius is None:
+        point_cloud_3d_nms_radius = float(output_default("point_cloud_3d_nms_radius"))
+    if point_cloud_3d_nms_min_neighbors is None:
+        point_cloud_3d_nms_min_neighbors = int(output_default("point_cloud_3d_nms_min_neighbors"))
+
+    animation_mode = _normalize_animation_mode(animation_mode)
     profiler = RunProfiler(enabled=verbose)
     profiler.start()
 
@@ -720,6 +871,7 @@ def reconstruct(
                 overlap_keyframes=overlap_keyframes,
                 use_sdpa=use_sdpa,
                 image_size=lingbot_map_image_size,
+                preprocess_mode=lingbot_map_preprocess_mode,
                 max_frames=max_frames,
                 max_frames_mode=max_frames_mode,
                 verbose=verbose,
@@ -830,6 +982,17 @@ def reconstruct(
             conf_percentile=dvlt_conf_percentile,
         )
 
+    if only_start_frame_pose:
+        from .common import apply_only_start_frame_pose
+
+        with profiler.stage("only_start_frame_pose"):
+            apply_only_start_frame_pose(prediction, reference_frame=0)
+            if verbose:
+                print(
+                    "--- [vibephysics] only_start_frame_pose: using frame 0 extrinsic for all frames ---",
+                    flush=True,
+                )
+
     if align_ground:
         from .ground_align import align_prediction_ground
 
@@ -840,12 +1003,125 @@ def reconstruct(
 
     with profiler.stage("save_artifacts"):
         convert_prediction_to_blender_zup(prediction)
+        if align_ground:
+            from .ground_align import finalize_ground_align_z_shift
+
+            finalize_ground_align_z_shift(prediction)
         prediction.metadata = dict(prediction.metadata)
         prediction.metadata["video_fps"] = source_video_fps
+        save_compact = compact or random_points_per_frame is not None or total_random_points is not None
+
+        detection_result = None
+        detection_meta: dict | None = None
+        if detection_seg:
+            from .detection_seg import (
+                DetectionSegConfig,
+                run_detection_segmentation,
+                save_detection_masks,
+            )
+
+            from .config import parse_detection_seg_classes
+
+            if detection_seg_classes is not None:
+                det_classes, det_colors = parse_detection_seg_classes(
+                    detection_seg_classes
+                )
+                if detection_seg_class_colors:
+                    det_colors = {**det_colors, **detection_seg_class_colors}
+            elif detection_seg_class_colors:
+                det_colors = dict(detection_seg_class_colors)
+                det_classes = list(detection_seg_class_colors.keys())
+            else:
+                from .config import detection_seg_default
+
+                det_classes, det_colors = parse_detection_seg_classes(
+                    detection_seg_default("classes")
+                )
+            with profiler.stage("detection_seg"):
+                detection_result = run_detection_segmentation(
+                    prediction,
+                    DetectionSegConfig(
+                        enabled=True,
+                        model=detection_seg_model,
+                        classes=list(det_classes),
+                        class_colors=det_colors,
+                        threshold=float(detection_seg_threshold),
+                        save_masks=bool(detection_seg_save_masks),
+                    ),
+                    verbose=verbose,
+                )
+            detection_meta = {
+                "enabled": True,
+                "model": detection_result.model,
+                "classes": detection_result.classes,
+                "threshold": detection_result.threshold,
+                "label_to_id": detection_result.label_to_id,
+                "class_colors": {
+                    cls: list(rgba) for cls, rgba in detection_result.class_colors.items()
+                },
+            }
+
+        post_result = None
+        need_per_frame_post = point_cloud_3d_nms or algo_3d_bbox
+        if need_per_frame_post:
+            from .frame_postprocess import run_per_frame_postprocess
+
+            if algo_3d_bbox and save_compact and verbose:
+                print(
+                    "--- [vibephysics] algo_3d_bbox uses dense world_points; "
+                    "set --random_points_per_frame 0 for best results ---",
+                    flush=True,
+                )
+            with profiler.stage("per_frame_3d_postprocess"):
+                post_result = run_per_frame_postprocess(
+                    prediction,
+                    min_confidence=export_min_confidence,
+                    point_cloud_3d_nms=point_cloud_3d_nms,
+                    point_cloud_3d_nms_radius=point_cloud_3d_nms_radius,
+                    point_cloud_3d_nms_min_neighbors=point_cloud_3d_nms_min_neighbors,
+                    to_blender=True,
+                    with_frame_ids=True,
+                    random_points_per_frame=random_points_per_frame,
+                    algo_3d_bbox=algo_3d_bbox,
+                    bbox_reference_frame=algo_3d_bbox_reference_frame,
+                    bbox_kwargs={
+                        "voxel_size": algo_3d_bbox_voxel_size,
+                        "min_changed_voxels": algo_3d_bbox_min_changed_voxels,
+                        "min_change_fraction": algo_3d_bbox_min_change_fraction,
+                        "min_cluster_voxels": algo_3d_bbox_min_cluster_voxels,
+                        "cluster_gap_close": algo_3d_bbox_cluster_gap_close,
+                        "min_points_per_voxel": algo_3d_bbox_min_points_per_voxel,
+                        "shell_min_new_neighbors": algo_3d_bbox_shell_min_new_neighbors,
+                        "min_interior_voxels": algo_3d_bbox_min_interior_voxels,
+                        "min_interior_fraction": algo_3d_bbox_min_interior_fraction,
+                        "bbox_dense_min_neighbors": algo_3d_bbox_bbox_dense_min_neighbors,
+                        "bbox_min_dense_voxels": algo_3d_bbox_bbox_min_dense_voxels,
+                        "padding": algo_3d_bbox_padding,
+                        "verbose": verbose,
+                    },
+                    detection_seg=detection_result,
+                )
+            if post_result is not None:
+                if point_cloud_3d_nms:
+                    profiler.record_stage(
+                        "point_cloud_3d_nms (CPU est)",
+                        post_result.timings.nms_cpu_s,
+                    )
+                if algo_3d_bbox:
+                    profiler.record_stage(
+                        "algo_3d_bbox (CPU est)",
+                        post_result.timings.bbox_cpu_s,
+                    )
+        algo_3d_bboxes = post_result.bboxes if post_result is not None and algo_3d_bbox else None
 
         output_path = prepare_output_directory(image_path, output_path, engine=engine, verbose=verbose)
+        if detection_result is not None and detection_seg_save_masks:
+            from .detection_seg import save_detection_masks
+
+            mask_root = save_detection_masks(output_path, detection_result)
+            if verbose:
+                print(f"[vibephysics] detection_seg: saved masks under {mask_root}", flush=True)
         prediction.metadata["source_image_paths"] = list(prediction.image_paths)
-        save_compact = compact or point_random_points_per_frame is not None or point_total_random_points is not None
         if save_frames:
             prediction.image_paths = persist_preprocessed_frames(output_path, prediction)
             prediction.metadata["preprocessed_frames_dir"] = str((output_path / "frames").resolve())
@@ -859,7 +1135,6 @@ def reconstruct(
             "max_frames": max_frames,
             "max_frames_mode": max_frames_mode,
             "vram_gb": vram_gb,
-            "min_confidence": export_min_confidence,
             "conf_percentile": (
                 vggt_omega_conf_percentile
                 if is_vggt_omega_engine(engine)
@@ -869,28 +1144,87 @@ def reconstruct(
                 if is_dvlt_engine(engine)
                 else None
             ),
-            "point_scale": point_scale,
-            "point_random_points_per_frame": point_random_points_per_frame,
-            "point_total_random_points": point_total_random_points,
-            "compact": save_compact,
-            "save_html": save_html,
-            "save_frames": save_frames,
-            "filter_edges": filter_edges,
             "mask_sky": mask_sky,
             "video_fps": source_video_fps,
             "video_fps_config": video_fps,
-            "animation_fps": animation_fps,
-            "align_ground": align_ground,
+            "output": {
+                "random_points_per_frame": random_points_per_frame,
+                "total_random_points": total_random_points,
+                "compact": save_compact,
+                "save_html": save_html,
+                "save_frames": save_frames,
+                "min_confidence": export_min_confidence,
+                "filter_edges": filter_edges,
+                "align_ground": align_ground,
+                "only_start_frame_pose": only_start_frame_pose,
+                "point_cloud_3d_nms": point_cloud_3d_nms,
+                "point_cloud_3d_nms_radius": point_cloud_3d_nms_radius,
+                "point_cloud_3d_nms_min_neighbors": point_cloud_3d_nms_min_neighbors,
+                "algo_3d_bbox": algo_3d_bbox,
+            },
+            "blend": {
+                "point_scale": point_scale,
+                "point_display": point_display,
+                "animate": animate,
+                "animation_fps": animation_fps,
+                "animation_mode": animation_mode,
+                "keep_start_frame_point_cloud": keep_start_frame_point_cloud,
+            },
+            "algo_3d_bbox_min_visualize_changed_voxels": algo_3d_bbox_min_visualize_changed_voxels,
+            "detection_seg": detection_seg,
+            "detection_seg_model": detection_seg_model,
+            "detection_seg_classes": detection_seg_classes,
+            "detection_seg_threshold": detection_seg_threshold,
+            "detection_seg_save_masks": detection_seg_save_masks,
             "prediction_metadata": prediction.metadata,
         }
         save_reconstruct_config(output_path / "reconstruct_config.json", config)
+        if algo_3d_bboxes is not None:
+            from .algo_3d_bbox import (
+                DETECTION_SEG_BBOX_METHOD,
+                save_algo_3d_bboxes,
+            )
+
+            save_algo_3d_bboxes(
+                output_path / "algo_3d_bbox.json",
+                algo_3d_bboxes,
+                reference_frame=algo_3d_bbox_reference_frame,
+                method=(
+                    DETECTION_SEG_BBOX_METHOD
+                    if detection_result is not None
+                    else "voxel_diff_blob"
+                ),
+                voxel_size=algo_3d_bbox_voxel_size,
+                min_changed_voxels=algo_3d_bbox_min_changed_voxels,
+                min_change_fraction=algo_3d_bbox_min_change_fraction,
+                min_cluster_voxels=algo_3d_bbox_min_cluster_voxels,
+                cluster_gap_close=algo_3d_bbox_cluster_gap_close,
+                min_points_per_voxel=algo_3d_bbox_min_points_per_voxel,
+                shell_min_new_neighbors=algo_3d_bbox_shell_min_new_neighbors,
+                min_interior_voxels=algo_3d_bbox_min_interior_voxels,
+                min_interior_fraction=algo_3d_bbox_min_interior_fraction,
+                bbox_dense_min_neighbors=algo_3d_bbox_bbox_dense_min_neighbors,
+                bbox_min_dense_voxels=algo_3d_bbox_bbox_min_dense_voxels,
+                padding=algo_3d_bbox_padding,
+                min_visualize_changed_voxels=algo_3d_bbox_min_visualize_changed_voxels,
+                detection_seg=detection_meta,
+            )
+        precomputed_points = _precomputed_points_from_post(
+            post_result,
+            total_random_points=total_random_points,
+        )
         if save_compact:
+            precomputed = precomputed_points
             save_compact_prediction(
                 output_path / "predictions.npz",
                 prediction,
                 min_confidence=export_min_confidence,
-                random_points_per_frame=point_random_points_per_frame,
-                total_random_points=point_total_random_points,
+                random_points_per_frame=random_points_per_frame,
+                total_random_points=total_random_points,
+                point_cloud_3d_nms=point_cloud_3d_nms,
+                point_cloud_3d_nms_radius=point_cloud_3d_nms_radius,
+                point_cloud_3d_nms_min_neighbors=point_cloud_3d_nms_min_neighbors,
+                precomputed_points=precomputed,
             )
         else:
             save_prediction(output_path / "predictions.npz", prediction)
@@ -905,6 +1239,8 @@ def reconstruct(
             )
 
     if save_blend is not None:
+        from .algo_3d_bbox import class_colors_from_detection_meta
+
         with profiler.stage("blend_export"):
             _export_blend_scene(
                 prediction,
@@ -912,11 +1248,25 @@ def reconstruct(
                 save_blend,
                 min_confidence=export_min_confidence,
                 point_scale=point_scale,
-                point_random_points_per_frame=point_random_points_per_frame,
-                point_total_random_points=point_total_random_points,
+                point_display=point_display,
+                random_points_per_frame=random_points_per_frame,
+                total_random_points=total_random_points,
                 animate=animate,
                 animation_fps=animation_fps,
+                animation_mode=animation_mode,
                 video_fps=source_video_fps,
+                algo_3d_bboxes=algo_3d_bboxes,
+                algo_3d_bbox_min_visualize_changed_voxels=algo_3d_bbox_min_visualize_changed_voxels,
+                algo_3d_bbox_class_colors=(
+                    class_colors_from_detection_meta(detection_meta)
+                    if detection_meta
+                    else detection_seg_class_colors
+                ),
+                keep_start_frame_point_cloud=keep_start_frame_point_cloud,
+                point_cloud_3d_nms=point_cloud_3d_nms,
+                point_cloud_3d_nms_radius=point_cloud_3d_nms_radius,
+                point_cloud_3d_nms_min_neighbors=point_cloud_3d_nms_min_neighbors,
+                precomputed_points=precomputed_points,
                 verbose=verbose,
             )
 
@@ -925,6 +1275,7 @@ def reconstruct(
 
 
 _PREPROCESS_MODES = {
+    "lingbot_map": ("center_square", "crop", "pad"),
     "vggt_omega": ("balanced", "max_size"),
     "vgg_ttt": ("crop", "pad"),
     "map_anything": ("fixed_mapping", "longest_side", "square", "fixed_size"),
@@ -940,9 +1291,18 @@ def reconstruct_from_config(
     max_frames_mode: str | None = None,
     point_scale: float | None = None,
     min_confidence: float | None = None,
-    random_points_per_frame: int | None = None,
-    total_random_points: int | None = None,
+    random_points_per_frame: int | float | None = None,
+    total_random_points: int | float | None = None,
     compact: bool | None = None,
+    animation_mode: str | None = None,
+    algo_3d_bbox: bool | None = None,
+    detection_seg: bool | None = None,
+    detection_seg_classes: str | list[str] | None = None,
+    only_start_frame_pose: bool | None = None,
+    keep_start_frame_point_cloud: bool | None = None,
+    point_cloud_3d_nms: bool | None = None,
+    point_cloud_3d_nms_radius: float | None = None,
+    point_cloud_3d_nms_min_neighbors: int | None = None,
     html: bool | None = None,
     frames: bool | None = None,
     map_anything_model: str | None = None,
@@ -964,27 +1324,103 @@ def reconstruct_from_config(
         output = cfg.setdefault("output", {})
         if not isinstance(output, dict):
             raise ValueError("Config section 'output' must be a mapping")
-        output["point_scale"] = float(point_scale)
+        blend = output.setdefault("blend", {})
+        if not isinstance(blend, dict):
+            raise ValueError("Config section 'output.blend' must be a mapping")
+        blend["point_scale"] = float(point_scale)
     if min_confidence is not None:
         output = cfg.setdefault("output", {})
         if not isinstance(output, dict):
             raise ValueError("Config section 'output' must be a mapping")
         output["min_confidence"] = float(min_confidence)
     if random_points_per_frame is not None:
+        from .common import parse_random_points_limit
+
         output = cfg.setdefault("output", {})
         if not isinstance(output, dict):
             raise ValueError("Config section 'output' must be a mapping")
-        output["random_points_per_frame"] = int(random_points_per_frame)
+        output["random_points_per_frame"] = parse_random_points_limit(
+            random_points_per_frame,
+            name="random_points_per_frame",
+        )
     if total_random_points is not None:
+        from .common import parse_random_points_limit
+
         output = cfg.setdefault("output", {})
         if not isinstance(output, dict):
             raise ValueError("Config section 'output' must be a mapping")
-        output["total_random_points"] = int(total_random_points)
+        output["total_random_points"] = parse_random_points_limit(
+            total_random_points,
+            name="total_random_points",
+        )
     if compact is not None:
         output = cfg.setdefault("output", {})
         if not isinstance(output, dict):
             raise ValueError("Config section 'output' must be a mapping")
         output["compact"] = bool(compact)
+    if animation_mode is not None:
+        output = cfg.setdefault("output", {})
+        if not isinstance(output, dict):
+            raise ValueError("Config section 'output' must be a mapping")
+        blend = output.setdefault("blend", {})
+        if not isinstance(blend, dict):
+            raise ValueError("Config section 'output.blend' must be a mapping")
+        blend["animation_mode"] = str(animation_mode)
+    if algo_3d_bbox is not None:
+        output = cfg.setdefault("output", {})
+        if not isinstance(output, dict):
+            raise ValueError("Config section 'output' must be a mapping")
+        output["algo_3d_bbox"] = bool(algo_3d_bbox)
+    if detection_seg is not None:
+        section = cfg.setdefault("detection_seg", {})
+        if not isinstance(section, dict):
+            raise ValueError("Config section 'detection_seg' must be a mapping")
+        section["enabled"] = bool(detection_seg)
+        if detection_seg:
+            output = cfg.setdefault("output", {})
+            if not isinstance(output, dict):
+                raise ValueError("Config section 'output' must be a mapping")
+            output["algo_3d_bbox"] = True
+    if detection_seg_classes is not None:
+        from .config import (
+            format_detection_seg_class_entries,
+            parse_detection_seg_classes,
+        )
+
+        section = cfg.setdefault("detection_seg", {})
+        if not isinstance(section, dict):
+            raise ValueError("Config section 'detection_seg' must be a mapping")
+        classes, colors = parse_detection_seg_classes(detection_seg_classes)
+        section["classes"] = format_detection_seg_class_entries(classes, colors)
+        section.pop("class_colors", None)
+    if only_start_frame_pose is not None:
+        output = cfg.setdefault("output", {})
+        if not isinstance(output, dict):
+            raise ValueError("Config section 'output' must be a mapping")
+        output["only_start_frame_pose"] = bool(only_start_frame_pose)
+    if keep_start_frame_point_cloud is not None:
+        output = cfg.setdefault("output", {})
+        if not isinstance(output, dict):
+            raise ValueError("Config section 'output' must be a mapping")
+        blend = output.setdefault("blend", {})
+        if not isinstance(blend, dict):
+            raise ValueError("Config section 'output.blend' must be a mapping")
+        blend["keep_start_frame_point_cloud"] = bool(keep_start_frame_point_cloud)
+    if point_cloud_3d_nms is not None:
+        output = cfg.setdefault("output", {})
+        if not isinstance(output, dict):
+            raise ValueError("Config section 'output' must be a mapping")
+        output["point_cloud_3d_nms"] = bool(point_cloud_3d_nms)
+    if point_cloud_3d_nms_radius is not None:
+        output = cfg.setdefault("output", {})
+        if not isinstance(output, dict):
+            raise ValueError("Config section 'output' must be a mapping")
+        output["point_cloud_3d_nms_radius"] = float(point_cloud_3d_nms_radius)
+    if point_cloud_3d_nms_min_neighbors is not None:
+        output = cfg.setdefault("output", {})
+        if not isinstance(output, dict):
+            raise ValueError("Config section 'output' must be a mapping")
+        output["point_cloud_3d_nms_min_neighbors"] = int(point_cloud_3d_nms_min_neighbors)
     if html is not None:
         output = cfg.setdefault("output", {})
         if not isinstance(output, dict):
@@ -1077,7 +1513,7 @@ def main() -> None:
         "--point-scale",
         type=float,
         default=None,
-        help="Override output.point_scale as an absolute point radius in the saved .blend.",
+        help="Override output.blend.point_scale (point radius in the saved .blend).",
     )
     parser.add_argument(
         "--min_confidence",
@@ -1089,21 +1525,83 @@ def main() -> None:
     parser.add_argument(
         "--random_points_per_frame",
         "--random-points-per-frame",
-        type=int,
+        type=float,
         default=None,
-        help="Randomly keep up to N points per frame after confidence filtering.",
+        help="Per-frame subsample after confidence filter: integer max count (e.g. 4000) "
+        "or ratio in (0,1] (e.g. 0.5 = 50%% of valid points per frame). 0 = dense.",
     )
     parser.add_argument(
         "--total_random_points",
         "--total-random-points",
-        type=int,
+        type=float,
         default=None,
-        help="Randomly keep up to N total points after per-frame filtering.",
+        help="Global subsample after per-frame step: integer cap or ratio in (0,1]. 0 = off.",
     )
     parser.add_argument(
         "--compact",
         action="store_true",
         help="Save compact predictions.npz with colored points and camera poses only.",
+    )
+    parser.add_argument(
+        "--animation_mode",
+        "--animation-mode",
+        choices=("progressive", "discrete"),
+        default=None,
+        help="Blender timeline style: progressive (cumulative build, default) or "
+        "discrete (one reconstruction frame at a time, no overlap).",
+    )
+    parser.add_argument(
+        "--only_start_frame_pose",
+        "--only-start-frame-pose",
+        action="store_true",
+        help="Reproject every frame with frame 0 camera pose (depth/intrinsics stay per frame).",
+    )
+    parser.add_argument(
+        "--keep_start_frame_point_cloud",
+        "--keep-start-frame-point-cloud",
+        action="store_true",
+        help="In Blender animation, always show reconstruction frame 0 points while later frames build.",
+    )
+    parser.add_argument(
+        "--point_cloud_3d_nms",
+        "--point-cloud-3d-nms",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Per-frame 3D density filter for isolated points (default: output.point_cloud_3d_nms).",
+    )
+    parser.add_argument(
+        "--point_cloud_3d_nms_radius",
+        "--point-cloud-3d-nms-radius",
+        type=float,
+        default=None,
+        help="Neighbor radius in meters for 3D NMS (default: output.point_cloud_3d_nms_radius).",
+    )
+    parser.add_argument(
+        "--point_cloud_3d_nms_min_neighbors",
+        "--point-cloud-3d-nms-min-neighbors",
+        type=int,
+        default=None,
+        help="Min neighbors within radius to keep a point (default: output.point_cloud_3d_nms_min_neighbors).",
+    )
+    parser.add_argument(
+        "--algo_3d_bbox",
+        "--algo-3d-bbox",
+        action="store_true",
+        help="Voxel-diff change bboxes vs frame 0 (no RF-DETR). Not needed with --detection_seg.",
+    )
+    parser.add_argument(
+        "--detection_seg",
+        "--detection-seg",
+        action="store_true",
+        help="RF-DETR masks per class, 3D bboxes, and occupancy voxels in Blender "
+        "(implies algo_3d_bbox; see detection_seg in YAML).",
+    )
+    parser.add_argument(
+        "--detection_seg_classes",
+        "--detection-seg-classes",
+        default=None,
+        help="Classes from YAML if omitted. Else comma-separated entries: "
+        "person,cyan,oven,red (pairs) or person,oven (names only).",
     )
     parser.add_argument(
         "--html",
@@ -1148,6 +1646,17 @@ def main() -> None:
             random_points_per_frame=args.random_points_per_frame,
             total_random_points=args.total_random_points,
             compact=args.compact if args.compact else None,
+            animation_mode=args.animation_mode,
+            algo_3d_bbox=args.algo_3d_bbox if args.algo_3d_bbox else None,
+            detection_seg=args.detection_seg if args.detection_seg else None,
+            detection_seg_classes=args.detection_seg_classes,
+            only_start_frame_pose=args.only_start_frame_pose if args.only_start_frame_pose else None,
+            keep_start_frame_point_cloud=(
+                args.keep_start_frame_point_cloud if args.keep_start_frame_point_cloud else None
+            ),
+            point_cloud_3d_nms=args.point_cloud_3d_nms,
+            point_cloud_3d_nms_radius=args.point_cloud_3d_nms_radius,
+            point_cloud_3d_nms_min_neighbors=args.point_cloud_3d_nms_min_neighbors,
             html=args.html if args.html else None,
             frames=args.frames if args.frames else None,
             map_anything_model=args.map_anything_model,

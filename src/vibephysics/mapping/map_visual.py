@@ -76,7 +76,6 @@ def _create_camera_trajectory(
     points = [obj.matrix_world.translation for obj in camera_objects]
     curve_data = bpy.data.curves.new(name="CameraTrajectory", type="CURVE")
     curve_data.dimensions = "3D"
-    curve_data.fill_mode = "NONE"
     curve_data.bevel_depth = max(float(radius), 0.0)
     curve_data.bevel_resolution = 0 if curve_data.bevel_depth <= 0.0 else 2
     spline = curve_data.splines.new("POLY")

@@ -23,7 +23,7 @@ pip-wheel-metadata/
 venv/
 env/
 .venv/
-demo/
+
 
 # IDE
 .idea/
@@ -38,6 +38,8 @@ Thumbs.db
 # Project specific
 *output/
 .vibephysics/
+demo/
+paper/
 *.blend
 # But include assets/*.blend (tracked via Git LFS)
 !assets/*.blend

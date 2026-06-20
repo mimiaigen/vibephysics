@@ -1,0 +1,181 @@
+# Dense feedforward reconstruction (defaults per-engine match official demos)
+# image_path accepts: folder of images, single image, or video (.mov, .mp4, ...)
+#
+# CLI -> YAML (python -m vibephysics.feedforward.reconstruct --help)
+#   --algo_3d_bbox                    -> output.algo_3d_bbox (voxel-diff only; not needed with --detection_seg)
+#   --only_start_frame_pose           -> output.only_start_frame_pose
+#   --point_cloud_3d_nms              -> output.point_cloud_3d_nms
+#   --point_cloud_3d_nms_radius       -> output.point_cloud_3d_nms_radius
+#   --point_cloud_3d_nms_min_neighbors -> output.point_cloud_3d_nms_min_neighbors
+#   --detection_seg                   -> detection_seg.enabled
+#   --detection_seg_classes           -> detection_seg.classes (omit to use YAML list)
+#   --split_files                     -> output.split_files
+#   --random_points_per_frame         -> output.random_points_per_frame
+#   --total_random_points             -> output.total_random_points
+#   --min_confidence                  -> output.min_confidence
+#   --point_scale                     -> output.blend.point_scale
+#   --animation_mode                  -> output.blend.animation_mode
+#   --keep_start_frame_point_cloud    -> output.blend.keep_start_frame_point_cloud
+#   --html                            -> output.save_html
+#   --frames                          -> output.save_frames
+#   algo_3d_bbox.* params             -> algo_3d_bbox section below
+#   detection_seg.* params            -> detection_seg section below
+engine: lingbot_map
+image_path: path/to/images
+output_path: null
+verbose: true
+
+video:
+  fps: 2              # extraction rate; saved to .vibephysics_extract_fps and reused for animation
+  quality: 2
+  max_frames: null     # null = all frames; set N to limit count (both engines)
+  max_frames_mode: first   # first = first N consecutive; spread = evenly across input
+
+# Predictions / NPZ / Plotly (engine-agnostic)
+output:
+  save_blend: null
+  save_html: null
+  save_frames: false
+  split_files: true              # true = predictions.<key>.npz per array instead of one NPZ
+  min_confidence: 2.0
+  filter_edges: true
+  random_points_per_frame: 0.5   # subsample points/colors; depth always saved
+  total_random_points: 0          # int = global cap; float = ratio after per-frame step; null/0 = off
+  point_cloud_3d_nms: true
+  point_cloud_3d_nms_radius: 0.05
+  point_cloud_3d_nms_min_neighbors: 20
+  align_ground: true
+  algo_3d_bbox: false   # voxel-diff bboxes vs frame 0; auto true when detection_seg.enabled
+  only_start_frame_pose: false
+
+  # Blender .blend export only (ignored when save_blend is null)
+  blend:
+    point_scale: 0.0035
+    point_display: points       # points (default) | pointcloud (native) | spheres (slow)
+    animate: true
+    animation_fps: 24
+    animation_mode: discrete   # progressive | discrete
+    keep_start_frame_point_cloud: false
+
+detection_seg:
+  enabled: true                # CLI --detection_seg: RF-DETR + 3D bboxes + Blender occupancy voxels
+  # Per-frame bboxes: one mask per RF-DETR instance (not OR-merged per class).
+  model: Roboflow/rf-detr-seg-medium   # HF cache: .vibephysics/feedforward/huggingface/
+  # COCO names only (~80 labels). Per line: "name, color" (spaces around comma OK).
+  # Aliases: human/people -> person; automobile/vehicle -> car.
+  #
+  # Kitchen / dining: sink, microwave, refrigerator, oven, toaster, bottle, cup, bowl,
+  #   wine glass, fork, knife, spoon, dining table, banana, apple, orange, sandwich,
+  #   hot dog, pizza, donut, cake, broccoli, carrot
+  # Living / office: chair, couch, bed, tv, laptop, remote, keyboard, mouse, book,
+  #   clock, vase, potted plant, teddy bear, cell phone
+  # Bath / personal: toilet, hair drier, toothbrush, tie, suitcase
+  # Pets: cat, dog, bird
+  # Outdoor / garage (if visible): car, bicycle, motorcycle, bench, potted plant
+  # Not in COCO (will error): toy, coffee machine, stove, pan, plate, lamp, desk,
+  #   stuffed animal, robot, baby, crib, cabinet, drawer, rug, curtain
+  classes:
+    - person, cyan
+    - refrigerator, [176, 224, 255, 255]
+    - oven, red
+    - microwave, orange
+    - dining table, blue
+    - bottle, purple
+    - cup, blue
+    - bowl, magenta
+    - chair, red
+    - couch, [70, 130, 180, 255]
+    - tv, white
+    - laptop, [47, 47, 55, 255]
+    - book, [210, 180, 140, 255]
+    - clock, black
+    - vase, [255, 182, 193, 255]
+    - potted plant, [34, 139, 34, 255]
+    - remote, [190, 190, 190, 255]
+    - cell phone, [255, 127, 80, 255]
+  threshold: 0.45                # detection confidence for instance masks
+  save_masks: true              # write masks only when class detected on that frame
+
+algo_3d_bbox:
+  # Used when output.algo_3d_bbox is true.
+  # With detection_seg.enabled: masked_cluster_aabb (per-frame mask cluster; static OK).
+  # reference_frame only applies to non-detection voxel_diff_blob bboxes.
+  reference_frame: 0
+  voxel_size: 0.02
+  min_changed_voxels: 12
+  min_change_fraction: 0.03
+  min_cluster_voxels: 8         # minimum blob size after gap-closing
+  cluster_gap_close: 1          # bridge 1-voxel gaps in sparse recon
+  min_points_per_voxel: 1
+  shell_min_new_neighbors: 1    # ref-adjacent new voxels need this many new neighbors
+  min_interior_voxels: 2
+  min_interior_fraction: 0.04
+  bbox_dense_min_neighbors: 3    # tighten exported bbox to dense core (0=full cluster)
+  bbox_min_dense_voxels: 4      # minimum voxels kept after tightening
+  padding: 0.01
+  # Blender-only (change bbox / voxel layers in the .blend):
+  min_visualize_changed_voxels: 350
+  progressive_class_nms_iou: 0.25   # 3D IoU NMS: same-frame same-class always; cross-frame when progressive playback (chair+couch share one bucket)
+  visualization: both          # voxels | bbox | both
+  voxel_alpha: 0.1
+  label_face_camera: true      # TRACK_TO scene camera so class labels face the viewer
+  bbox_wire_radius: 0.001      # fixed world-space edge thickness (not scaled with box size)
+
+lingbot_map:
+  model: lingbot-map
+  checkpoint: null
+  image_size: 518
+  preprocess_mode: center_square  # center_square | crop | pad (crop/pad = upstream LingBot)
+  mode: auto
+  keyframe_interval: null
+  max_streaming_keyframes: null
+  window_size: 64
+  overlap_size: 16
+  overlap_keyframes: null
+  use_sdpa: false           # official demo.py default (FlashInfer)
+  mask_sky: false
+
+vggt_omega:
+  checkpoint: null
+  checkpoint_name: vggt-omega-1b-512
+  resolution: 512
+  preprocess_mode: balanced
+  enable_alignment: false
+  conf_percentile: 10.0
+  depth_edge_rtol: 0.03
+
+vgg_ttt:
+  model_id: nvidia/vgg-ttt
+  preprocess_mode: crop
+  image_size: 518
+  conf_percentile: 50.0
+  depth_edge_rtol: 0.03
+  num_ttt_steps: 1
+  memory_efficient_inference: false
+
+map_anything:
+  model: vggt                  # model_factory key; e.g. vggt, mapanything, pi3, moge
+  model_kwargs: null           # null = use repo defaults for the selected model
+  install_all: false          # true = pip install upstream mapanything[all]
+  resolution: 518              # resolution_set for load_images
+  norm_type: identity          # vggt/pi3/moge=identity, mapanything/da3=dinov2, dust3r family=dust3r
+  patch_size: 14
+  resize_mode: fixed_mapping   # fixed_mapping | longest_side | square | fixed_size
+  size: null                   # required for longest_side/square/fixed_size
+
+r3:
+  checkpoint: null             # null = auto-download from HuggingFace (KevinXu02/R3)
+  model: r3_long               # r3 | r3_long; r3_long is the vibephysics default
+  config_name: r3-large
+  mode: local                  # test | local | long | strided
+  image_size: 504
+  kv_backend: dense            # dense | paged (paged needs flashinfer)
+  rel_pose_method: greedy      # greedy | pgo
+  metric_model_name: depth-anything/DA3METRIC-LARGE
+
+dvlt:
+  checkpoint: nvidia/dvlt      # HF Hub repo id, local dir, or HTTPS URL (NVIDIA license on weights)
+  img_size: 504
+  patch_size: 14
+  conf_percentile: 50.0
+  depth_edge_rtol: 0.03

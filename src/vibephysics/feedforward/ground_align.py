@@ -686,16 +686,25 @@ def shift_prediction_ground_above_z(
     flat[valid] += shift
     prediction.world_points = flat.astype(np.float32).reshape(wp.shape)
 
+    if prediction.compact_points is not None:
+        cp = np.asarray(prediction.compact_points, dtype=np.float64)
+        cp_valid = np.isfinite(cp).all(axis=1)
+        if np.any(cp_valid):
+            cp = cp.copy()
+            cp[cp_valid] += shift
+            prediction.compact_points = cp.astype(np.float32)
+
+    matrix_world = bool(prediction.metadata.get("extrinsic_is_matrix_world"))
     w2c_as_camera_pose = bool(prediction.metadata.get("w2c_as_camera_pose"))
     new_ext = np.empty_like(prediction.extrinsic)
-    for i, w2c in enumerate(prediction.extrinsic):
-        w2c4 = np.vstack([w2c, [0.0, 0.0, 0.0, 1.0]])
-        if w2c_as_camera_pose:
-            pose = w2c4.copy()
+    for i, ext in enumerate(prediction.extrinsic):
+        ext4 = np.vstack([ext, [0.0, 0.0, 0.0, 1.0]])
+        if matrix_world or w2c_as_camera_pose:
+            pose = ext4.copy()
             pose[:3, 3] += shift
             new_ext[i] = pose[:3, :4]
         else:
-            c2w = np.linalg.inv(w2c4)
+            c2w = np.linalg.inv(ext4)
             c2w[:3, 3] += shift
             new_ext[i] = np.linalg.inv(c2w)[:3, :4]
     prediction.extrinsic = new_ext.astype(np.float32)

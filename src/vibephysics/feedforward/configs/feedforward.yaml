@@ -9,7 +9,7 @@
 #   --point_cloud_3d_nms_min_neighbors -> output.point_cloud_3d_nms_min_neighbors
 #   --detection_seg                   -> detection_seg.enabled
 #   --detection_seg_classes           -> detection_seg.classes (omit to use YAML list)
-#   --compact                         -> output.compact
+#   --split_files                     -> output.split_files
 #   --random_points_per_frame         -> output.random_points_per_frame
 #   --total_random_points             -> output.total_random_points
 #   --min_confidence                  -> output.min_confidence
@@ -36,10 +36,10 @@ output:
   save_blend: null
   save_html: null
   save_frames: false
-  compact: false
+  split_files: true              # true = predictions.<key>.npz per array instead of one NPZ
   min_confidence: 2.0
   filter_edges: true
-  random_points_per_frame: 0.35   # int = max points/frame; float in (0,1] = ratio; null/0 = dense
+  random_points_per_frame: 0.05   # subsample points/colors; depth always saved
   total_random_points: 0          # int = global cap; float = ratio after per-frame step; null/0 = off
   point_cloud_3d_nms: true
   point_cloud_3d_nms_radius: 0.05
@@ -51,7 +51,7 @@ output:
   # Blender .blend export only (ignored when save_blend is null)
   blend:
     point_scale: 0.0035
-    point_display: points       # points (default) | pointcloud (fast native) | spheres
+    point_display: points       # points (default) | pointcloud (native) | spheres (slow)
     animate: true
     animation_fps: 24
     animation_mode: progressive   # progressive | discrete
@@ -85,7 +85,6 @@ detection_seg:
     - bowl, magenta
     - chair, red
     - couch, [70, 130, 180, 255]
-    - bed, pink
     - tv, white
     - laptop, [47, 47, 55, 255]
     - book, [210, 180, 140, 255]
@@ -94,7 +93,7 @@ detection_seg:
     - potted plant, [34, 139, 34, 255]
     - remote, [190, 190, 190, 255]
     - cell phone, [255, 127, 80, 255]
-  threshold: 0.25                # detection confidence for instance masks
+  threshold: 0.45                # detection confidence for instance masks
   save_masks: true              # write masks only when class detected on that frame
 
 algo_3d_bbox:

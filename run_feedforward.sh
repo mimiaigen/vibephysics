@@ -25,7 +25,7 @@ usage() {
     echo "Common args are forwarded, including:"
     echo "  --input/--image_path, --output_path, --point_scale, --max_frames,"
     echo "  --max_frames_mode, --min_confidence, --random_points_per_frame, --total_random_points,"
-    echo "  --compact, --animation_mode, --only_start_frame_pose,"
+    echo "  --split_files, --animation_mode, --only_start_frame_pose,"
     echo "  --keep_start_frame_point_cloud,"
     echo "  --point_cloud_3d_nms, --point_cloud_3d_nms_radius, --point_cloud_3d_nms_min_neighbors,"
     echo "  --detection_seg (masks + 3D bboxes + voxels), --detection_seg_classes,"
@@ -46,7 +46,6 @@ HTML=0
 FRAMES=0
 RANDOM_POINTS_PER_FRAME=""
 TOTAL_RANDOM_POINTS=""
-COMPACT=0
 ARGS=()
 
 while [[ "$#" -gt 0 ]]; do
@@ -89,9 +88,6 @@ while [[ "$#" -gt 0 ]]; do
         --total_random_points|--total-random-points)
             TOTAL_RANDOM_POINTS="$2"
             shift
-            ;;
-        --compact)
-            COMPACT=1
             ;;
         --no-install|--no_install)
             export VIBEPHYSICS_NO_AUTO_INSTALL=1
@@ -223,7 +219,7 @@ make_runtime_config() {
     local source_config="${CONFIG:-$DEFAULT_CONFIG}"
     local tmp_config
     tmp_config="$(mktemp "${TMPDIR:-/tmp}/vibephysics_feedforward.XXXXXX.yaml")"
-    "$PYTHON" - "$source_config" "$tmp_config" "$ENGINE" "$r3_model" "$BLEND" "$HTML" "$FRAMES" "$RANDOM_POINTS_PER_FRAME" "$TOTAL_RANDOM_POINTS" "$COMPACT" <<'PY'
+    "$PYTHON" - "$source_config" "$tmp_config" "$ENGINE" "$r3_model" "$BLEND" "$HTML" "$FRAMES" "$RANDOM_POINTS_PER_FRAME" "$TOTAL_RANDOM_POINTS" <<'PY'
 import sys
 from pathlib import Path
 
@@ -238,7 +234,6 @@ html = sys.argv[6] == "1"
 frames = sys.argv[7] == "1"
 random_points_per_frame = sys.argv[8]
 total_random_points = sys.argv[9]
-compact = sys.argv[10] == "1"
 
 cfg = yaml.safe_load(src.read_text())
 if not isinstance(cfg, dict):
@@ -258,7 +253,6 @@ if total_random_points.lower() not in {"", "none", "null"}:
     output["total_random_points"] = (
         None if total_random_points == "0" else float(total_random_points)
     )
-output["compact"] = compact
 
 if r3_model:
     section = cfg.setdefault("r3", {})

@@ -697,7 +697,7 @@ def reconstruct(
     point_display: str | None = None,
     random_points_per_frame: int | float | None = None,
     total_random_points: int | float | None = None,
-    compact: bool = False,
+    split_files: bool = False,
     animate: bool | None = None,
     animation_fps: int | None = None,
     animation_mode: str | None = None,
@@ -1012,7 +1012,11 @@ def reconstruct(
             finalize_ground_align_z_shift(prediction)
         prediction.metadata = dict(prediction.metadata)
         prediction.metadata["video_fps"] = source_video_fps
-        save_compact = compact or random_points_per_frame is not None or total_random_points is not None
+        from .common import random_points_limit_enabled
+
+        save_sampled = random_points_limit_enabled(
+            random_points_per_frame
+        ) or random_points_limit_enabled(total_random_points)
 
         detection_result = None
         detection_meta: dict | None = None
@@ -1069,7 +1073,10 @@ def reconstruct(
         if need_per_frame_post:
             from .frame_postprocess import run_per_frame_postprocess
 
-            if algo_3d_bbox and save_compact and verbose:
+            if algo_3d_bbox and verbose and (
+                random_points_limit_enabled(random_points_per_frame)
+                or random_points_limit_enabled(total_random_points)
+            ):
                 print(
                     "--- [vibephysics] algo_3d_bbox uses dense world_points; "
                     "set --random_points_per_frame 0 for best results ---",
@@ -1153,7 +1160,8 @@ def reconstruct(
             "output": {
                 "random_points_per_frame": random_points_per_frame,
                 "total_random_points": total_random_points,
-                "compact": save_compact,
+                "sampled_points": save_sampled,
+                "split_files": split_files,
                 "save_html": save_html,
                 "save_frames": save_frames,
                 "min_confidence": export_min_confidence,
@@ -1216,7 +1224,7 @@ def reconstruct(
             post_result,
             total_random_points=total_random_points,
         )
-        if save_compact:
+        if save_sampled:
             precomputed = precomputed_points
             save_compact_prediction(
                 output_path / "predictions.npz",
@@ -1228,9 +1236,14 @@ def reconstruct(
                 point_cloud_3d_nms_radius=point_cloud_3d_nms_radius,
                 point_cloud_3d_nms_min_neighbors=point_cloud_3d_nms_min_neighbors,
                 precomputed_points=precomputed,
+                split_files=split_files,
             )
         else:
-            save_prediction(output_path / "predictions.npz", prediction)
+            save_prediction(
+                output_path / "predictions.npz",
+                prediction,
+                split_files=split_files,
+            )
 
     if save_html is not None:
         with profiler.stage("html_export"):
@@ -1296,7 +1309,7 @@ def reconstruct_from_config(
     min_confidence: float | None = None,
     random_points_per_frame: int | float | None = None,
     total_random_points: int | float | None = None,
-    compact: bool | None = None,
+    split_files: bool | None = None,
     animation_mode: str | None = None,
     algo_3d_bbox: bool | None = None,
     detection_seg: bool | None = None,
@@ -1356,11 +1369,11 @@ def reconstruct_from_config(
             total_random_points,
             name="total_random_points",
         )
-    if compact is not None:
+    if split_files is not None:
         output = cfg.setdefault("output", {})
         if not isinstance(output, dict):
             raise ValueError("Config section 'output' must be a mapping")
-        output["compact"] = bool(compact)
+        output["split_files"] = bool(split_files)
     if animation_mode is not None:
         output = cfg.setdefault("output", {})
         if not isinstance(output, dict):
@@ -1541,9 +1554,10 @@ def main() -> None:
         help="Global subsample after per-frame step: integer cap or ratio in (0,1]. 0 = off.",
     )
     parser.add_argument(
-        "--compact",
+        "--split_files",
+        "--split-files",
         action="store_true",
-        help="Save compact predictions.npz with colored points and camera poses only.",
+        help="Save predictions as predictions.<key>.npz (one array per file) instead of one NPZ.",
     )
     parser.add_argument(
         "--animation_mode",
@@ -1648,7 +1662,7 @@ def main() -> None:
             min_confidence=args.min_confidence,
             random_points_per_frame=args.random_points_per_frame,
             total_random_points=args.total_random_points,
-            compact=args.compact if args.compact else None,
+            split_files=args.split_files if args.split_files else None,
             animation_mode=args.animation_mode,
             algo_3d_bbox=args.algo_3d_bbox if args.algo_3d_bbox else None,
             detection_seg=args.detection_seg if args.detection_seg else None,

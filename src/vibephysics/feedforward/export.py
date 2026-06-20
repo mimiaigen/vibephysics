@@ -353,6 +353,8 @@ def export_plotly(args: argparse.Namespace) -> None:
 
     from vibephysics.feedforward.config import output_settings_from_reconstruct_config
 
+    from vibephysics.feedforward.schema import load_npz_payload
+
     saved = _load_output_defaults(args.predictions)
     output_saved = output_settings_from_reconstruct_config(saved)
     min_confidence = args.min_confidence
@@ -362,91 +364,91 @@ def export_plotly(args: argparse.Namespace) -> None:
     if video_fps is None:
         video_fps = float(saved.get("video_fps") or 2.0)
 
-    with np.load(args.predictions, allow_pickle=True) as data:
-        extrinsic = data["extrinsic"]
-        metadata = data["metadata"][0] if "metadata" in data.files and len(data["metadata"]) else {}
-        frames_dir = args.frames_dir
-        if frames_dir is None:
-            frames_dir = Path(metadata.get("preprocessed_frames_dir") or (args.predictions.parent / "frames"))
-        else:
-            frames_dir = Path(frames_dir)
-        if not frames_dir.is_absolute():
-            frames_dir = args.predictions.parent / frames_dir
-        frame_paths = sorted(frames_dir.glob("frame_*.jpg"))
-        is_compact = "points" in data.files and "colors" in data.files
-        if is_compact:
-            points_all = data["points"].astype(np.float32)
-            conf_all = data["conf"].reshape(-1).astype(np.float32)
-            mask = (conf_all >= min_confidence) & np.isfinite(conf_all) & np.isfinite(points_all).all(axis=1)
+    payload = load_npz_payload(args.predictions)
+    extrinsic = payload["extrinsic"]
+    metadata = payload["metadata"][0] if "metadata" in payload and len(payload["metadata"]) else {}
+    frames_dir = args.frames_dir
+    if frames_dir is None:
+        frames_dir = Path(metadata.get("preprocessed_frames_dir") or (args.predictions.parent / "frames"))
+    else:
+        frames_dir = Path(frames_dir)
+    if not frames_dir.is_absolute():
+        frames_dir = args.predictions.parent / frames_dir
+    frame_paths = sorted(frames_dir.glob("frame_*.jpg"))
+    is_compact = "points" in payload and "colors" in payload
+    if is_compact:
+        points_all = payload["points"].astype(np.float32)
+        conf_all = payload["conf"].reshape(-1).astype(np.float32)
+        mask = (conf_all >= min_confidence) & np.isfinite(conf_all) & np.isfinite(points_all).all(axis=1)
+        if not np.any(mask):
+            raise ValueError(f"No finite compact points found at confidence >= {min_confidence:g}")
+        selected_idx = np.flatnonzero(mask)
+        frame_ids = payload["frame_ids"] if "frame_ids" in payload else None
+        selected_idx = _select_plotly_compact_indices(
+            selected_idx,
+            conf_all,
+            args.max_points,
+            np.random.default_rng(args.seed),
+            frame_ids=frame_ids,
+        )
+        points = points_all[selected_idx]
+        conf_values = conf_all[selected_idx]
+        colors = payload["colors"][selected_idx].astype(np.uint8)
+        marker_color = [f"rgb({r},{g},{b})" for r, g, b in colors]
+        colorbar = None
+        colorscale = None
+    else:
+        world_points = payload["world_points"]
+        confidence = payload["conf"]
+        num_frames, height, width = confidence.shape
+        flat_points = world_points.reshape(-1, 3)
+        flat_conf = confidence.reshape(-1)
+        total_points = flat_conf.size
+
+        if args.max_points is None:
+            mask = (flat_conf >= min_confidence) & np.isfinite(flat_conf) & np.isfinite(flat_points).all(axis=1)
             if not np.any(mask):
-                raise ValueError(f"No finite compact points found at confidence >= {min_confidence:g}")
-            selected_idx = np.flatnonzero(mask)
-            frame_ids = data["frame_ids"] if "frame_ids" in data.files else None
-            selected_idx = _select_plotly_compact_indices(
-                selected_idx,
-                conf_all,
-                args.max_points,
-                np.random.default_rng(args.seed),
-                frame_ids=frame_ids,
-            )
-            points = points_all[selected_idx]
-            conf_values = conf_all[selected_idx]
-            colors = data["colors"][selected_idx].astype(np.uint8)
-            marker_color = [f"rgb({r},{g},{b})" for r, g, b in colors]
+                raise ValueError(f"No finite points found at confidence >= {min_confidence:g}")
+            sampled_idx = np.flatnonzero(mask)
+        else:
+            rng = np.random.default_rng(args.seed)
+            sampled_chunks: list[np.ndarray] = []
+            chunk_size = min(2_000_000, total_points)
+            for _ in range(args.sample_rounds):
+                idx = rng.integers(0, total_points, size=chunk_size, endpoint=False)
+                pts = flat_points[idx]
+                conf = flat_conf[idx]
+                mask = (conf >= min_confidence) & np.isfinite(conf) & np.isfinite(pts).all(axis=1)
+                if not np.any(mask):
+                    continue
+                sampled_chunks.append(idx[mask])
+                if sum(len(chunk) for chunk in sampled_chunks) >= args.max_points:
+                    break
+            if not sampled_chunks:
+                raise ValueError(f"No finite points found at confidence >= {min_confidence:g}")
+            sampled_idx = np.concatenate(sampled_chunks)[: args.max_points]
+        points = flat_points[sampled_idx].astype(np.float32)
+        conf_values = flat_conf[sampled_idx].astype(np.float32)
+
+        marker_color = conf_values
+        colorbar = {"title": "confidence"}
+        colorscale = "Viridis"
+        if len(frame_paths) >= num_frames:
+            frame_idx = sampled_idx // (height * width)
+            rem = sampled_idx % (height * width)
+            yy = rem // width
+            xx = rem % width
+            rgb_values = np.empty((len(sampled_idx), 3), dtype=np.uint8)
+            for frame in np.unique(frame_idx):
+                image = Image.open(frame_paths[int(frame)]).convert("RGB")
+                if image.size != (width, height):
+                    image = image.resize((width, height), Image.Resampling.BICUBIC)
+                rgb = np.asarray(image, dtype=np.uint8)
+                selected = frame_idx == frame
+                rgb_values[selected] = rgb[yy[selected], xx[selected]]
+            marker_color = [f"rgb({r},{g},{b})" for r, g, b in rgb_values]
             colorbar = None
             colorscale = None
-        else:
-            world_points = data["world_points"]
-            confidence = data["conf"]
-            num_frames, height, width = confidence.shape
-            flat_points = world_points.reshape(-1, 3)
-            flat_conf = confidence.reshape(-1)
-            total_points = flat_conf.size
-
-            if args.max_points is None:
-                mask = (flat_conf >= min_confidence) & np.isfinite(flat_conf) & np.isfinite(flat_points).all(axis=1)
-                if not np.any(mask):
-                    raise ValueError(f"No finite points found at confidence >= {min_confidence:g}")
-                sampled_idx = np.flatnonzero(mask)
-            else:
-                rng = np.random.default_rng(args.seed)
-                sampled_chunks: list[np.ndarray] = []
-                chunk_size = min(2_000_000, total_points)
-                for _ in range(args.sample_rounds):
-                    idx = rng.integers(0, total_points, size=chunk_size, endpoint=False)
-                    pts = flat_points[idx]
-                    conf = flat_conf[idx]
-                    mask = (conf >= min_confidence) & np.isfinite(conf) & np.isfinite(pts).all(axis=1)
-                    if not np.any(mask):
-                        continue
-                    sampled_chunks.append(idx[mask])
-                    if sum(len(chunk) for chunk in sampled_chunks) >= args.max_points:
-                        break
-                if not sampled_chunks:
-                    raise ValueError(f"No finite points found at confidence >= {min_confidence:g}")
-                sampled_idx = np.concatenate(sampled_chunks)[: args.max_points]
-            points = flat_points[sampled_idx].astype(np.float32)
-            conf_values = flat_conf[sampled_idx].astype(np.float32)
-
-            marker_color = conf_values
-            colorbar = {"title": "confidence"}
-            colorscale = "Viridis"
-            if len(frame_paths) >= num_frames:
-                frame_idx = sampled_idx // (height * width)
-                rem = sampled_idx % (height * width)
-                yy = rem // width
-                xx = rem % width
-                rgb_values = np.empty((len(sampled_idx), 3), dtype=np.uint8)
-                for frame in np.unique(frame_idx):
-                    image = Image.open(frame_paths[int(frame)]).convert("RGB")
-                    if image.size != (width, height):
-                        image = image.resize((width, height), Image.Resampling.BICUBIC)
-                    rgb = np.asarray(image, dtype=np.uint8)
-                    selected = frame_idx == frame
-                    rgb_values[selected] = rgb[yy[selected], xx[selected]]
-                marker_color = [f"rgb({r},{g},{b})" for r, g, b in rgb_values]
-                colorbar = None
-                colorscale = None
 
     figure_data = [
         go.Scatter3d(
@@ -469,7 +471,10 @@ def export_plotly(args: argparse.Namespace) -> None:
 
     trajectory_js = ""
     if args.trajectory:
-        trajectory = extrinsic[:, :3, 3].astype(np.float32)
+        if "trajectory" in payload:
+            trajectory = np.asarray(payload["trajectory"], dtype=np.float32)
+        else:
+            trajectory = extrinsic[:, :3, 3].astype(np.float32)
         trajectory = trajectory[np.isfinite(trajectory).all(axis=1)]
         tx, ty, tz = trajectory[:, 0], trajectory[:, 1], trajectory[:, 2]
         figure_data.extend(

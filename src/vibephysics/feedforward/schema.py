@@ -10,8 +10,30 @@ import numpy as np
 
 
 def is_compact_npz_payload(payload: dict) -> bool:
-    """True for colored-points compact saves (no dense depth/world grid)."""
-    return "points" in payload and "colors" in payload and "depth" not in payload
+    """True for sampled colored-point saves (``points`` + ``colors``; may include ``depth``)."""
+    return "points" in payload and "colors" in payload
+
+
+def _storage_float16(arr: np.ndarray) -> np.ndarray:
+    return np.asarray(arr, dtype=np.float16)
+
+
+def _encode_float_storage(payload: dict) -> dict:
+    encoded: dict = {}
+    for key, value in payload.items():
+        if isinstance(value, np.ndarray) and np.issubdtype(value.dtype, np.floating):
+            encoded[key] = _storage_float16(value)
+        else:
+            encoded[key] = value
+    return encoded
+
+
+def _normalize_loaded_payload(payload: dict) -> dict:
+    """Promote stored half-precision arrays back to float32 for downstream code."""
+    for key, value in payload.items():
+        if isinstance(value, np.ndarray) and np.issubdtype(value.dtype, np.floating):
+            payload[key] = np.asarray(value, dtype=np.float32)
+    return payload
 
 
 @dataclass
@@ -80,8 +102,13 @@ class FeedforwardPrediction:
         frame_ids = payload.get("frame_ids")
         if frame_ids is not None:
             frame_ids = np.asarray(frame_ids, dtype=np.int32).reshape(-1)
+        depth = payload.get("depth")
+        if depth is not None:
+            depth = np.asarray(depth, dtype=np.float32)
+        else:
+            depth = np.zeros((n_frames, size, size, 1), dtype=np.float32)
         return cls(
-            depth=np.zeros((n_frames, size, size, 1), dtype=np.float32),
+            depth=depth,
             conf=np.asarray(payload["conf"], dtype=np.float32).reshape(-1),
             extrinsic=extrinsic,
             intrinsic=np.asarray(payload["intrinsic"], dtype=np.float32),
@@ -122,19 +149,68 @@ class FeedforwardPrediction:
         )
 
 
-def save_prediction(path: Path, prediction: FeedforwardPrediction) -> None:
+def _npz_base_path(path: Path) -> Path:
+    return path.with_suffix("") if path.suffix == ".npz" else path
+
+
+def _write_npz_payload(path: Path, payload: dict, *, split_files: bool = False) -> None:
+    payload = _encode_float_storage(payload)
+    if not split_files:
+        np.savez_compressed(path, **payload)
+        return
+    base = _npz_base_path(path)
+    for key, value in payload.items():
+        np.savez_compressed(base.parent / f"{base.name}.{key}.npz", **{key: value})
+
+
+def load_npz_payload(path: Path | str) -> dict:
+    """Load a monolithic predictions.npz or split predictions.<key>.npz siblings."""
+    path = Path(path)
+    if path.is_file():
+        with np.load(path, allow_pickle=True) as data:
+            return _normalize_loaded_payload({key: data[key] for key in data.files})
+    base = _npz_base_path(path)
+    parts = sorted(base.parent.glob(f"{base.name}.*.npz"))
+    if not parts:
+        raise FileNotFoundError(f"No monolithic or split NPZ at {path}")
+    prefix = f"{base.name}."
+    payload: dict = {}
+    for part in parts:
+        if not part.stem.startswith(prefix):
+            continue
+        key = part.stem[len(prefix) :]
+        with np.load(part, allow_pickle=True) as data:
+            payload[key] = data[key]
+    if not payload:
+        raise FileNotFoundError(f"No monolithic or split NPZ at {path}")
+    return _normalize_loaded_payload(payload)
+
+
+def save_prediction(
+    path: Path,
+    prediction: FeedforwardPrediction,
+    *,
+    split_files: bool = False,
+) -> None:
+    metadata = dict(prediction.metadata)
+    metadata["float_storage"] = "float16"
+    if split_files:
+        metadata["split_files"] = True
+    trajectory = prediction.extrinsic[:, :3, 3].astype(np.float32)
     payload = {
         "depth": prediction.depth,
         "conf": prediction.conf,
         "extrinsic": prediction.extrinsic,
         "intrinsic": prediction.intrinsic,
+        "trajectory": trajectory,
         "world_points": prediction.world_points,
-        "world_points_from_depth": prediction.world_points,
         "image_paths": np.array(prediction.image_paths, dtype=object),
         "engine": prediction.engine,
-        "metadata": np.array([prediction.metadata], dtype=object),
+        "metadata": np.array([metadata], dtype=object),
     }
-    np.savez_compressed(path, **payload)
+    if not split_files:
+        payload["world_points_from_depth"] = prediction.world_points
+    _write_npz_payload(path, payload, split_files=split_files)
 
 
 def save_compact_prediction(
@@ -148,6 +224,7 @@ def save_compact_prediction(
     point_cloud_3d_nms_radius: float = 0.03,
     point_cloud_3d_nms_min_neighbors: int = 3,
     precomputed_points: tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray] | None = None,
+    split_files: bool = False,
 ) -> None:
     """Save filtered colored 3D points plus camera pose/trajectory data."""
     from .common import collect_colored_point_cloud
@@ -170,16 +247,19 @@ def save_compact_prediction(
     metadata = dict(prediction.metadata)
     metadata.update(
         {
-            "compact": True,
-            "compact_schema": "colored_points_pose_v1",
+            "float_storage": "float16",
+            "sample_schema": "colored_points_pose_v1",
             "compact_min_confidence": float(min_confidence),
             "random_points_per_frame": random_points_per_frame,
             "total_random_points": total_random_points,
-            "compact_point_count": int(points.shape[0]),
+            "sample_point_count": int(points.shape[0]),
             "color_format": "uint8_rgb",
         }
     )
+    if split_files:
+        metadata["split_files"] = True
     payload = {
+        "depth": prediction.depth,
         "points": points.astype(np.float32),
         "colors": colors.astype(np.uint8),
         "conf": conf.astype(np.float32),
@@ -191,13 +271,12 @@ def save_compact_prediction(
         "engine": prediction.engine,
         "metadata": np.array([metadata], dtype=object),
     }
-    np.savez_compressed(path, **payload)
+    _write_npz_payload(path, payload, split_files=split_files)
 
 
 def load_prediction(path: Path | str) -> FeedforwardPrediction:
     path = Path(path)
-    data = np.load(path, allow_pickle=True)
-    payload = {key: data[key] for key in data.files}
+    payload = load_npz_payload(path)
     if "metadata" in payload:
         meta = payload["metadata"]
         payload["metadata"] = meta[0] if len(meta) else {}

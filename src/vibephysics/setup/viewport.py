@@ -355,6 +355,88 @@ def _setup_compare_viewport(area, objects: list[bpy.types.Object], *, fill: floa
     return space.local_view is not None
 
 
+def split_viewport_triple():
+    """Split the current 3D viewport into three side-by-side panes (left, center, right)."""
+    screen = bpy.context.screen
+    if not screen:
+        return None, None, None
+
+    view3d_areas = sorted([a for a in screen.areas if a.type == "VIEW_3D"], key=lambda a: a.x)
+    if len(view3d_areas) >= 3:
+        return view3d_areas[0], view3d_areas[1], view3d_areas[2]
+
+    if not view3d_areas:
+        return None, None, None
+
+    area = view3d_areas[0]
+    with bpy.context.temp_override(area=area, region=area.regions[0]):
+        try:
+            bpy.ops.screen.area_split(direction="VERTICAL", factor=1 / 3)
+        except Exception as exc:
+            print(f"⚠️ Could not split viewport (first): {exc}")
+            return None, None, None
+
+    view3d_areas = sorted([a for a in screen.areas if a.type == "VIEW_3D"], key=lambda a: a.x)
+    if len(view3d_areas) < 2:
+        return None, None, None
+
+    right_area = view3d_areas[-1]
+    with bpy.context.temp_override(area=right_area, region=right_area.regions[0]):
+        try:
+            bpy.ops.screen.area_split(direction="VERTICAL", factor=0.5)
+        except Exception as exc:
+            print(f"⚠️ Could not split viewport (second): {exc}")
+            return None, None, None
+
+    view3d_areas = sorted([a for a in screen.areas if a.type == "VIEW_3D"], key=lambda a: a.x)
+    if len(view3d_areas) < 3:
+        return None, None, None
+    return view3d_areas[0], view3d_areas[1], view3d_areas[2]
+
+
+def setup_compare_triple_viewport(
+    left_collection: str,
+    center_collection: str,
+    right_collection: str,
+):
+    """
+    Split the 3D view into three independent viewports with a shared timeline.
+
+    Each pane isolates one reconstruction via Local View and frames independently.
+    """
+    pane_specs = (
+        ("left", left_collection),
+        ("center", center_collection),
+        ("right", right_collection),
+    )
+    objects_by_pane = []
+    for label, collection_name in pane_specs:
+        objects = _objects_in_collection(collection_name)
+        if not objects:
+            print(f"⚠️ Compare viewport skipped: missing objects for {label}={collection_name}")
+            return None, None, None
+        objects_by_pane.append(objects)
+
+    left_area, center_area, right_area = split_viewport_triple()
+    if not left_area or not center_area or not right_area:
+        print("⚠️ Compare viewport skipped: could not split 3D view into three panes")
+        return None, None, None
+
+    areas = (left_area, center_area, right_area)
+    ok = True
+    for area, objects in zip(areas, objects_by_pane):
+        ok = _setup_compare_viewport(area, objects) and ok
+    if not ok:
+        print("⚠️ Compare viewport setup incomplete (local view may be missing)")
+
+    print(
+        "✅ Compare viewport ready: "
+        f"left={left_collection}, center={center_collection}, right={right_collection} "
+        "(layout=triple, shared timeline, independent views)"
+    )
+    return left_area, center_area, right_area
+
+
 def setup_compare_dual_viewport(left_collection: str, right_collection: str, *, layout: str = "left-right"):
     """
     Split the 3D view into two independent viewports with a shared timeline.

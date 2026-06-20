@@ -148,7 +148,7 @@ vgg_ttt:
   model_id: nvidia/vgg-ttt
   preprocess_mode: crop
   image_size: 518
-  conf_percentile: 50.0
+  conf_percentile: 10.0
   depth_edge_rtol: 0.03
   num_ttt_steps: 1
   memory_efficient_inference: false

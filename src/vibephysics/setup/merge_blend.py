@@ -33,6 +33,39 @@ def _detect_result_collection(blend_path: Path) -> str:
     raise ValueError(f"No collections found in {blend_path}")
 
 
+def _iter_action_fcurves(action):
+    fcurves = getattr(action, "fcurves", None)
+    if fcurves is not None:
+        yield from fcurves
+        return
+    for layer in getattr(action, "layers", []):
+        for strip in getattr(layer, "strips", []):
+            for channelbag in getattr(strip, "channelbags", []):
+                yield from channelbag.fcurves
+
+
+def _timeline_from_actions() -> tuple[int, int]:
+    """Infer playback range from appended animation (feedforward exports start at frame 0)."""
+    frame_start = 0
+    frame_end = 1
+    for action in bpy.data.actions:
+        for fcurve in _iter_action_fcurves(action):
+            for kp in fcurve.keyframe_points:
+                frame = int(round(kp.co[0]))
+                frame_start = min(frame_start, frame)
+                frame_end = max(frame_end, frame)
+    return frame_start, frame_end
+
+
+def _sync_compare_timeline() -> None:
+    """Match merged scene length to the longest appended reconstruction."""
+    frame_start, frame_end = _timeline_from_actions()
+    scene = bpy.context.scene
+    scene.frame_start = frame_start
+    scene.frame_end = max(frame_end, frame_start + 1)
+    scene.frame_set(frame_start)
+
+
 def append_collection(blend_path: Path, collection_name: str) -> bpy.types.Collection:
     blend_path = blend_path.expanduser().resolve()
     if not blend_path.is_file():
@@ -91,7 +124,7 @@ def merge_blend_files(
             "(supported: 2 or 3 panes)"
         )
 
-    bpy.context.scene.frame_set(0)
+    _sync_compare_timeline()
     output_path = output_path.expanduser().resolve()
     if output_path.suffix.lower() != ".blend":
         output_path = output_path.with_suffix(".blend")

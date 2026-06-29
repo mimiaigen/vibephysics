@@ -214,7 +214,17 @@ def enter_local_view(area, objects):
     
     if not objects:
         return False
-        
+
+    frame = bpy.context.scene.frame_current
+    # Discrete bbox/voxel layers keyframe hide_viewport. Objects hidden on the
+    # current frame are easy for Blender to omit from the local-view isolate set;
+    # they then stay missing during playback (scrubbing a still frame still looks fine).
+    unhidden: list[bpy.types.Object] = []
+    for obj in objects:
+        if obj and obj.name in bpy.data.objects and obj.hide_viewport:
+            obj.hide_viewport = False
+            unhidden.append(obj)
+
     # 2. Select objects
     target = _point_cloud_object(objects) or objects[0]
     bpy.ops.object.select_all(action="DESELECT")
@@ -223,11 +233,14 @@ def enter_local_view(area, objects):
             obj.select_set(True)
     if target is not None:
         bpy.context.view_layer.objects.active = target
-    
+
     # 3. Enter Local View
     with bpy.context.temp_override(area=area, region=region, space_data=space):
         bpy.ops.view3d.localview()
-        
+
+    if unhidden:
+        bpy.context.scene.frame_set(frame)
+
     return space.local_view is not None
 
 
